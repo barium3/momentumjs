@@ -1,3 +1,3 @@
-var text1 = function () {
+pub.text1 = function () {
   return alert("1");
 };
