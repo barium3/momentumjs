@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>movement.js</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <script src="js/CSInterface.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.30.1/min/vs/loader.min.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="container">
+      <div id="main-content">
+        <div id="file-list"></div>
+        <div id="editor-container">
+          <div id="editor"></div>
+          <div id="image-container"></div>
+          <div id="controls">
+            <button id="runEditorScript">运行编辑器脚本</button>
+            <button id="saveFile">保存文件</button>
+          </div>
+        </div>
+      </div>
+      <div id="console-container">
+        <h3 style="margin: 0 0 5px 0; color: #569cd6">Console</h3>
+        <div id="console-output"></div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>

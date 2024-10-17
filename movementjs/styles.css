@@ -1,0 +1,48 @@
+body,
+html {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+#container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+#main-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+#file-list {
+  width: 220px;
+  overflow-y: auto;
+  background-color: #252526;
+  padding: 10px 0;
+  user-select: none;
+}
+
+#editor-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#editor {
+  flex: 1;
+  overflow: hidden;
+}
+
+#console-container {
+  height: 200px;
+  background-color: #252526;
+  color: #d4d4d4;
+  overflow-y: auto;
+  padding: 10px;
+  font-family: monospace;
+  border-top: 1px solid #1e1e1e;
+}
