@@ -77,16 +77,18 @@ function writeFile(filePath, content) {
 }
 
 // 添加新的函数来处理包含语句
-function addIncludeStatement(code) {
-  var includeStatement =
-    '#include "/Library/Application Support/Adobe/CEP/extensions/movementjs/bundle/movement.js";\n\n';
+function addIncludeStatement(code, scriptPath) {
+  var extensionRoot = new File($.fileName).parent.parent.fsName;
+  var movementPath = extensionRoot + "/bundle/movement.js";
+  var relativeMovementPath = File(movementPath).fsName.replace(/\\/g, "/");
+  var includeStatement = '#include "' + relativeMovementPath + '";\n\n';
   return includeStatement + code;
 }
 
 // 修改 executeUserCode 函数
-$.global.executeUserCode = function (code) {
+$.global.executeUserCode = function (code, scriptPath) {
   try {
-    var codeWithInclude = addIncludeStatement(code);
+    var codeWithInclude = addIncludeStatement(code, scriptPath);
     var result = eval(codeWithInclude);
     return JSON.stringify(result);
   } catch (error) {

@@ -223,7 +223,7 @@ function saveFile() {
             // 可以在这里添加错误提示
           } else {
             console.log(result);
-            // 可以在这里添加保存成功的提示
+            // 可以在这里添加���存成功的提示
           }
         }
       );
@@ -234,10 +234,9 @@ function saveFile() {
   }
 }
 
-// 在文件顶部添加这个新函数
+// 修改 addIncludeStatement 函数
 function addIncludeStatement(code) {
-  const includeStatement =
-    '#include "/Library/Application Support/Adobe/CEP/extensions/movementjs/bundle/movement.js";\n\n';
+  const includeStatement = '#include "../bundle/movement.js";\n\n';
   return includeStatement + code;
 }
 
