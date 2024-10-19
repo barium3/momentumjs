@@ -234,11 +234,18 @@ function saveFile() {
   }
 }
 
-// 执行用户代码
+// 在文件顶部添加这个新函数
+function addIncludeStatement(code) {
+  const includeStatement =
+    '#include "/Library/Application Support/Adobe/CEP/extensions/movementjs/bundle/movement.js";\n\n';
+  return includeStatement + code;
+}
+
+// 修改 executeUserCode 函数
 function executeUserCode(userCode) {
   return new Promise((resolve, reject) => {
     csInterface.evalScript(
-      userCode,
+      "executeUserCode(" + JSON.stringify(userCode) + ")",
       function (result) {
         resolve(result);
       },
@@ -249,7 +256,7 @@ function executeUserCode(userCode) {
   });
 }
 
-// 运行编辑器中的脚本
+// 修改 runEditorScript 函数
 function runEditorScript() {
   const code = editor.getValue();
   document.getElementById("console-output").innerHTML = ""; // 清空之前的输出

@@ -76,21 +76,25 @@ function writeFile(filePath, content) {
   }
 }
 
-// ExtendScript 环境测试函数
-/**
- * 测试 ExtendScript 环境是否正常工作
- * @returns {string} - 测试结果信息
- */
-function testExtendScript() {
-  return "ExtendScript 环境正常工作";
+// 添加新的函数来处理包含语句
+function addIncludeStatement(code) {
+  var includeStatement =
+    '#include "/Library/Application Support/Adobe/CEP/extensions/movementjs/bundle/movement.js";\n\n';
+  return includeStatement + code;
 }
 
-// 添加全局函数
+// 修改 executeUserCode 函数
 $.global.executeUserCode = function (code) {
   try {
-    var result = eval(code);
+    var codeWithInclude = addIncludeStatement(code);
+    var result = eval(codeWithInclude);
     return JSON.stringify(result);
   } catch (error) {
     return "错误: " + error.message;
   }
 };
+
+// ExtendScript 环境测试函数
+function testExtendScript() {
+  return "ExtendScript 环境正常工作";
+}

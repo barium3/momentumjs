@@ -22,7 +22,7 @@ var m = {};
   #include "includes/keyframe.js"; // 添加分号
 
 //lib
-  #include "includes/lib/ImageClassifier.js"; // 添加分号
+  #include "lib/ImageClassifier.js"; // 添加分号
 
   $.global.m = pub;
 })(m, app);
