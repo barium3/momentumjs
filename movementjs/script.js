@@ -223,7 +223,7 @@ function saveFile() {
             // 可以在这里添加错误提示
           } else {
             console.log(result);
-            // 可以在这里添加���存成功的提示
+            // 可以在这里添加存成功的提示
           }
         }
       );
@@ -234,11 +234,10 @@ function saveFile() {
   }
 }
 
-// 修改 addIncludeStatement 函数
-function addIncludeStatement(code) {
-  const includeStatement = '#include "../bundle/movement.js";\n\n';
-  return includeStatement + code;
-}
+/**
+ * 执行来自 AE 脚本环境的代码，并返回结果。
+ * @param {string} userCode - 要执行的代码。
+ */
 
 // 修改 executeUserCode 函数
 function executeUserCode(userCode) {

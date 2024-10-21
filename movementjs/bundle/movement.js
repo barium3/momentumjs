@@ -1,4 +1,4 @@
-#target "aftereffects";
+#target "aftereffects"; // 添加分号
 var m = {};
 
 (function(pub, app, undef) {
@@ -27,4 +27,7 @@ var m = {};
   $.global.m = pub;
 })(m, app);
 
-
+// 示例：调用 runCodeInWebPage 函数
+var codeToRun = 'var a = 1 + 2; a;';
+var result = runCodeInWebPage(codeToRun);
+$.writeln("运行结果: " + result);
