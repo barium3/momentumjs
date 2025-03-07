@@ -1,0 +1,1 @@
+ // 使用十六进制颜色// m.fill(100);// m.ellipse(0, 0, 100, 100);// m.shapeLayer("Circle");m.colorMode("CMYK");m.stroke(100, 0, 0, 0); m.fill("#FFFF00"); m.translate(100, 100, 100);// m.fill(0, 0, 100, 0);m.ellipse(0, 0, 100, 100);m.colorMode("HSB");m.fill(100, 100, 100);m.ellipse(200, 0, 100, 100);
