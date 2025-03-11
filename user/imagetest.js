@@ -1,0 +1,1 @@
+var img = m.loadImage("3-640x400(1).jpg");m.image(img, 200, 200, 300, 400);var anotherImg = m.loadImage("3-640x400(1).jpg");m.image(anotherImg, 300, 300, 300, m.mul(m.time, 100));var compItem = m.loadImage(1); // 加载索引为1的项目m.image(compItem, 400, 400, 300, 400);var selectedItem = m.loadImage("selected"); // 加载选中的项目m.image(selectedItem, 500, 500, 300, 400);
