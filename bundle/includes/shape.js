@@ -9,7 +9,7 @@ pub.ellipse = function (x, y, w, h) {
   var anchor = currAnchor;
 
   if (arguments.length !== 4)
-    error("m.ellipse(), 参数数量不正确！使用: x, y, w, h ");
+    error("m.ellipse(), incorrect number of arguments! Usage: x, y, w, h ");
 
   var result = pub.checkCompAndLayer("Ellipse", "shape");
   var shapeLayer = result.layer;
@@ -21,7 +21,7 @@ pub.ellipse = function (x, y, w, h) {
     .property("Contents")
     .addProperty("ADBE Vector Shape - Ellipse");
 
-  // 为形状组添加变换属性
+  // Add transform properties to the shape group
   var groupTransform = shapeGroup.property("Transform");
 
   var isExpression =
@@ -90,7 +90,7 @@ pub.rect = function (x, y, w, h) {
   var anchor = currAnchor;
 
   if (arguments.length !== 4)
-    error("m.rect(), 参数数量不正确！使用: x, y, w, h ");
+    error("m.rect(), incorrect number of arguments! Usage: x, y, w, h ");
 
   var result = pub.checkCompAndLayer("Rectangle", "shape");
   var shapeLayer = result.layer;
@@ -166,9 +166,11 @@ pub.polygon = function (x, y, radius, npoints) {
   var anchor = currAnchor;
 
   if (arguments.length !== 4) {
-    error("m.polygon(), 参数数量不正确！使用: x, y, radius, npoints");
+    error(
+      "m.polygon(), incorrect number of arguments! Usage: x, y, radius, npoints"
+    );
   } else if (npoints < 3) {
-    error("m.polygon(), points数量不能小于3");
+    error("m.polygon(), number of points cannot be less than 3");
   }
 
   var result = pub.checkCompAndLayer("Polygon", "shape");
@@ -183,8 +185,8 @@ pub.polygon = function (x, y, radius, npoints) {
 
   var groupTransform = shapeGroup.property("Transform");
 
-  // 设置多边形属性
-  polygon.property("Type").setValue(2); // 2 表示多边形
+  // Set polygon properties
+  polygon.property("Type").setValue(2); // 2 means polygon
   if (typeof npoints === "string") {
     polygon.property("Points").setValue(3);
     var expression = controllable ? customProperty + "+" : "";
@@ -219,7 +221,7 @@ pub.line = function (x1, y1, x2, y2) {
   var anchor = currAnchor;
 
   if (arguments.length !== 4) {
-    error("m.line(), 参数数量不正确！使用: x1, y1, x2, y2");
+    error("m.line(), incorrect number of arguments! Usage: x1, y1, x2, y2");
   }
 
   var result = pub.checkCompAndLayer("Line", "shape");
@@ -234,7 +236,7 @@ pub.line = function (x1, y1, x2, y2) {
 
   var groupTransform = shapeGroup.property("Transform");
 
-  // 设置路径，使用表达式
+  // Set path, using expression
   var pathExpression =
     "var x1 = " +
     x1 +
@@ -277,7 +279,7 @@ pub.ellipseMode = function (mode) {
     return currEllipseMode;
   } else {
     error(
-      "m.ellipseMode(), 不支持的椭圆模式。请使用：CENTER, RADIUS, CORNER, CORNERS。"
+      "m.ellipseMode(), unsupported ellipse mode. Please use: CENTER, RADIUS, CORNER, CORNERS."
     );
   }
 };
@@ -294,7 +296,7 @@ pub.rectMode = function (mode) {
     return currRectMode;
   } else {
     error(
-      "m.rectMode(), 不支持的矩形模式。请使用：CENTER, RADIUS, CORNER, CORNERS。"
+      "m.rectMode(), unsupported rectangle mode. Please use: CENTER, RADIUS, CORNER, CORNERS."
     );
   }
 };
@@ -302,28 +304,28 @@ pub.rectMode = function (mode) {
 function setShapeProperties(shapeGroup, properties) {
   var groupTransform = shapeGroup.property("Transform");
 
-  // 设置锚点
+  // Set anchor point
   m.handlePropertyValue(
     groupTransform.property("Anchor Point"),
     properties.anchor
   );
 
-  // 设置位置
+  // Set position
   m.handlePropertyValue(
     groupTransform.property("Position"),
     properties.position
   );
 
-  // 设置旋转
+  // Set rotation
   m.handlePropertyValue(
     groupTransform.property("Rotation"),
     properties.rotation
   );
 
-  // 设置缩放
+  // Set scale
   m.handlePropertyValue(groupTransform.property("Scale"), properties.scale);
 
-  // 设置填充（如果有）
+  // Set fill (if provided)
   if (properties.fillColor !== null) {
     var fill = shapeGroup
       .property("Contents")
@@ -331,7 +333,7 @@ function setShapeProperties(shapeGroup, properties) {
     m.handlePropertyValue(fill.property("Color"), properties.fillColor);
   }
 
-  // 设置描边（如果有）
+  // Set stroke (if provided)
   if (properties.strokeColor !== null && properties.strokeWeight > 0) {
     var stroke = shapeGroup
       .property("Contents")
@@ -343,10 +345,10 @@ function setShapeProperties(shapeGroup, properties) {
     );
   }
 
-  // 设置不透明度
+  // Set opacity
   m.handlePropertyValue(groupTransform.property("Opacity"), properties.opacity);
 
-  // 设置大小（适用于矩形和椭圆）
+  // Set size (for rectangles and ellipses)
   if (properties.size) {
     var shapeSize = shapeGroup
       .property("Contents")
@@ -371,7 +373,7 @@ pub.vertex = function (
 ) {
   if (arguments.length !== 2 && arguments.length !== 6) {
     error(
-      "m.vertex(), 参数数量不正确！使用: x, y 或 x, y, xAnchorLeft, yAnchorLeft, xAnchorRight, yAnchorRight"
+      "m.vertex(), incorrect number of arguments! Usage: x, y or x, y, xAnchorLeft, yAnchorLeft, xAnchorRight, yAnchorRight"
     );
   }
 
@@ -394,7 +396,7 @@ pub.vertex = function (
 
 pub.endShape = function (close) {
   if (vertices.length < 2) {
-    error("m.endShape(), 至少需要两个顶点来创建形状");
+    error("m.endShape(), at least two vertices are needed to create a shape");
   }
 
   var result = pub.checkCompAndLayer("CustomShape", "shape");
@@ -464,7 +466,9 @@ pub.endShape = function (close) {
 
 pub.quad = function (x1, y1, x2, y2, x3, y3, x4, y4) {
   if (arguments.length !== 8) {
-    error("m.quad(), 参数数量不正确！使用: x1, y1, x2, y2, x3, y3, x4, y4");
+    error(
+      "m.quad(), incorrect number of arguments! Usage: x1, y1, x2, y2, x3, y3, x4, y4"
+    );
   }
 
   pub.beginShape();
@@ -477,7 +481,9 @@ pub.quad = function (x1, y1, x2, y2, x3, y3, x4, y4) {
 
 pub.triangle = function (x1, y1, x2, y2, x3, y3) {
   if (arguments.length !== 6) {
-    error("m.triangle(), 参数数量不正确！使用: x1, y1, x2, y2, x3, y3");
+    error(
+      "m.triangle(), incorrect number of arguments! Usage: x1, y1, x2, y2, x3, y3"
+    );
   }
 
   pub.beginShape();

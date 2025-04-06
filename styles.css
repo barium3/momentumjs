@@ -1,245 +1,196 @@
-/* 全局样式 */
-:root {
-  --bg-dark: #1e1e1e;
-  --bg-panel: #252526;
-  --bg-editor: #1e1e1e;
-  --accent-color: #ff6b35;
-  --accent-hover: #ff8c5a;
-  --text-primary: #e0e0e0;
-  --text-secondary: #a0a0a0;
-  --border-color: #3e3e3e;
-  --panel-width: 240px;
-  --header-height: 48px;
-  --footer-height: 28px;
-}
-
-* {
+body,
+html {
+  height: 100%;
   margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  overflow: hidden;
+  background-color: #1a1a19;
 }
 
-body {
-  background-color: var(--bg-dark);
-  color: var(--text-primary);
+#container {
+  display: flex;
+  flex-direction: column;
   height: 100vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
-/* 顶部标题栏 */
-.header {
-  height: var(--header-height);
-  background-color: var(--bg-panel);
-  border-bottom: 1px solid var(--border-color);
+#top-toolbar {
+  height: 40px;
+  background-color: transparent;
   display: flex;
   align-items: center;
-  padding: 0 16px;
   justify-content: space-between;
+  padding: 0;
+  border-bottom: 1px solid #333332;
 }
 
-.header-title {
-  font-size: 16px;
-  font-weight: 500;
+.toolbar-left {
   display: flex;
   align-items: center;
+  padding-left: 5px;
 }
 
-.header-title .logo {
-  color: var(--accent-color);
-  margin-right: 8px;
-  font-size: 20px;
-}
-
-.header-actions {
+.toolbar-right {
   display: flex;
   gap: 8px;
+  padding-right: 10px;
 }
 
-/* 主内容区域 */
-.main-container {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-/* 左侧面板 */
-.sidebar {
-  width: var(--panel-width);
-  background-color: var(--bg-panel);
-  border-right: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.sidebar-header {
-  padding: 12px 16px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.file-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.btn-icon {
-  background: transparent;
+#top-toolbar button {
+  background-color: transparent;
+  color: #cccccc;
   border: none;
-  color: var(--text-secondary);
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 14px;
-  padding: 4px;
-  border-radius: 3px;
+  margin: 0 5px;
   display: flex;
   align-items: center;
   justify-content: center;
+  outline: none;
 }
 
-.btn-icon:hover {
-  color: var(--text-primary);
-  background-color: rgba(255, 255, 255, 0.1);
+#top-toolbar button:hover {
+  background-color: #3e3e3e;
+  color: #ffffff;
 }
 
-.file-list-container {
+#top-toolbar button:active {
+  background-color: #505050;
+}
+
+#top-toolbar button:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+#top-toolbar button i {
+  font-size: 16px;
+}
+
+#main-content {
+  display: flex;
   flex: 1;
-  overflow-y: auto;
-  padding: 8px 0;
+  overflow: hidden;
 }
 
-/* 文件树样式优化 */
+/* 文件列表样式 */
 #file-list {
-  font-size: 13px;
+  width: 220px;
+  overflow-y: auto;
+  background-color: transparent;
+  user-select: none;
+  font-size: 12px;
+  color: #cccccc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  padding: 0;
+  border-right: 1px solid #333332;
 }
 
-#file-list .file,
-#file-list .folder {
-  padding: 2px 8px;
+.file,
+.folder {
   cursor: pointer;
+}
+
+.file-item-content {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  line-height: 24px;
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 0;
+  padding-left: 0;
+}
+
+.file-item {
+  padding: 4px 12px;
+}
+
+.file-item:hover {
+  background-color: #ffffff0f;
+  width: 100%;
+}
+
+.file-item.selected {
+  background-color: #ffffff1a;
+  width: 100%;
+}
+
+.file .file-item-content:hover,
+.folder .file-item-content:hover {
+  background-color: #262625;
+}
+
+.file.selected .file-item-content {
+  background-color: #303030;
+}
+
+.toggle {
+  width: 14px;
   display: flex;
+  justify-content: center;
   align-items: center;
-  position: relative;
-  transition: all 0.1s ease;
-  background-color: transparent !important;
+  font-size: 9px;
+  color: #cccccc;
 }
 
-#file-list .file:hover,
-#file-list .folder:hover {
-  background-color: transparent !important;
+.toggle.empty {
+  visibility: hidden;
 }
 
-#file-list .file.active {
-  background-color: rgba(255, 107, 53, 0.2);
-  color: var(--accent-color);
-}
-
-/* 文件图标统一颜色 */
-#file-list .file-icon,
-#file-list .folder-icon {
-  color: var(--text-secondary);
-  margin-right: 5px;
+.icon {
   width: 16px;
   text-align: center;
-  flex-shrink: 0; /* 防止图标压缩 */
+  margin-right: 4px;
+  color: #cccccc;
 }
 
-/* 文件项内容容器 */
-.file-item-content {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 24px;
+.icon i {
+  font-size: 12px;
+}
+
+.name {
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 30px;
 }
 
-/* 修改文件操作菜单样式，默认隐藏 */
-.file-actions-menu {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  opacity: 0; /* 默认不可见 */
-  transition: opacity 0.15s ease;
-  z-index: 10;
+/* 新建文件输入框样式 */
+.new-file-input-container {
+  margin-bottom: 4px;
 }
 
-/* 悬停时显示操作菜单 */
-#file-list .file:hover > .file-item-content > .file-actions-menu,
-#file-list .folder:hover > .file-item-content > .file-actions-menu {
-  opacity: 1;
+.file-name-input {
+  background-color: #262625;
+  border: none;
+  color: #cccccc;
+  outline: none;
+  font-size: 12px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 2px;
+  width: 140px;
+  font-family: inherit;
 }
 
-/* 删除按钮样式 */
-.file-action.delete {
-  background-color: transparent;
-  color: var(--text-secondary);
-  padding: 4px;
-  border-radius: 3px;
-  cursor: pointer;
+.file-name-input:focus {
+  border: none;
 }
 
-.file-action.delete:hover {
-  color: #ff4444;
-  background-color: rgba(255, 0, 0, 0.1);
+.file-name-input::placeholder {
+  color: transparent;
 }
 
-/* 移除可能的冲突样式 */
-#file-list .folder.expanded > .file-actions-menu {
-  top: 12px;
-}
-
-/* 编辑器区域 */
-.editor-container {
+#editor-container {
   flex: 1;
+  min-height: 60%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.editor-header {
-  height: 40px;
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  background-color: var(--bg-editor);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.editor-tabs {
-  display: flex;
-  height: 100%;
-}
-
-.editor-tab {
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  height: 100%;
-  border-right: 1px solid var(--border-color);
-  font-size: 13px;
-  background-color: var(--bg-panel);
-}
-
-.editor-tab.active {
-  background-color: var(--bg-editor);
-  border-bottom: 2px solid var(--accent-color);
+  position: relative;
+  background-color: #1a1a19;
 }
 
 #editor {
@@ -247,465 +198,109 @@ body {
   overflow: hidden;
 }
 
-/* 控制台区域 */
-.console-container {
+#console-container {
   height: 180px;
-  background-color: var(--bg-panel);
-  border-top: 1px solid var(--border-color);
-  overflow: hidden;
+  min-height: 120px;
+  max-height: 40%;
+  background-color: transparent;
+  color: #d4d4d4;
+  overflow-y: auto;
+  padding: 10px 0 10px 10px;
+  font-family: monospace;
+  font-size: 11px;
+  border-top: 1px solid #333332;
   display: flex;
   flex-direction: column;
 }
 
-.console-header {
-  padding: 8px 16px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
+/* 确保控制台输出区域可以滚动 */
+#console-output {
+  overflow-y: auto;
+  flex: 1;
+  font-size: 11px;
+  line-height: 1.4;
+  padding-right: 10px;
+}
+
+/* 为编辑器内容区增加边框，与其他模块保持一致的分隔风格 */
+.monaco-editor {
+  border-top: 1px solid #333332;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+}
+
+#toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid var(--border-color);
+  padding: 4px 8px;
+  border-bottom: 1px solid #333332;
+  background-color: #1a1a19;
 }
 
-.console-clear {
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: normal;
-}
-
-.console-clear:hover {
-  color: var(--text-primary);
-}
-
-#console-output {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 16px;
-  font-family: "Menlo", "Monaco", "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-#console-output div {
-  margin-bottom: 4px;
-}
-
-/* 底部状态栏 */
-.footer {
-  height: var(--footer-height);
-  background-color: var(--bg-panel);
-  border-top: 1px solid var(--border-color);
+.toolbar-left {
   display: flex;
-  align-items: center;
-  padding: 0 16px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-/* 按钮样式 */
-.btn {
-  background-color: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.btn:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-.btn-primary {
-  background-color: var(--accent-color);
-  border-color: var(--accent-color);
-  color: white;
-}
-
-.btn-primary:hover {
-  background-color: var(--accent-hover);
-}
-
-/* 图标 */
-.icon {
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 图片容器 */
-#image-container {
-  display: none;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  background-color: var(--bg-editor);
-  position: relative;
-  overflow: auto;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* 图片信息 */
-.image-info {
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
-  background-color: rgba(0, 0, 0, 0.7);
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: white;
-}
-
-/* 文件图标 */
-.file-icon {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  text-align: center;
-}
-
-.file-icon i {
-  font-size: 64px;
-  margin-bottom: 16px;
-  color: var(--accent-color);
-}
-
-/* CSV表格预览 */
-.csv-preview {
-  height: 300px;
-  overflow: auto;
-  background-color: var(--bg-panel);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.csv-table {
-  border-collapse: collapse;
-  width: 100%;
-  font-family: "Menlo", "Monaco", "Courier New", monospace;
-  font-size: 12px;
-}
-
-.csv-table th,
-.csv-table td {
-  padding: 6px 10px;
-  text-align: left;
-  border: 1px solid var(--border-color);
-}
-
-.csv-table th {
-  background-color: rgba(255, 107, 53, 0.2);
-  color: var(--accent-color);
-  font-weight: 600;
-}
-
-.csv-table tr:nth-child(even) {
-  background-color: rgba(255, 255, 255, 0.03);
-}
-
-.csv-toggle {
-  margin-left: auto;
-  font-size: 12px;
-}
-
-/* 调整编辑器布局 */
-.editor-container {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-#editor.with-preview {
-  height: 50%;
-}
-
-/* 响应式调整 */
-@media (max-width: 768px) {
-  .sidebar {
-    width: 200px;
-  }
-}
-
-/* Monaco编辑器自定义样式 */
-.monaco-editor .margin {
-  background-color: var(--bg-editor) !important;
-}
-
-/* 自定义滚动条 */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--bg-dark);
-}
-
-::-webkit-scrollbar-thumb {
-  background: #555;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #777;
-}
-
-/* 模态对话框样式 */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-container {
-  background-color: var(--bg-panel);
-  border-radius: 6px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
-  padding: 24px;
-  min-width: 400px;
-}
-
-.modal-header {
-  font-size: 16px;
-  font-weight: 500;
-  margin-bottom: 16px;
-}
-
-.modal-content {
-  margin-bottom: 24px;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
   gap: 8px;
 }
 
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-
-.form-input {
-  width: 100%;
-  padding: 8px 12px;
-  background-color: var(--bg-dark);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 14px;
-}
-
-.form-input:focus {
-  border-color: var(--accent-color);
-  outline: none;
-}
-
-/* 文件/文件夹名称样式 */
-.item-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 4px;
-  border-radius: 2px;
-  transition: background-color 0.1s;
-}
-
-#file-list .file:hover .item-name,
-#file-list .folder:hover .item-name {
-  background-color: transparent !important;
-}
-
-/* 调整文件树缩进和交互区域 */
-#file-list .children {
-  width: 100%;
-  margin-left: 16px; /* 为子项添加缩进 */
-  padding-left: 4px;
-  border-left: 1px dotted var(--border-color);
-}
-
-/* 保持切换按钮与图标的紧凑排列 */
-#file-list .toggle {
-  display: inline-block;
-  width: 16px;
-  text-align: center;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-#file-list .folder:hover .toggle {
-  color: var(--text-primary);
-}
-
-/* 重命名输入框样式 */
-.rename-input {
-  background-color: var(--bg-dark);
-  color: var(--text-primary);
-  border: 1px solid var(--accent-color);
-  border-radius: 2px;
-  padding: 2px 4px;
-  font-size: 13px;
-  width: calc(100% - 10px);
-  max-width: 180px;
-  outline: none;
-}
-
-/* 添加拖放相关样式 */
-.folder.drag-over {
-  background-color: rgba(255, 107, 53, 0.15);
-  outline: 1px dashed var(--accent-color);
-}
-
-.file.dragging,
-.folder.dragging {
-  opacity: 0.5;
-}
-
-/* 拖动时的视觉反馈 */
-.drag-ghost {
+.toolbar-center {
   position: absolute;
-  background-color: var(--bg-panel);
-  border: 1px solid var(--accent-color);
-  border-radius: 3px;
-  padding: 6px 12px;
-  opacity: 0.8;
-  pointer-events: none;
-  z-index: 1000;
-  max-width: 200px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #cccccc;
+  font-size: 13px;
+}
+
+.toolbar-right {
+  display: flex;
+  gap: 8px;
+}
+
+#current-filename {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 300px;
 }
 
-/* 修复文件夹展开后样式 */
-#file-list .folder {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-/* 确保文件夹内容始终在顶部 */
-#file-list .folder > .file-item-content {
+/* 修改icon-button的样式 */
+.icon-button {
+  background-color: transparent;
+  color: #cccccc;
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin: 0 4px;
   display: flex;
   align-items: center;
-  min-height: 24px;
-  width: 100%;
-  z-index: 2;
-}
-
-/* 子项容器样式 */
-#file-list .children {
-  width: 100%;
-  margin-left: 16px; /* 为子项添加缩进 */
-  padding-left: 4px;
-  border-left: 1px dotted var(--border-color);
-}
-
-/* 如果需要修改图标颜色或间距 */
-#new-document i {
-  color: var(--text-secondary);
-}
-
-#new-document:hover i {
-  color: var(--text-primary);
-}
-
-/* 新增用于内联创建的样式 */
-.new-item {
-  background-color: rgba(255, 107, 53, 0.05);
-}
-
-.inline-create-input {
-  background-color: var(--bg-dark);
-  color: var(--text-primary);
-  border: 1px solid var(--accent-color);
-  border-radius: 2px;
-  padding: 4px 8px;
-  font-size: 13px;
-  width: calc(100% - 25px);
-  margin-left: 4px;
+  justify-content: center;
   outline: none;
+  padding: 0;
 }
 
-/* 优化新建项目的视觉反馈 */
-.new-item .file-icon,
-.new-item .folder-icon {
-  color: var(--accent-color);
+.icon-button:hover {
+  background-color: #ffffff0f;
 }
 
-/* 删除选中按钮样式 */
-#delete-selected {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
+.icon-button:active {
+  background-color: #ffffff1a;
 }
 
-#delete-selected:hover {
-  color: #ff4444;
+.icon-button i {
+  font-size: 15px;
 }
 
-/* 当没有选中文件时，禁用删除按钮 */
-#delete-selected.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-#delete-selected.disabled:hover {
-  color: var(--text-secondary);
-}
-
-/* 文件夹选中状态样式 */
-#file-list .folder.active > .file-item-content {
-  background-color: rgba(255, 107, 53, 0.2);
-  border-radius: 3px;
-}
-
-#file-list .folder.active > .file-item-content .item-name {
-  color: var(--accent-color);
-}
-
-#file-list .folder.active > .file-item-content .folder-icon {
-  color: var(--accent-color);
-}
-
-/* 添加重命名输入框样式 */
-.item-name .inline-create-input {
-  background-color: var(--bg-dark);
-  color: var(--text-primary);
-  border: 1px solid var(--accent-color);
-  border-radius: 2px;
-  padding: 4px 8px;
-  font-size: 13px;
+.icon-button:focus {
   outline: none;
-  height: 24px;
+  box-shadow: none;
 }
 
-/* 重命名时的文件/文件夹项样式 */
-.file.renaming > .file-item-content,
-.folder.renaming > .file-item-content {
-  background-color: rgba(255, 107, 53, 0.1);
+#right-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
 }

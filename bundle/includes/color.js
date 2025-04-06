@@ -4,13 +4,13 @@ pub.color = function () {
     c = arguments[2],
     d = arguments[3];
   var colorErrorMsg =
-    "m.color(), 参数错误。请使用: " +
+    "m.color(), parameter error. Please use: " +
     (currColorMode === "RGB"
       ? "R,G,B"
       : currColorMode === "HSB"
       ? "H,S,B"
       : "C,M,Y,K") +
-    " 或 十六进制字符串 或 GREY。";
+    " or hexadecimal string or GREY.";
 
   function reMap(value, max) {
     return pub.map(value, 0, max, 0, 1);
@@ -19,7 +19,7 @@ pub.color = function () {
   if (arguments.length === 1) {
     if (typeof a === "string") {
       if (a.charAt(0) === "#") {
-        // 处理十六进制颜色
+        // Handle hexadecimal colors
         var hex = a.substring(1);
         var r = parseInt(hex.substr(0, 2), 16);
         var g = parseInt(hex.substr(2, 2), 16);
@@ -30,7 +30,7 @@ pub.color = function () {
       // GREY
       return [reMap(a, 255), reMap(a, 255), reMap(a, 255), 1];
     } else {
-      error("m.color(), 第一个参数类型错误。");
+      error("m.color(), first parameter type error.");
     }
   } else if (arguments.length === 3) {
     if (currColorMode === "RGB") {
@@ -54,7 +54,9 @@ pub.colorMode = function (colorMode) {
   if (colorMode === "RGB" || colorMode === "HSB" || colorMode === "CMYK") {
     currColorMode = colorMode;
   } else {
-    error("m.colorMode(), 不支持的颜色模式。请使用 'RGB'、'HSB' 或 'CMYK'。");
+    error(
+      "m.colorMode(), unsupported color mode. Please use 'RGB', 'HSB' or 'CMYK'."
+    );
   }
 };
 
@@ -122,7 +124,7 @@ pub.fill = function () {
     typeof arguments[0] === "string" &&
     arguments[0].charAt(0) !== "#"
   ) {
-    // 处理任何可能的表达式
+    // Handle any possible expressions
     currFillColor = arguments[0];
   } else {
     currFillColor = pub.color.apply(null, arguments);
@@ -142,7 +144,7 @@ pub.stroke = function () {
     typeof arguments[0] === "string" &&
     arguments[0].charAt(0) !== "#"
   ) {
-    // 处理任何可能的表达式
+    // Handle any possible expressions
     currStrokeColor = arguments[0];
   } else {
     currStrokeColor = pub.color.apply(null, arguments);
@@ -202,7 +204,9 @@ pub.blendMode = function (mode) {
   if (mode in validModes) {
     currBlendMode = validModes[mode];
   } else {
-    error("m.blendMode(), 不支持的叠加模式。请使用有效的叠加模式。");
+    error(
+      "m.blendMode(), unsupported blending mode. Please use a valid blending mode."
+    );
   }
 };
 
@@ -212,11 +216,13 @@ pub.lerpColor = function (c1, c2, amt) {
     typeof c2 !== "object" ||
     typeof amt !== "number"
   ) {
-    error("m.lerpColor(), 参数错误。请使用: 两个颜色对象和一个数字。");
+    error(
+      "m.lerpColor(), parameter error. Please use: two color objects and a number."
+    );
   }
 
   if (c1.length !== c2.length) {
-    error("m.lerpColor(), 两个颜色对象必须是相同的颜色模式。");
+    error("m.lerpColor(), two color objects must be the same color mode.");
   }
 
   var result = [];

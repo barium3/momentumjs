@@ -1,5 +1,5 @@
 pub.composition = function () {
-  var name = "新合成";
+  var name = "New Composition";
   var width = 1920;
   var height = 1080;
   var pixelAspect = 1;
@@ -28,7 +28,9 @@ pub.composition = function () {
     case 0:
       break;
     default:
-      error("m.composition(): 参数数量不正确。最多支持6个参数。");
+      error(
+        "m.composition(): Incorrect number of arguments. Maximum 6 parameters supported."
+      );
   }
 
   var comp = app.project.items.addComp(
@@ -48,11 +50,11 @@ pub.composition = function () {
 pub.layer = function (type, content) {
   var comp;
 
-  // 检查是否存在活动合成
+  // Check if there is an active composition
   if (app.project.activeItem && app.project.activeItem instanceof CompItem) {
     comp = app.project.activeItem;
   } else {
-    // 如果没有活动合成,创建一个新的默认合成
+    // If no active composition, create a new default composition
     comp = m.composition();
   }
 
@@ -61,7 +63,7 @@ pub.layer = function (type, content) {
   switch (type.toLowerCase()) {
     case "text":
       if (currBoxSize == null) {
-        newLayer = comp.layers.addText(content || "新文本图层");
+        newLayer = comp.layers.addText(content || "New Text Layer");
       } else {
         newLayer = comp.layers.addBoxText(currBoxSize);
       }
@@ -69,25 +71,25 @@ pub.layer = function (type, content) {
       break;
     case "shape":
       newLayer = comp.layers.addShape();
-      newLayer.name = content || "新形状图层";
+      newLayer.name = content || "New Shape Layer";
       break;
     default:
-      error("m.layer(): 不支持的图层类型。请使用 'text' 或 'shape'。");
+      error("m.layer(): Unsupported layer type. Please use 'text' or 'shape'.");
   }
 
-  // 应用当前的叠加模式
+  // Apply current blending mode
   if (typeof currBlendMode !== "undefined") {
     newLayer.blendingMode = currBlendMode;
   }
 
-  // 应用变换
+  // Apply transformations
   m.setLayerProperties(newLayer);
 
-  // 返回创建的图层
+  // Return created layer
   return newLayer;
 };
 
-// layerTransform的变量调整需要在创建layer之前
+// layerTransform variables need to be adjusted before creating the layer
 pub.setLayerProperties = function (layer) {
   var layerRotation = currLayerRotation;
   var layerScale = currLayerScale;
@@ -99,7 +101,7 @@ pub.setLayerProperties = function (layer) {
       ? m.add(textPosition, currPosition)
       : currPosition;
 
-  // 检查是否需要使用3D变换
+  // Check if 3D transform is needed
   var use3D =
     layerAnchor.length > 2 ||
     position.length > 2 ||
@@ -121,7 +123,7 @@ pub.setLayerProperties = function (layer) {
       m.handlePropertyValue(transform.zRotation, layerRotation[2]);
     }
   } else {
-    // 2D变换
+    // 2D transform
     m.handlePropertyValue(transform.anchorPoint, layerAnchor);
     m.handlePropertyValue(transform.position, position);
     m.handlePropertyValue(transform.scale, layerScale);
@@ -131,7 +133,7 @@ pub.setLayerProperties = function (layer) {
     );
   }
 
-  // 设置不透明度
+  // Set opacity
   m.handlePropertyValue(layer.opacity, layerOpacity);
 };
 
@@ -144,12 +146,12 @@ pub.handlePropertyValue = function (property, value) {
         return 0;
       });
       property.setValue(zeroValue);
-      // 如果数组中所有元素都是字符串，则将其作为表达式处理,value设置为0
+      // If all elements in the array are strings, treat them as expressions, value set to 0
       var expression = controllable ? customProperty + "+" : "";
       expression += "[" + value.join(", ") + "]";
       property.expression = expression;
     } else {
-      // 否则，将数组作为普通值设置
+      // Otherwise, set array as regular value
       property.setValue(value);
     }
   } else if (typeof value === "string") {
@@ -170,11 +172,11 @@ pub.controllable = function (value) {
   if (typeof value === "boolean") {
     currControllable = value;
   } else {
-    error("m.controllable(): 参数必须是布尔值 (true 或 false)。");
+    error("m.controllable(): Parameter must be a boolean (true or false).");
   }
 };
 
-// 辅助函数：检查是否为字符串数组
+// Helper function: Check if it's an array of strings
 function isArrayOfStrings(arr) {
   for (var i = 0; i < arr.length; i++) {
     if (typeof arr[i] == "string") {
@@ -193,16 +195,16 @@ pub.checkCompAndLayer = function (layerName, layerTypes) {
   var comp;
   var layer;
 
-  // 确保 layerTypes 是一个数组
+  // Ensure layerTypes is an array
   if (!Array.isArray(layerTypes)) {
     layerTypes = [layerTypes];
   }
 
-  // 检查或创建合成
+  // Check or create composition
   if (app.project.numItems == 0) {
     comp = m.composition();
   } else {
-    // 遍历所有项目，查找第一个合成
+    // Iterate through all items, find the first composition
     for (var i = 1; i <= app.project.numItems; i++) {
       var item = app.project.item(i);
       if (item instanceof CompItem) {
@@ -210,7 +212,7 @@ pub.checkCompAndLayer = function (layerName, layerTypes) {
         break;
       }
     }
-    // 如果没有找到合成，创建一个新的默认合成
+    // If no composition found, create a new default composition
     if (!comp) {
       comp = m.composition();
     }
@@ -219,14 +221,14 @@ pub.checkCompAndLayer = function (layerName, layerTypes) {
   if (comp) {
     comp.openInViewer();
   } else {
-    error("无法创建或找到合适的合成");
+    error("Unable to create or find suitable composition");
   }
 
-  // 检查或创建图层
+  // Check or create layer
   if (comp.numLayers == 0) {
     layer = createLayerByType(comp, layerName, layerTypes[0]);
   } else {
-    // 检查最顶层的图层是否为所需类型之一
+    // Check if the top layer is one of the required types
     var topLayer = comp.layer(1);
     var isMatch = false;
     for (var i = 0; i < layerTypes.length; i++) {
@@ -263,7 +265,7 @@ function createLayerByType(comp, layerName, layerType) {
     case "null":
       return comp.layers.addNull();
     default:
-      error("不支持的图层类型：" + layerType);
+      error("Unsupported layer type: " + layerType);
   }
 }
 
@@ -283,18 +285,18 @@ function isLayerTypeMatch(layer, layerType) {
 }
 
 pub.item = function (identifier) {
-  // 如果identifier是数字，通过索引查找
+  // If identifier is a number, find by index
   if (typeof identifier === "number") {
     if (identifier > 0 && identifier <= app.project.numItems) {
       return app.project.item(identifier);
     } else {
-      error("m.item(), 无效的项目索引");
+      error("m.item(), Invalid project index");
     }
   }
 
-  // 如果identifier是字符串，可能是名称或文件路径
+  // If identifier is a string, it could be a name or file path
   if (typeof identifier === "string") {
-    // 尝试通过名称查找
+    // Try finding by name
     for (var i = 1; i <= app.project.numItems; i++) {
       var item = app.project.item(i);
       if (item.name === identifier) {
@@ -302,7 +304,7 @@ pub.item = function (identifier) {
       }
     }
 
-    // 如果通过名称没找到，尝试通过文件路径查找
+    // If not found by name, try finding by file path
     var file = new File(identifier);
     if (file.exists) {
       for (var i = 1; i <= app.project.numItems; i++) {
@@ -316,26 +318,26 @@ pub.item = function (identifier) {
         }
       }
 
-      // 如果文件存在但项目中没有，尝试导入
+      // If file exists but project has no, try importing
       try {
         return app.project.importFile(new ImportOptions(file));
       } catch (e) {
-        error("m.item(), 无法导入文件: " + e.message);
+        error("m.item(), Unable to import file: " + e.message);
       }
     }
   }
 
-  // 如果identifier是"selected"，返回选中的项目
+  // If identifier is "selected", return selected item
   if (identifier === "selected") {
     var selectedItems = app.project.selection;
     if (selectedItems.length > 0) {
-      return selectedItems[0]; // 返回第一个选中的项目
+      return selectedItems[0]; // Return first selected item
     } else {
-      error("m.item(), 没有选中的项目");
+      error("m.item(), No selected item");
     }
   }
 
-  // 如果identifier是File对象，先查找是否已存在，如果不存在则导入
+  // If identifier is File object, first check if it exists, if not then import
   if (identifier instanceof File) {
     for (var i = 1; i <= app.project.numItems; i++) {
       var item = app.project.item(i);
@@ -351,28 +353,28 @@ pub.item = function (identifier) {
     try {
       return app.project.importFile(new ImportOptions(identifier));
     } catch (e) {
-      error("m.item(), 无法导入文件: " + e.message);
+      error("m.item(), Unable to import file: " + e.message);
     }
   }
 
-  // 如果都没找到，返回null或抛出错误
-  error("m.item(), 未找到匹配的项目");
+  // If none found, return null or throw error
+  error("m.item(), No matching project found");
 };
 
 pub.background = function () {
   var args = Array.prototype.slice.call(arguments);
   var solidColor = m.color.apply(null, args);
 
-  // 检查或创建合成和图层
-  var result = m.checkCompAndLayer("背景层", "solid");
+  // Check or create composition and layer
+  var result = m.checkCompAndLayer("Background Layer", "solid");
 
-  // 设置图层颜色
+  // Set layer color
   result.layer.source.mainSource.color = [
     solidColor[0],
     solidColor[1],
     solidColor[2],
   ];
 
-  // 返回创建的纯色层
+  // Return created solid layer
   return result.layer;
 };

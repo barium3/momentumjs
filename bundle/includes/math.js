@@ -30,10 +30,3 @@ pub.div = function (num1, num2) {
     return num1 / num2;
   }
 };
-
-pub.expressionPath = function (expressionString) {
-  // 转义双引号
-  var escaped = expressionString.replace(/"/g, '\\"');
-  // 添加括号以帮助解析
-  return "(" + escaped + ")";
-};

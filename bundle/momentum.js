@@ -1,25 +1,26 @@
-#target "aftereffects"; // 添加分号
+#target "aftereffects";
 var m = {};
 
 (function(pub, app, undef) {
 
   pub.VERSION = "0.0.1";
 
+  // Core includes
+  #include "includes/constants.js"
+  #include "includes/private-vars.js"
+  #include "includes/core.js"
 
-  #include "includes/private-vars.js"; // 添加分号
-
-  #include "includes/core.js"; // 添加分号
-
-  #include "includes/shape.js"; // 添加分号
-  #include "includes/typography.js"; // 添加分号
-  #include "includes/color.js"; // 添加分号
-  #include "includes/transformation.js"; // 添加分号
-  #include "includes/math.js"; // 添加分号
-  #include "includes/controller.js"; // 添加分号
-  #include "includes/image.js"; // 添加分号
-  #include "includes/environment.js"; // 添加分号
-  #include "includes/data.js"; // 添加分号
-  #include "includes/keyframe.js"; // 添加分号
+  // Feature modules
+  #include "includes/shape.js"
+  #include "includes/typography.js"
+  #include "includes/color.js"
+  #include "includes/transformation.js"
+  #include "includes/math.js"
+  #include "includes/controller.js"
+  #include "includes/image.js"
+  #include "includes/environment.js"
+  #include "includes/data.js"
+  #include "includes/keyframe.js"
 
   $.global.m = pub;
-})(m, app);
+})(m, app); 

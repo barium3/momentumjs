@@ -9,19 +9,21 @@ pub.text = function (str, x, y, z) {
   var justification = currJustification;
 
   if (arguments.length !== 3 && arguments.length !== 4) {
-    error("m.text(), 参数数量不正确！使用: str, x, y 或 str, x, y, z");
+    error(
+      "m.text(), incorrect number of arguments! Usage: str, x, y or str, x, y, z"
+    );
   }
 
-  var result = pub.checkCompAndLayer("文本图层", "text");
+  var result = pub.checkCompAndLayer("Text Layer", "text");
   var textLayer = result.layer;
 
-  // 设置文本内容
+  // Set text content
   var textProp = textLayer.property("Source Text");
   var textDocument = textProp.value;
   textDocument.text = str;
   textProp.setValue(textDocument);
 
-  // 使用 textStyle 函数构建表达式
+  // Use textStyle function to build expression
   var expression = m.textStyle(
     fontSize,
     font,
@@ -41,13 +43,13 @@ pub.text = function (str, x, y, z) {
   } else {
     textPosition = [x, y, z];
   }
-  // 应用当前的图层属性
+  // Apply current layer properties
   m.setLayerProperties(textLayer, { position: textPosition });
 
   return textLayer;
 };
 
-// 添加一些辅助函数来设置文本样式
+// Add some helper functions to set text style
 pub.textSize = function (size) {
   currFontSize = size;
 };
@@ -69,7 +71,7 @@ pub.textAlign = function (align) {
       break;
     default:
       error(
-        "m.textAlign(), 不支持的对齐方式。请使用：'left', 'center', 或 'right'"
+        "m.textAlign(), unsupported alignment. Please use: 'left', 'center', or 'right'"
       );
   }
 };
@@ -88,7 +90,9 @@ pub.textBox = function () {
   } else if (arguments.length == 2) {
     currBoxSize = [arguments[0], arguments[1]];
   } else {
-    error("m.textBox(), 参数数量不正确！使用: width, height 或 null");
+    error(
+      "m.textBox(), incorrect number of arguments! Usage: width, height or null"
+    );
   }
 };
 
@@ -111,7 +115,7 @@ pub.textStyle = function (
     expression += ".setLeading(" + leading + ")";
   }
 
-  // 处理 fillColor
+  // Handle fillColor
   if (fillColor !== null) {
     if (Array.isArray(fillColor)) {
       expression +=
@@ -123,7 +127,7 @@ pub.textStyle = function (
     expression += ".setApplyFill(false)";
   }
 
-  // 处理 strokeColor
+  // Handle strokeColor
   if (strokeColor !== null) {
     if (Array.isArray(strokeColor)) {
       expression +=
@@ -137,7 +141,7 @@ pub.textStyle = function (
     expression += ".setApplyStroke(false)";
   }
 
-  // 处理 strokeWeight
+  // Handle strokeWeight
   if (strokeWeight !== null) {
     expression += ".setStrokeWidth(" + strokeWeight.toString() + ")";
   }

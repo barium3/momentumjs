@@ -32,7 +32,7 @@ pub.scale = function (w, h) {
 
 pub.anchor = function (x, y) {
   if (arguments.length !== 2)
-    error("m.anchor(), 参数数量不正确！使用: x, y");
+    error("m.anchor(), incorrect number of arguments! Usage: x, y");
   currAnchor = [x, y];
 };
 
@@ -42,6 +42,8 @@ pub.layerAnchor = function (x, y, z) {
   } else if (arguments.length === 3) {
     currLayerAnchor = [x, y, z];
   } else {
-    error("m.layerAnchor(), 参数数量不正确！使用: x, y 或 x, y, z");
+    error(
+      "m.layerAnchor(), incorrect number of arguments! Usage: x, y or x, y, z"
+    );
   }
 };

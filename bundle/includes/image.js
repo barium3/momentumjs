@@ -21,48 +21,50 @@ pub.loadImage = function (source) {
       if (imageExtensions.indexOf(fileExtension) !== -1) {
         return item;
       } else {
-        error("m.loadImage(), 所选项目不是支持的图片格式");
+        error("m.loadImage(), selected item is not a supported image format");
       }
     } else if (item.mainSource instanceof SolidSource) {
-      return item; // 纯色也可以被视为"图片"
+      return item; // Solid can also be treated as an "image"
     } else {
-      error("m.loadImage(), 所选素材项目不是图片");
+      error("m.loadImage(), selected footage item is not an image");
     }
   } else if (item instanceof CompItem) {
-    return item; // 合成也可以被用作图层
+    return item; // Composition can also be used as a layer
   } else {
-    error("m.loadImage(), 无效的源文件/项目项");
+    error("m.loadImage(), invalid source file/project item");
   }
 };
 
 pub.image = function (img, x, y, width, height) {
   var comp;
 
-  // 检查参数
+  // Check parameters
   if (arguments.length < 3) {
-    error("m.image(), 参数数量不正确！至少需要图片对象和位置 (x, y)");
+    error(
+      "m.image(), incorrect number of arguments! At least need image object and position (x, y)"
+    );
   }
 
-  // 检查img是否为有效的项目
+  // Check if img is a valid item
   if (!(img instanceof FootageItem) && !(img instanceof CompItem)) {
-    error("m.image(), 无效的图片对象");
+    error("m.image(), invalid image object");
   }
 
-  // 获取或创建合成
+  // Get or create composition
   if (app.project.activeItem && app.project.activeItem instanceof CompItem) {
     comp = app.project.activeItem;
   } else {
-    comp = m.composition(); // 使用默认设置创建新合成
+    comp = m.composition(); // Create new composition with default settings
   }
 
-  // 创建图层
+  // Create layer
   var imageLayer = comp.layers.add(img);
 
-  // 保存原始的 currPosition 和 currLayerScale
+  // Save original currPosition and currLayerScale
   var originalPosition = currPosition;
   var originalLayerScale = currLayerScale;
 
-  // 计算新的 currPosition 和 currLayerScale
+  // Calculate new currPosition and currLayerScale
   currPosition = m.add(currPosition, [x, y]);
   if (width !== undefined && height !== undefined) {
     var newScale = calculateScale(imageLayer, width, height);
@@ -72,10 +74,10 @@ pub.image = function (img, x, y, width, height) {
     ];
   }
 
-  // 应用当前的图层属性
+  // Apply current layer properties
   m.setLayerProperties(imageLayer);
 
-  // 恢复原始的 currPosition 和 currLayerScale
+  // Restore original currPosition and currLayerScale
   currPosition = originalPosition;
   currLayerScale = originalLayerScale;
 

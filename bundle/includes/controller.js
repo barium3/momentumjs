@@ -124,17 +124,17 @@ pub.colorController = function () {
   var expressionControl = layer.effect.addProperty("ADBE Color Control");
   expressionControl.name = controllerName;
 
-  // 使用语言检测函数
+  // Use language detection function
   var language = pub.getAELanguage();
   var colorPropertyName = language === "zh_CN" ? "颜色" : "Color";
 
-  // 使用 color 函数处理输入参数
+  // Use color function to handle input parameters
   var colorValue = pub.color.apply(null, arguments);
 
-  // 设置初始颜色值
+  // Set initial color value
   expressionControl.property(colorPropertyName).setValue(colorValue);
 
-  // 设置表达式
+  // Set expression
   var returnExpression =
     'comp("' +
     comp.name +
@@ -146,7 +146,7 @@ pub.colorController = function () {
     colorPropertyName +
     '")';
 
-  // 返回字符串形式的表达式
+  // Return expression as string
   return returnExpression;
 };
 

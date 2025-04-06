@@ -1,85 +1,66 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Momentum Scripter</title>
+    <title>momentum.js</title>
     <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
-    <script src="bundle/includes/constants.js"></script>
     <script src="js/CSInterface.js"></script>
-    <script src="web/momentum-bridge.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.30.1/min/vs/loader.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
     <link rel="stylesheet" href="styles.css" />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
-    />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
-    />
   </head>
   <body>
-    <div class="header">
-      <div class="header-title">
-        <span class="logo"><i class="fas fa-code"></i></span>
-        <span>Momentum Scripter</span>
-      </div>
-      <div class="header-actions">
-        <button id="saveFile" class="btn">
-          <i class="fas fa-save icon"></i>
-          <span>保存</span>
-        </button>
-        <button id="runEditorScript" class="btn btn-primary">
-          <i class="fas fa-play icon"></i>
-          <span>运行</span>
-        </button>
-      </div>
-    </div>
-
-    <div class="main-container">
-      <div class="sidebar">
-        <div class="sidebar-header">
-          <div>文件浏览器</div>
-          <div class="file-actions">
-            <button id="new-file" class="btn-icon" title="新建文件">
-              <i class="fas fa-file-code"></i>
-            </button>
-            <button id="new-folder" class="btn-icon" title="新建文件夹">
-              <i class="fas fa-folder-plus"></i>
-            </button>
-            <button id="delete-selected" class="btn-icon" title="删除选中项">
-              <i class="fas fa-trash-alt"></i>
-            </button>
-          </div>
+    <div id="container">
+      <div id="toolbar">
+        <div class="toolbar-left">
+          <button id="newFile" class="icon-button">
+            <i class="fas fa-plus"></i>
+          </button>
+          <button id="saveFile" class="icon-button">
+            <i class="fas fa-save"></i>
+          </button>
         </div>
-        <div class="file-list-container">
-          <div id="file-list"></div>
+
+        <div class="toolbar-center">
+          <span id="current-filename"></span>
+        </div>
+
+        <div class="toolbar-right">
+          <button id="runEditorScript" class="icon-button">
+            <i class="fas fa-play"></i>
+          </button>
         </div>
       </div>
 
-      <div class="editor-container">
-        <div class="editor-header">
-          <div class="editor-tabs">
-            <div class="editor-tab active" id="current-file-tab">未命名</div>
+      <div id="main-content">
+        <!-- File Browser -->
+        <div id="file-list"></div>
+
+        <!-- Code Area -->
+        <div id="right-panel">
+          <!-- Editor -->
+          <div id="editor-container">
+            <div id="editor"></div>
           </div>
-        </div>
-        <div id="editor"></div>
-        <div id="image-container"></div>
-        <div class="console-container">
-          <div class="console-header">
-            <span>控制台输出</span>
-            <span class="console-clear" id="clear-console">清除</span>
+
+          <!-- Console -->
+          <div id="console-container">
+            <div id="console-output"></div>
           </div>
-          <div id="console-output"></div>
         </div>
       </div>
     </div>
 
-    <div class="footer">
-      <div>Momentum Scripter v1.0.0</div>
-    </div>
-
-    <script src="script.js"></script>
+    <!-- Module JS Files -->
+    <script src="js/utils/console.js"></script>
+    <script src="js/utils/codeExecutor.js"></script>
+    <script src="js/ui/fileTreeUI.js"></script>
+    <script src="js/fileSystem/fileManager.js"></script>
+    <script src="js/core/editor.js"></script>
+    <script src="js/core/init.js"></script>
+    <script src="js/main.js"></script>
   </body>
 </html>

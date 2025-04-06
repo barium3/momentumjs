@@ -1,4 +1,4 @@
-// 定义 trim 函数，因为 ExtendScript 不支持 String.prototype.trim
+// Define trim function, because ExtendScript doesn't support String.prototype.trim
 function trim(str) {
   return str.replace(/^\s+|\s+$/g, "");
 }
@@ -10,12 +10,12 @@ pub.loadTable = function (source, options) {
 
   var file = m.item(source);
 
-  // 检查文件是否有效
+  // Check if file is valid
   if (
     !(file instanceof FootageItem) ||
     !(file.mainSource instanceof FileSource)
   ) {
-    error("m.loadTable(), 无效的源文件");
+    error("m.loadTable(), invalid source file");
   }
 
   var fileExtension = file.file.name.split(".").pop().toLowerCase();
@@ -24,10 +24,12 @@ pub.loadTable = function (source, options) {
     fileExtension !== "tsv" &&
     fileExtension !== "txt"
   ) {
-    error("m.loadTable(), 不支持的文件格式。请使用 CSV, TSV 或 TXT 文件");
+    error(
+      "m.loadTable(), unsupported file format. Please use CSV, TSV or TXT files"
+    );
   }
 
-  // 如果是 TSV 文件，使用制表符作为分隔符
+  // If it's a TSV file, use tab as delimiter
   if (fileExtension === "tsv") {
     delimiter = "\t";
   }
@@ -39,13 +41,13 @@ pub.loadTable = function (source, options) {
 
   if (header) {
     if (lines.length === 0) {
-      error("m.loadTable(), 文件为空，未找到表头");
+      error("m.loadTable(), file is empty, no header found");
     }
     headers = lines.shift().split(delimiter);
   }
 
   for (var i = 0; i < lines.length; i++) {
-    var line = trim(lines[i]); // 使用自定义的 trim 函数
+    var line = trim(lines[i]); // Use custom trim function
     if (line) {
       var row = line.split(delimiter);
       if (header) {
@@ -60,7 +62,7 @@ pub.loadTable = function (source, options) {
     }
   }
 
-  // 构建并返回表格对象
+  // Build and return table object
   return {
     data: table,
     headers: headers,
@@ -78,7 +80,7 @@ pub.loadTable = function (source, options) {
       if (index >= 0 && index < table.length) {
         return table[index];
       } else {
-        error("m.loadTable(), 行索引超出范围");
+        error("m.loadTable(), row index out of range");
       }
     },
     getColumn: function (nameOrIndex) {
@@ -95,7 +97,7 @@ pub.loadTable = function (source, options) {
         return result;
       } else if (typeof nameOrIndex === "string") {
         if (!header) {
-          error("m.loadTable(), 没有表头，无法通过列名获取列");
+          error("m.loadTable(), no header, cannot get column by name");
         }
         var colIndex = -1;
         for (var k = 0; k < headers.length; k++) {
@@ -105,14 +107,14 @@ pub.loadTable = function (source, options) {
           }
         }
         if (colIndex === -1) {
-          error("m.loadTable(), 找不到列名: " + nameOrIndex);
+          error("m.loadTable(), column name not found: " + nameOrIndex);
         }
         for (var mIndex = 0; mIndex < table.length; mIndex++) {
           result.push(table[mIndex][nameOrIndex]);
         }
         return result;
       } else {
-        error("m.loadTable(), 无效的列名或索引");
+        error("m.loadTable(), invalid column name or index");
       }
     },
     getString: function (row, col) {
@@ -126,28 +128,28 @@ pub.loadTable = function (source, options) {
     get: function (row, col) {
       if (typeof col === "string") {
         if (!header) {
-          error("m.loadTable(), 没有表头，无法通过列名获取值");
+          error("m.loadTable(), no header, cannot get value by column name");
         }
         return table[row][col];
       } else if (typeof col === "number") {
         if (header) {
           var colName = headers[col];
           if (colName === undefined) {
-            error("m.loadTable(), 列索引超出范围");
+            error("m.loadTable(), column index out of range");
           }
           return table[row][colName];
         } else {
           return table[row][col];
         }
       } else {
-        error("m.loadTable(), 无效的列名或索引");
+        error("m.loadTable(), invalid column name or index");
       }
     },
     getObject: function (row) {
       if (row >= 0 && row < table.length) {
         return table[row];
       } else {
-        error("m.loadTable(), 行索引超出范围");
+        error("m.loadTable(), row index out of range");
       }
     },
     findRow: function (value, column) {
@@ -194,7 +196,7 @@ pub.loadTable = function (source, options) {
           column = headers[column];
         }
       } else {
-        error("m.loadTable(), 无效的列名或索引");
+        error("m.loadTable(), invalid column name or index");
       }
 
       if (header) {
@@ -219,18 +221,16 @@ pub.loadTable = function (source, options) {
   };
 };
 
-// 读取文件内容
 function readFile(filePath) {
   var file = new File(filePath);
-  file.encoding = "UTF-8";
   if (!file.exists) {
-    error("m.loadTable(), 文件不存在: " + filePath);
+    error("Cannot read file: file does not exist");
   }
-  var opened = file.open("r");
-  if (!opened) {
-    error("m.loadTable(), 无法打开文件: " + filePath);
-  }
+
+  file.encoding = "UTF-8";
+  file.open("r");
   var content = file.read();
   file.close();
+
   return content;
 }
