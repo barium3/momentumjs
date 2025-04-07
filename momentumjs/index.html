@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>momentum.js</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <script src="js/CSInterface.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.30.1/min/vs/loader.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="container">
+      <div id="toolbar">
+        <div class="toolbar-left">
+          <button id="newFile" class="icon-button">
+            <i class="fas fa-plus"></i>
+          </button>
+          <button id="saveFile" class="icon-button">
+            <i class="fas fa-save"></i>
+          </button>
+        </div>
+
+        <div class="toolbar-center">
+          <span id="current-filename"></span>
+        </div>
+
+        <div class="toolbar-right">
+          <button id="runEditorScript" class="icon-button">
+            <i class="fas fa-play"></i>
+          </button>
+        </div>
+      </div>
+
+      <div id="main-content">
+        <!-- File Browser -->
+        <div id="file-list"></div>
+
+        <!-- Code Area -->
+        <div id="right-panel">
+          <!-- Editor -->
+          <div id="editor-container">
+            <div id="editor"></div>
+          </div>
+
+          <!-- Console -->
+          <div id="console-container">
+            <div id="console-title">Console</div>
+            <div id="console-output"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Module JS Files -->
+    <script src="js/utils/console.js"></script>
+    <script src="js/utils/codeExecutor.js"></script>
+    <script src="js/ui/fileTreeUI.js"></script>
+    <script src="js/fileSystem/fileManager.js"></script>
+    <script src="js/core/editor.js"></script>
+    <script src="js/core/init.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>
