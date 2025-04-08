@@ -28,10 +28,13 @@
 
 ## Example Code
 
+![showcase](footage/showcase.png)
+I have developed an IDE in After Effects for writing momentum.js code. You can install it and try it out in After Effects.
+
 ```javascript
 // Example code: Create a simple rectangle
 
-rect(50, 50, 300, 300);
+m.rect(50, 50, 300, 300);
 ```
 
 ## Contribution
