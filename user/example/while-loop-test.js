@@ -1,0 +1,1 @@
+// @filename: while-loop-test// While 循环生成多个矩形function setup() {  size(800, 400);  noFill();}function draw() {  let i = 0;  // 使用 while 循环创建 4 个矩形  while (i < 4) {    stroke(255, 255, 255, 200);    strokeWeight(2);    rect(100 + i * 100, 150, 60, 60);    i = i + 1;  }}

@@ -1,0 +1,25 @@
+// @filename: for-object-test
+// For...in 循环 - 遍历对象属性
+
+function setup() {
+  size(800, 400);
+  noStroke();
+}
+
+function draw() {
+  // 定义位置数据对象
+  const positions = {
+    first: { x: 100, y: 100 },
+    second: { x: 250, y: 200 },
+    third: { x: 400, y: 150 },
+    fourth: { x: 550, y: 250 }
+  };
+
+  let index = 0;
+  for (const key in positions) {
+    const pos = positions[key];
+    fill(200 + index * 15, 100, 200 - index * 20);
+    ellipse(pos.x, pos.y, 50, 50);
+    index++;
+  }
+}

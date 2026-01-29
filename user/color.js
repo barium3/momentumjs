@@ -1,0 +1,1 @@
+function draw() {  // 红色填充  fill(255, 0, 0);  ellipse(100, 100, 50, 50);    // 绿色填充 + 蓝色描边  fill(0, 255, 0);  stroke(0, 0, 255);  strokeWeight(3);  rect(200, 100, 80, 60);    // 只有描边，无填充  noFill();  stroke(255, 255, 0);  ellipse(350, 100, 50, 50);    // 灰度颜色  fill(128);  // 灰色  noStroke();  rect(450, 100, 40, 40);}

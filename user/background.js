@@ -1,0 +1,1 @@
+function draw() {  background(30, 30, 50);  // 深蓝灰色背景    fill(255, 200, 100);  ellipse(width/2, height/2, 200, 200);}
