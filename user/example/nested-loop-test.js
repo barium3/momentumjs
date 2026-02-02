@@ -1,0 +1,1 @@
+// @filename: nested-loop-test// 嵌套循环 - 创建网格图案function draw() {  // 嵌套 for 循环：3行 x 4列 = 12 个圆  for (let row = 0; row < 3; row++) {    for (let col = 0; col < 4; col++) {      fill(100 + row * 50, 150, 200);      ellipse(150 + col * 100, 100 + row * 80, 40, 40);    }  }}

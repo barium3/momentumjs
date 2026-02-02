@@ -1,0 +1,1 @@
+// @filename: for-loop-test// For 循环生成多个椭圆function setup() {  createCanvas(800, 400);  //background(30);  noStroke();}function draw() {  // 使用 for 循环创建 5 个椭圆  for (let i = 0; i < 5; i++) {    fill(255, 100 + i * 30, 100);    ellipse(100 + i * 80, 200, 50, 50);  }}

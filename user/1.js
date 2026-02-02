@@ -1,0 +1,1 @@
+var x = 100;var speed = 5;function draw() {  // 变量 x 会每帧累积增加，实现移动动画  x += speed;     // 结合三角函数  var y = 500 + sin(frameCount * 0.1) * 100;    ellipse(x, y, 50, 50);}
