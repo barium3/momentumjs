@@ -524,6 +524,12 @@ function buildExpression(
   var colorDeps = deps && deps.colors ? deps.colors : {};
   var shapeDeps = deps && deps.shapes ? deps.shapes : {};
 
+  // background 依赖 color()，确保加载 color 函数
+  if (shapeCounts.background > 0) {
+    if (!colorDeps.color) colorDeps = colorDeps || {};
+    colorDeps.color = true;
+  }
+
   // 环境依赖：如果前端未提供，则自动检测环境变量和常量使用
   var envDeps = deps && deps.environment ? deps.environment : {};
 

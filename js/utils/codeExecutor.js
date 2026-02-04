@@ -27,7 +27,7 @@ window.codeExecutor = (function () {
           } else {
             resolve();
           }
-        }
+        },
       );
     });
   }
@@ -98,10 +98,10 @@ window.codeExecutor = (function () {
   let p5Analyzer = null;
 
   function getP5Analyzer() {
-    if (!p5Analyzer && typeof window.P5Analyzer !== 'undefined') {
+    if (!p5Analyzer && typeof window.P5Analyzer !== "undefined") {
       p5Analyzer = new window.P5Analyzer({
         timeout: 2000,
-        maxLoopCount: 1000
+        maxLoopCount: 1000,
       });
     }
     return p5Analyzer;
@@ -114,7 +114,9 @@ window.codeExecutor = (function () {
   function analyzeLayersWithAST(code) {
     const analyzer = getP5Analyzer();
     if (!analyzer) {
-      console.warn('[CodeExecutor] P5Analyzer not loaded, falling back to basic analysis');
+      console.warn(
+        "[CodeExecutor] P5Analyzer not loaded, falling back to basic analysis",
+      );
       return null;
     }
 
@@ -129,17 +131,17 @@ window.codeExecutor = (function () {
   async function analyzeDependenciesAsync(code) {
     const analyzer = getP5Analyzer();
     if (!analyzer) {
-      console.warn('[CodeExecutor] P5Analyzer not loaded');
+      console.warn("[CodeExecutor] P5Analyzer not loaded");
       return null;
     }
 
     try {
       // 使用运行时分析（异步执行代码）
       const result = await analyzer.analyzeDependencies(code);
-      console.log('[CodeExecutor] 依赖分析结果:', result);
+      console.log("[CodeExecutor] 依赖分析结果:", result);
       return result;
     } catch (error) {
-      console.warn('[CodeExecutor] 依赖分析失败:', error.message);
+      console.warn("[CodeExecutor] 依赖分析失败:", error.message);
       return null;
     }
   }
@@ -150,16 +152,16 @@ window.codeExecutor = (function () {
   async function fullAnalyzeAsync(code) {
     const analyzer = getP5Analyzer();
     if (!analyzer) {
-      console.warn('[CodeExecutor] P5Analyzer not loaded');
+      console.warn("[CodeExecutor] P5Analyzer not loaded");
       return null;
     }
 
     try {
       const result = await analyzer.fullAnalyze(code);
-      console.log('[CodeExecutor] 完整分析结果:', result);
+      console.log("[CodeExecutor] 完整分析结果:", result);
       return result;
     } catch (error) {
-      console.warn('[CodeExecutor] 完整分析失败:', error.message);
+      console.warn("[CodeExecutor] 完整分析失败:", error.message);
       return null;
     }
   }
@@ -196,6 +198,12 @@ window.codeExecutor = (function () {
   function executeUserCode(code, fileName) {
     return new Promise(async (resolve, reject) => {
       try {
+        // 先提取 @filename（依赖注释），再移除注释避免 Acorn 解析 Unicode 报错
+        const compName = extractFileName(code, fileName || "New Composition");
+        if (window.codePreprocessor && window.codePreprocessor.stripComments) {
+          code = window.codePreprocessor.stripComments(code);
+        }
+
         const parsed = parseProcessingCode(code);
 
         // 提取完整的函数定义，而不只是函数体
@@ -203,20 +211,27 @@ window.codeExecutor = (function () {
         const setupFuncBody = extractFunctionBody(code, "setup");
 
         // 提取完整的函数声明（包含 function 关键字和大括号）
-        const drawFullCode = drawFuncBody ? "function draw() {" + drawFuncBody + "}" : "";
-        const setupFullCode = setupFuncBody ? "function setup() {" + setupFuncBody + "}" : "";
+        const drawFullCode = drawFuncBody
+          ? "function draw() {" + drawFuncBody + "}"
+          : "";
+        const setupFullCode = setupFuncBody
+          ? "function setup() {" + setupFuncBody + "}"
+          : "";
 
         // 分析循环中的图形调用和依赖
-        const analysisCode = (parsed.globalCode || "") + "\n" +
-                             (setupFullCode || "") + "\n" +
-                             (drawFullCode || "");
+        const analysisCode =
+          (parsed.globalCode || "") +
+          "\n" +
+          (setupFullCode || "") +
+          "\n" +
+          (drawFullCode || "");
 
         // 使用 P5Analyzer 进行完整分析（包含 renderLayers 和 dependencies）
         let fullResult = null;
         try {
           fullResult = await fullAnalyzeAsync(analysisCode);
         } catch (e) {
-          console.warn('[CodeExecutor] P5Analyzer 分析失败，使用默认结果');
+          console.warn("[CodeExecutor] P5Analyzer 分析失败，使用默认结果");
           fullResult = null;
         }
 
@@ -224,47 +239,68 @@ window.codeExecutor = (function () {
         const drawArg = JSON.stringify(parsed.drawCode || "");
         const setupArg = JSON.stringify(parsed.setupCode || "");
         const globalArg = JSON.stringify(parsed.globalCode || "");
-        const compName = extractFileName(code, fileName || "New Composition");
         const nameArg = JSON.stringify(compName);
 
         // 将 P5Analyzer 分析结果转换为 JSON 字符串
-        const renderLayersArg = (fullResult && fullResult.renderLayers && fullResult.renderLayers.length > 0)
-          ? JSON.stringify(fullResult.renderLayers)
-          : "null";
+        const renderLayersArg =
+          fullResult &&
+          fullResult.renderLayers &&
+          fullResult.renderLayers.length > 0
+            ? JSON.stringify(fullResult.renderLayers)
+            : "null";
 
         // 传递依赖信息（用于按需加载库函数）
-        const dependenciesArg = (fullResult && fullResult.dependencies)
-          ? JSON.stringify(fullResult.dependencies)
-          : "null";
+        const dependenciesArg =
+          fullResult && fullResult.dependencies
+            ? JSON.stringify(fullResult.dependencies)
+            : "null";
 
         // 构建参数列表
         const widthArg = parsed.globalVars.width || 1920;
         const heightArg = parsed.globalVars.height || 1080;
         const frameRateArg = parsed.globalVars.frameRate || 30;
 
-        const finalCode = 'm.runParsed(' + drawArg + ', ' + setupArg + ', ' + globalArg + ', ' +
-                     parsed.maxShapes + ', ' + nameArg + ', ' +
-                     widthArg + ', ' + heightArg + ', ' + frameRateArg + ', ' +
-                     renderLayersArg + ', ' + dependenciesArg + ')';
+        const finalCode =
+          "m.runParsed(" +
+          drawArg +
+          ", " +
+          setupArg +
+          ", " +
+          globalArg +
+          ", " +
+          parsed.maxShapes +
+          ", " +
+          nameArg +
+          ", " +
+          widthArg +
+          ", " +
+          heightArg +
+          ", " +
+          frameRateArg +
+          ", " +
+          renderLayersArg +
+          ", " +
+          dependenciesArg +
+          ")";
 
         const scriptToRun = `try { ${finalCode}; "SUCCESS"; } catch(e) { "ERROR: " + e.message + " at line " + e.line; }`;
 
         // 重新加载 momentum.js 并执行
         loadMomentumLibrary()
           .then(() => {
-            csInterface.evalScript(
-              scriptToRun,
-              (result) => {
-                if (result && result.startsWith && result.startsWith(ERROR_PREFIX)) {
-                  reject(result.substring(ERROR_PREFIX.length + 1));
-                } else {
-                  resolve("Code executed successfully");
-                }
+            csInterface.evalScript(scriptToRun, (result) => {
+              if (
+                result &&
+                result.startsWith &&
+                result.startsWith(ERROR_PREFIX)
+              ) {
+                reject(result.substring(ERROR_PREFIX.length + 1));
+              } else {
+                resolve("Code executed successfully");
               }
-            );
+            });
           })
           .catch(reject);
-
       } catch (error) {
         reject(error);
       }

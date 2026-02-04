@@ -14,6 +14,25 @@ function initExecutor(registry) {
 }
 
 /**
+ * 确保 p5.Vector 可用
+ * @param {Object} p - p5 实例
+ */
+function ensureP5Vector(p) {
+  // 方式1：从 p5 实例的构造函数获取 Vector（最可靠）
+  if (p && p.constructor && p.constructor.Vector) {
+    var P5Vector = p.constructor.Vector;
+    window.createVector = function (x, y, z) {
+      return new P5Vector(x, y, z);
+    };
+    // 确保 window.p5.Vector 也可用
+    if (typeof window.p5 === "undefined") {
+      window.p5 = p.constructor;
+    }
+    return;
+  }
+}
+
+/**
  * 暴露环境变量到全局作用域
  * @param {Array<string>} variables - 变量名列表
  * @param {Object} p - p5 实例
@@ -22,6 +41,9 @@ function exposeVariables(variables, p) {
   if (!p) {
     return;
   }
+
+  // 确保 p5.Vector 可用（传入 p5 实例）
+  ensureP5Vector(p);
 
   variables.forEach(function (varName) {
     if (window.hasOwnProperty(varName) && window[varName] !== undefined) {
@@ -60,6 +82,15 @@ function exposeVariables(variables, p) {
       return;
     }
   });
+}
+
+/**
+ * 清除用户定义的 p5 入口函数（setup、draw）
+ * 必须在每次 eval 前调用，否则当新代码未定义 draw 时，会错误执行上一轮残留的 draw
+ */
+function clearUserEntryPoints() {
+  if (typeof window.setup !== "undefined") delete window.setup;
+  if (typeof window.draw !== "undefined") delete window.draw;
 }
 
 /**
@@ -149,14 +180,19 @@ function exposeFunctionsForAnalysis(context) {
 /**
  * 暴露 p5 函数到全局作用域（用于代码执行）
  * @param {Object} context - 上下文对象
+ *   - renderOrder: 按执行顺序记录的渲染调用 [baseType, baseType, ...]
  */
 function exposeFunctionsForExecution(context) {
   var p = context.p;
   var allFunctions = context.allFunctions;
   var renderFunctions = context.renderFunctions;
   var renderCounts = context.renderCounts;
+  var renderOrder = context.renderOrder;
+  var getShapeTypeMap = context.getShapeTypeMap;
   var loopExecutions = context.loopExecutions;
   var maxLoopCount = context.maxLoopCount;
+
+  var shapeTypeMap = getShapeTypeMap ? getShapeTypeMap(context.cache) : {};
 
   allFunctions.forEach(function (funcName) {
     var original = getP5Method(p, funcName);
@@ -168,6 +204,10 @@ function exposeFunctionsForExecution(context) {
             throw new Error("循环次数超过上限");
           }
           renderCounts[funcName]++;
+          if (renderOrder) {
+            var baseType = shapeTypeMap[funcName] || funcName;
+            renderOrder.push(baseType);
+          }
           return original.apply(p, arguments);
         };
       } else {

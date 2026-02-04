@@ -6,8 +6,7 @@ var m = {};
   pub.VERSION = "1.0.0";
 
   // Core includes
-  #include "includes/constants.js"
-  #include "includes/private-vars.js"
+
   #include "includes/registry.js"
 
   // Processing-style modules (must be before core.js)

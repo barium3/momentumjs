@@ -22,17 +22,22 @@ class P5Analyzer {
     // 运行时分析：执行代码并统计渲染函数调用
     const result = await this.runtime.execute(code);
 
-    // 转换为 renderLayers 格式
-    const renderLayers = Object.entries(result.renderCounts)
-      .filter(([, count]) => count > 0)
-      .map(([type, count]) => ({ type, count }));
+    // 按执行顺序构建 renderLayers（保证图层顺序与代码调用顺序一致）
+    let renderLayers;
+    if (result.renderOrder && result.renderOrder.length > 0) {
+      renderLayers = result.renderOrder.map((type) => ({ type, count: 1 }));
+    } else {
+      renderLayers = Object.entries(result.renderCounts)
+        .filter(([, count]) => count > 0)
+        .map(([type, count]) => ({ type, count }));
+    }
 
     return {
       renderLayers: renderLayers,
       runtimeCounts: result.renderCounts,
       loopExecutions: result.loopExecutions,
       error: null,
-      fallback: false
+      fallback: false,
     };
   }
 
@@ -54,7 +59,7 @@ class P5Analyzer {
     // 并行执行渲染统计和依赖分析
     const [renderResult, depsResult] = await Promise.all([
       this.analyze(code),
-      this.analyzeDependencies(code)
+      this.analyzeDependencies(code),
     ]);
 
     return {
@@ -63,7 +68,7 @@ class P5Analyzer {
       loopExecutions: renderResult.loopExecutions,
       dependencies: depsResult,
       error: null,
-      fallback: false
+      fallback: false,
     };
   }
 
@@ -78,7 +83,7 @@ class P5Analyzer {
 }
 
 // 导出类
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module !== "undefined" && module.exports) {
   module.exports = P5Analyzer;
 }
 

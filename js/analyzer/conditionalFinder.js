@@ -5,8 +5,15 @@
 
 class ConditionalFinder {
   constructor() {
-    // 支持的渲染函数
-    this.renderFunctions = ['ellipse', 'circle', 'rect', 'line', 'point'];
+    // 支持的渲染函数（与 registry.shapes 保持一致）
+    this.renderFunctions = [
+      "ellipse",
+      "circle",
+      "rect",
+      "line",
+      "point",
+      "background",
+    ];
   }
 
   /**
@@ -22,7 +29,7 @@ class ConditionalFinder {
     this.walkAST(ast, null, conditions);
 
     // 过滤出包含渲染函数的条件
-    return conditions.filter(c => c.hasRender);
+    return conditions.filter((c) => c.hasRender);
   }
 
   /**
@@ -32,12 +39,13 @@ class ConditionalFinder {
     if (!node) return;
 
     // 检查当前节点是否是 IfStatement
-    if (node.type === 'IfStatement') {
+    if (node.type === "IfStatement") {
       const condition = this.extractCondition(node.test);
       const hasThen = this.containsRenderFunction(node.consequent);
-      const hasElse = node.alternate && node.alternate.type !== 'IfStatement'
-        ? this.containsRenderFunction(node.alternate)
-        : false;
+      const hasElse =
+        node.alternate && node.alternate.type !== "IfStatement"
+          ? this.containsRenderFunction(node.alternate)
+          : false;
 
       if (hasThen || hasElse) {
         conditions.push({
@@ -45,7 +53,7 @@ class ConditionalFinder {
           hasRender: true,
           hasThen: hasThen,
           hasElse: hasElse,
-          node: node
+          node: node,
         });
       }
 
@@ -53,7 +61,7 @@ class ConditionalFinder {
       if (node.consequent) {
         this.walkAST(node.consequent, node, conditions);
       }
-      if (node.alternate && node.alternate.type !== 'IfStatement') {
+      if (node.alternate && node.alternate.type !== "IfStatement") {
         this.walkAST(node.alternate, node, conditions);
       } else if (node.alternate) {
         this.walkAST(node.alternate, node, conditions);
@@ -62,16 +70,17 @@ class ConditionalFinder {
 
     // 继续遍历子节点
     for (const key in node) {
-      if (key === 'type' || key === 'loc' || key === 'start' || key === 'end') continue;
+      if (key === "type" || key === "loc" || key === "start" || key === "end")
+        continue;
 
       const child = node[key];
       if (Array.isArray(child)) {
-        child.forEach(childNode => {
-          if (childNode && typeof childNode === 'object') {
+        child.forEach((childNode) => {
+          if (childNode && typeof childNode === "object") {
             this.walkAST(childNode, node, conditions);
           }
         });
-      } else if (child && typeof child === 'object') {
+      } else if (child && typeof child === "object") {
         this.walkAST(child, node, conditions);
       }
     }
@@ -81,23 +90,23 @@ class ConditionalFinder {
    * 提取条件的字符串表示
    */
   extractCondition(node) {
-    if (!node) return '';
+    if (!node) return "";
 
     switch (node.type) {
-      case 'BinaryExpression':
+      case "BinaryExpression":
         return `${this.extractCondition(node.left)} ${node.operator} ${this.extractCondition(node.right)}`;
-      case 'LogicalExpression':
+      case "LogicalExpression":
         return `${this.extractCondition(node.left)} ${node.operator} ${this.extractCondition(node.right)}`;
-      case 'UnaryExpression':
+      case "UnaryExpression":
         return `${node.operator} ${this.extractCondition(node.argument)}`;
-      case 'Identifier':
+      case "Identifier":
         return node.name;
-      case 'Literal':
+      case "Literal":
         return String(node.value);
-      case 'MemberExpression':
+      case "MemberExpression":
         return this.extractMemberExpression(node);
       default:
-        return '';
+        return "";
     }
   }
 
@@ -105,10 +114,10 @@ class ConditionalFinder {
    * 提取成员表达式
    */
   extractMemberExpression(node) {
-    let obj = '';
-    if (node.object.type === 'Identifier') {
+    let obj = "";
+    if (node.object.type === "Identifier") {
       obj = node.object.name;
-    } else if (node.object.type === 'MemberExpression') {
+    } else if (node.object.type === "MemberExpression") {
       obj = this.extractMemberExpression(node.object);
     }
 
@@ -125,8 +134,9 @@ class ConditionalFinder {
     let contains = false;
 
     this.walkNode(node, (n) => {
-      if (n.type === 'CallExpression') {
-        const funcName = n.callee.name || (n.callee.property && n.callee.property.name);
+      if (n.type === "CallExpression") {
+        const funcName =
+          n.callee.name || (n.callee.property && n.callee.property.name);
         if (this.renderFunctions.includes(funcName)) {
           contains = true;
           return true; // 停止遍历
@@ -147,16 +157,17 @@ class ConditionalFinder {
     if (callback(node)) return true;
 
     for (const key in node) {
-      if (key === 'type' || key === 'loc' || key === 'start' || key === 'end') continue;
+      if (key === "type" || key === "loc" || key === "start" || key === "end")
+        continue;
 
       const child = node[key];
       if (Array.isArray(child)) {
         for (const childNode of child) {
-          if (childNode && typeof childNode === 'object') {
+          if (childNode && typeof childNode === "object") {
             if (this.walkNode(childNode, callback)) return true;
           }
         }
-      } else if (child && typeof child === 'object') {
+      } else if (child && typeof child === "object") {
         if (this.walkNode(child, callback)) return true;
       }
     }
@@ -173,14 +184,15 @@ class ConditionalFinder {
    */
   forceCondition(code, condition, branch) {
     // 转义正则特殊字符
-    const escapedCondition = condition.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`if\\s*\\(${escapedCondition}\\)`, 'g');
-    const replacement = branch === 'then' ? 'if (true /* forced */)' : 'if (false /* forced */)';
+    const escapedCondition = condition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`if\\s*\\(${escapedCondition}\\)`, "g");
+    const replacement =
+      branch === "then" ? "if (true /* forced */)" : "if (false /* forced */)";
     return code.replace(pattern, replacement);
   }
 }
 
 // 导出
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module !== "undefined" && module.exports) {
   module.exports = ConditionalFinder;
 }

@@ -19,7 +19,8 @@ function initDependencies(registry) {
  * @param {Object} dependencies - 依赖对象（会被修改）
  */
 function parseConstantsAndVariables(code, dependencies) {
-  var categories = ["math", "environment"];
+  // 支持的类别：math, environment, colors
+  var categories = ["math", "environment", "colors"];
 
   categories.forEach(function (category) {
     if (!functionRegistry[category]) {
@@ -58,6 +59,35 @@ function parseConstantsAndVariables(code, dependencies) {
           dependencies[category] = {};
         }
         dependencies[category][funcName] = true;
+        if (category === "math") {
+          dependencies.requires.math = true;
+        }
+      }
+    }
+
+    // 匹配命名空间的使用（如 p5.Vector.fromAngle()、new p5.Vector()）
+    var namespaces = [];
+    for (var name in categoryData) {
+      if (categoryData.hasOwnProperty(name)) {
+        var item = categoryData[name];
+        if (item.type === "namespace") {
+          namespaces.push(name);
+        }
+      }
+    }
+    if (namespaces.length > 0) {
+      // 匹配 namespace.xxx 的使用（如 p5.Vector）
+      var nsPattern = new RegExp(
+        "\\b(" + namespaces.join("|") + ")\\s*\\.",
+        "g",
+      );
+      var match;
+      while ((match = nsPattern.exec(code)) !== null) {
+        var nsName = match[1];
+        if (!dependencies[category]) {
+          dependencies[category] = {};
+        }
+        dependencies[category][nsName] = true;
         if (category === "math") {
           dependencies.requires.math = true;
         }

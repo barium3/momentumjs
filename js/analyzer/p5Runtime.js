@@ -205,6 +205,7 @@ class P5Runtime {
   async executeSingle(code) {
     var self = this;
     var renderCounts = {};
+    var renderOrder = [];
     var loopExecutions = { value: 0 };
 
     this.renderFunctions.forEach(function (func) {
@@ -226,12 +227,19 @@ class P5Runtime {
           allFunctions: self.allFunctions,
           renderFunctions: self.renderFunctions,
           renderCounts: renderCounts,
+          renderOrder: renderOrder,
+          getShapeTypeMap: getShapeTypeMap,
+          cache: self,
           loopExecutions: loopExecutions,
           maxLoopCount: self.options.maxLoopCount,
         });
 
+        clearUserEntryPoints();
         window.eval(code);
 
+        if (typeof window.setup === "function") {
+          window.setup();
+        }
         if (typeof window.draw === "function") {
           window.draw();
         }
@@ -241,6 +249,7 @@ class P5Runtime {
         clearTimeout(timeoutId);
         resolve({
           renderCounts: renderCounts,
+          renderOrder: renderOrder,
           loopExecutions: loopExecutions.value,
         });
       } catch (err) {
@@ -259,11 +268,14 @@ class P5Runtime {
   mergeResults(results) {
     var mergedCounts = {};
     var maxLoopExecutions = 0;
+    var mergedOrder = [];
 
     this.renderFunctions.forEach(function (func) {
       mergedCounts[func] = 0;
     });
 
+    // 收集所有结果中出现的图层类型（按首次出现顺序），确保条件分支的 then/else 都被包含
+    var seenTypes = new Set();
     results.forEach(function (result) {
       if (result.renderCounts) {
         for (var type in result.renderCounts) {
@@ -280,9 +292,21 @@ class P5Runtime {
       if (result.loopExecutions > maxLoopExecutions) {
         maxLoopExecutions = result.loopExecutions;
       }
+      if (result.renderOrder && result.renderOrder.length > 0) {
+        result.renderOrder.forEach(function (type) {
+          if (!seenTypes.has(type)) {
+            seenTypes.add(type);
+            mergedOrder.push(type);
+          }
+        });
+      }
     });
 
-    return { renderCounts: mergedCounts, loopExecutions: maxLoopExecutions };
+    return {
+      renderCounts: mergedCounts,
+      renderOrder: mergedOrder,
+      loopExecutions: maxLoopExecutions,
+    };
   }
 
   // ========================================
@@ -370,6 +394,7 @@ class P5Runtime {
           collectShape: collectShape,
         });
 
+        clearUserEntryPoints();
         window.eval(code);
 
         parseConstantsAndVariables(code, dependencies);

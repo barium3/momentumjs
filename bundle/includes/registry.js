@@ -16,49 +16,72 @@ var functionRegistry = {};
  *   - slots: 数据槽位数（从 path 读取的数据长度）
  *   - markerType: 标记类型（用于在 path 中标识）
  */
+/**
+ * 形状数据槽位说明：
+ * 每个形状存储的数据格式为: [...geometry, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
+ * - geometry: 形状特定的几何数据（位置、大小、旋转等）
+ * - fill1: [r, g] 填充颜色的红绿分量
+ * - fill2: [b, a] 填充颜色的蓝和透明度分量
+ * - stroke1: [r, g] 描边颜色的红绿分量
+ * - stroke2: [b, a] 描边颜色的蓝和透明度分量
+ * - opacity: [fillOpacity, strokeOpacity] 填充和描边的不透明度 (0-100)
+ * - strokeWeight: [weight, 0] 描边宽度
+ * - marker: [index, type] 形状标记
+ *
+ * slots 计算: geometry slots + 6 (颜色数据)
+ */
 functionRegistry.shapes = {
-  // 椭圆/圆形
+  // 椭圆/圆形: geometry = [pos, size, rot] = 3 slots
   ellipse: {
     internal: "_ellipse",
-    baseType: "ellipse", // 基础类型，用于统计和分类
-    slots: 7,
+    baseType: "ellipse",
+    slots: 9, // 3 geometry + 6 color
     markerType: 1001,
   },
   circle: {
-    internal: "_ellipse", // circle 和 ellipse 共享同一个内部函数
-    baseType: "ellipse", // circle 映射到 ellipse 进行统计
-    slots: 7,
+    internal: "_ellipse",
+    baseType: "ellipse",
+    slots: 9,
     markerType: 1001,
   },
 
-  // 矩形/正方形
+  // 矩形/正方形: geometry = [pos, size, rot] = 3 slots
   rect: {
     internal: "_rect",
-    baseType: "rect", // 基础类型，用于统计和分类
-    slots: 7,
+    baseType: "rect",
+    slots: 9, // 3 geometry + 6 color
     markerType: 1002,
   },
   square: {
-    internal: "_rect", // square 和 rect 共享同一个内部函数
-    baseType: "rect", // square 映射到 rect 进行统计
-    slots: 7,
+    internal: "_rect",
+    baseType: "rect",
+    slots: 9,
     markerType: 1002,
   },
 
-  // 直线
+  // 直线: geometry = [p1, p2] = 2 slots
   line: {
     internal: "_line",
-    baseType: "line", // 基础类型，用于统计和分类
-    slots: 6,
+    baseType: "line",
+    slots: 8, // 2 geometry + 6 color
     markerType: 1003,
   },
 
-  // 点
+  // 点: geometry = [pos] = 1 slot
   point: {
     internal: "_point",
-    baseType: "point", // 基础类型，用于统计和分类
-    slots: 5,
+    baseType: "point",
+    slots: 7, // 1 geometry + 6 color
     markerType: 1004,
+  },
+
+  // 背景: 纯色图层，颜色由效果-生成-填色控制
+  // 数据格式: [fill1, fill2, marker] = [r,g], [b,a], marker
+  background: {
+    internal: "_background",
+    baseType: "background",
+    slots: 3,
+    markerType: 1005,
   },
 };
 
@@ -76,15 +99,37 @@ functionRegistry.transforms = {
 
 /**
  * 颜色函数定义
+ * 颜色模式常量：RGB=0, HSB=1, HSL=2
  */
 functionRegistry.colors = {
+  // 设置/重置函数
   fill: { internal: "fill" },
   noFill: { internal: "noFill" },
   stroke: { internal: "stroke" },
   noStroke: { internal: "noStroke" },
   strokeWeight: { internal: "strokeWeight" },
+
+  // 颜色创建
   color: { internal: "color" },
   lerpColor: { internal: "lerpColor" },
+
+  // 颜色模式
+  colorMode: { internal: "colorMode" },
+
+  // 颜色提取函数
+  red: { internal: "red" },
+  green: { internal: "green" },
+  blue: { internal: "blue" },
+  alpha: { internal: "alpha" },
+  hue: { internal: "hue" },
+  saturation: { internal: "saturation" },
+  brightness: { internal: "brightness" },
+  lightness: { internal: "lightness" },
+
+  // 颜色模式常量
+  RGB: { internal: "RGB", type: "constant" },
+  HSB: { internal: "HSB", type: "constant" },
+  HSL: { internal: "HSL", type: "constant" },
 };
 
 /**
@@ -98,10 +143,17 @@ functionRegistry.math = {
   HALF_PI: { internal: "HALF_PI", type: "constant" },
   QUARTER_PI: { internal: "QUARTER_PI", type: "constant" },
 
-  // 基本数学函数
+  // 基本数学函数（三角与反三角）
   sin: { internal: "sin" },
   cos: { internal: "cos" },
   tan: { internal: "tan" },
+  asin: { internal: "asin" },
+  acos: { internal: "acos" },
+  atan: { internal: "atan" },
+  atan2: { internal: "atan2" },
+  degrees: { internal: "degrees" },
+  radians: { internal: "radians" },
+  angleMode: { internal: "angleMode" },
   sqrt: { internal: "sqrt" },
   pow: { internal: "pow" },
   abs: { internal: "abs" },
@@ -110,16 +162,31 @@ functionRegistry.math = {
   round: { internal: "round" },
   min: { internal: "min" },
   max: { internal: "max" },
+  exp: { internal: "exp" },
+  log: { internal: "log" },
+  sq: { internal: "sq" },
+  fract: { internal: "fract" },
+  norm: { internal: "norm" },
+  mag: { internal: "mag" },
 
-  // 扩展数学函数
+  // 扩展数学函数（randomSeed、randomGaussian 与 random 一同注入）
   random: { internal: "random" },
+  randomGaussian: { internal: "randomGaussian" },
+  randomSeed: { internal: "randomSeed" },
   map: { internal: "map" },
   constrain: { internal: "constrain" },
   lerp: { internal: "lerp" },
   dist: { internal: "dist" },
 
-  // 噪声函数
+  // 噪声函数（noiseDetail、noiseSeed 与 noise 一同注入）
   noise: { internal: "noise" },
+  noiseDetail: { internal: "noiseDetail" },
+  noiseSeed: { internal: "noiseSeed" },
+
+  // 向量函数（p5.Vector 命名空间）
+  // 检测 p5.Vector 或 createVector 时注入整个 p5 命名空间
+  p5: { internal: "p5", type: "namespace" },
+  createVector: { internal: "createVector" },
 };
 
 /**

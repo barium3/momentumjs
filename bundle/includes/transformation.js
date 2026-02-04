@@ -12,7 +12,7 @@ function getTransformStateLib() {
     "var _tx = 0, _ty = 0;",
     "var _rotation = 0;",
     "var _scaleX = 1, _scaleY = 1;",
-    "var _stack = [];"
+    "var _stack = [];",
   ].join("\n");
 }
 
@@ -24,7 +24,7 @@ function getTransformBasicLib() {
     "// Basic Transform Functions",
     "function translate(x, y) { _tx += x; _ty = y !== undefined ? y : _ty + y; }",
     "function rotate(a) { _rotation += a; }",
-    "function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }"
+    "function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }",
   ].join("\n");
 }
 
@@ -40,7 +40,7 @@ function getTransformStackLib() {
     "    var _v = _stack.pop();",
     "    _tx = _v[0]; _ty = _v[1]; _rotation = _v[2]; _scaleX = _v[3]; _scaleY = _v[4];",
     "  }",
-    "}"
+    "}",
   ].join("\n");
 }
 
@@ -49,7 +49,7 @@ function getTransformStackLib() {
  */
 function getResetMatrixLib() {
   return [
-    "function resetMatrix() { _tx = 0; _ty = 0; _rotation = 0; _scaleX = 1; _scaleY = 1; _stack = []; }"
+    "function resetMatrix() { _tx = 0; _ty = 0; _rotation = 0; _scaleX = 1; _scaleY = 1; _stack = []; }",
   ].join("\n");
 }
 
@@ -62,7 +62,7 @@ function getApplyTransformLib() {
     "  var sx = x * _scaleX, sy = y * _scaleY;",
     "  var c = Math.cos(_rotation), s = Math.sin(_rotation);",
     "  return [sx * c - sy * s + _tx, sx * s + sy * c + _ty];",
-    "}"
+    "}",
   ].join("\n");
 }
 
@@ -88,22 +88,32 @@ function getTransformationLib(deps) {
 
   // 用户使用的变换函数
   if (deps.translate) {
-    lib.push("function translate(x, y) { _tx += x; _ty = y !== undefined ? y : _ty + y; }");
+    lib.push(
+      "function translate(x, y) { _tx += x; _ty = y !== undefined ? y : _ty + y; }",
+    );
   }
   if (deps.rotate) {
     lib.push("function rotate(a) { _rotation += a; }");
   }
   if (deps.scale) {
-    lib.push("function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }");
+    lib.push(
+      "function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }",
+    );
   }
   if (deps.push) {
-    lib.push("function push() { _stack.push([_tx, _ty, _rotation, _scaleX, _scaleY]); }");
+    lib.push(
+      "function push() { _stack.push([_tx, _ty, _rotation, _scaleX, _scaleY]); }",
+    );
   }
   if (deps.pop) {
-    lib.push("function pop() { if (_stack.length > 0) { var _v = _stack.pop(); _tx = _v[0]; _ty = _v[1]; _rotation = _v[2]; _scaleX = _v[3]; _scaleY = _v[4]; } }");
+    lib.push(
+      "function pop() { if (_stack.length > 0) { var _v = _stack.pop(); _tx = _v[0]; _ty = _v[1]; _rotation = _v[2]; _scaleX = _v[3]; _scaleY = _v[4]; } }",
+    );
   }
   if (deps.resetMatrix) {
-    lib.push("function resetMatrix() { _tx = 0; _ty = 0; _rotation = 0; _scaleX = 1; _scaleY = 1; _stack = []; }");
+    lib.push(
+      "function resetMatrix() { _tx = 0; _ty = 0; _rotation = 0; _scaleX = 1; _scaleY = 1; _stack = []; }",
+    );
   }
   if (deps.shape) {
     lib.push(getApplyTransformLib());
@@ -117,7 +127,7 @@ function getTransformationLib(deps) {
  */
 function getTransformFunctionNames() {
   // 优先使用 registry
-  if (typeof functionRegistry !== 'undefined' && functionRegistry.transforms) {
+  if (typeof functionRegistry !== "undefined" && functionRegistry.transforms) {
     return Object.keys(functionRegistry.transforms);
   }
 

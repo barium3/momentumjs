@@ -1,0 +1,77 @@
+// @filename: color-test
+// 测试 color 相关函数：colorMode, color(), alpha, red/green/blue, hue/saturation/brightness, lerpColor
+
+function setup() {
+  createCanvas(800, 400);
+}
+
+function draw() {
+  // 1. 测试 color(gray) 和 color(gray, alpha)
+  fill(color(200));
+  noStroke();
+  ellipse(80, 100, 50, 50);
+
+  fill(color(100, 127)); // 半透明灰 (alpha 0-255)
+  ellipse(80, 180, 50, 50);
+
+  // 2. 测试 color(v1, v2, v3) 和 color(v1, v2, v3, alpha)
+  fill(color(255, 100, 100));
+  noStroke();
+  ellipse(180, 100, 50, 50);
+
+  fill(color(255, 100, 100, 128)); // 半透明红 (alpha 0-255)
+  ellipse(180, 180, 50, 50);
+
+  // 3. 测试 colorMode HSB
+  colorMode(HSB, 360, 100, 100, 1);
+  fill(color(120, 80, 100)); // 绿色 (H=120)
+  noStroke();
+  ellipse(280, 100, 50, 50);
+
+  fill(color(240, 80, 100, 0.6)); // 半透明蓝 (HSB 模式 alpha 0-1)
+  ellipse(280, 180, 50, 50);
+
+  // 恢复 RGB 模式
+  colorMode(RGB, 255, 255, 255, 255);
+
+  // 4. 测试颜色提取函数
+  var c = color(255, 128, 64);
+  fill(red(c), green(c), blue(c));
+  noStroke();
+  ellipse(380, 100, 50, 50);
+
+  var c2 = color(255, 0, 0, 180);
+  fill(red(c2), green(c2), blue(c2), alpha(c2));
+  ellipse(380, 180, 50, 50);
+
+  // 5. 测试 lerpColor
+  var from = color(255, 0, 0);
+  var to = color(0, 0, 255);
+  var t = (frameCount % 60) / 60; // 0~1 循环
+  fill(lerpColor(from, to, t));
+  noStroke();
+  ellipse(480, 140, 60, 60);
+
+  // 6. 测试 hue/saturation/brightness 提取（颜色内部存为 RGB，提取后可直接用于 fill）
+  colorMode(HSB, 360, 100, 100);
+  var hsbColor = color(200, 70, 90); // 青蓝色
+  colorMode(RGB, 255, 255, 255);
+  fill(red(hsbColor), green(hsbColor), blue(hsbColor));
+  noStroke();
+  ellipse(580, 100, 50, 50);
+
+  // 7. 测试 stroke 带 alpha
+  noFill();
+  stroke(255, 255, 0, 200);
+  strokeWeight(3);
+  ellipse(680, 140, 50, 50);
+
+  // 8. 测试 CSS 颜色字符串
+  fill("red");
+  noStroke();
+  ellipse(80, 280, 40, 40);
+  fill("#00ff00");
+  ellipse(140, 280, 40, 40);
+  fill("rgb(0, 0, 255)");
+  ellipse(200, 280, 40, 40);
+}
