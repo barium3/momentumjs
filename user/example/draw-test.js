@@ -1,0 +1,1 @@
+// 测试 draw 函数中创建图形// 使用固定数值，排除变量问题function draw() {  ellipse(frameCount, PI, 200, 200);}

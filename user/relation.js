@@ -1,0 +1,1 @@
+var angle = 0;function draw() {  angle += 0.05;    // 中心圆  var cx = 300, cy = 300;  ellipse(cx, cy, 50, 50);    // 围绕中心旋转的圆（相对位置）  var orbitX = cx +cos(angle) * 100;  var orbitY = cy +sin(angle) * 100;  ellipse(orbitX, orbitY, 30, 30);    // 跟随轨道圆的小圆  var followX = orbitX + 30;  var followY = orbitY;  ellipse(followX, followY, 15, 15);}

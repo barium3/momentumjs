@@ -1,0 +1,1 @@
+// @filename: if-else-test// If/else 条件测试 - 根据 x 坐标选择不同图形  var x = 0;function draw() {  // 使用 if/else 根据条件绘制不同图形  if (x > 50) {    ellipse(x, 10, 60, 60);  } else {    rect(x, 10, 60, 60);  }  x++;}
