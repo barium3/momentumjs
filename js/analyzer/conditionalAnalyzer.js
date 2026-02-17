@@ -42,19 +42,12 @@ class ConditionalAnalyzer {
 
     // 阶段2：收集所有渲染函数调用
     const renderCalls = this.collectRenderFunctions(ast);
-    console.log("[DEBUG] 找到的渲染函数调用:", renderCalls.map(c => c.funcName));
 
     // 阶段3：对每个渲染函数，找出影响它的条件
     const conditionMap = new Map(); // key: condition string, value: condition info
 
     for (const renderCall of renderCalls) {
       const affectingConditions = this.findAffectingBranches(renderCall, ast);
-      console.log(`[DEBUG] 渲染函数 ${renderCall.funcName} 找到的条件:`, 
-        affectingConditions.map(c => ({
-          condition: c.condition,
-          hasThen: c.hasThen,
-          hasElse: c.hasElse
-        })));
       
       for (const cond of affectingConditions) {
         const key = cond.condition;
@@ -68,13 +61,8 @@ class ConditionalAnalyzer {
           });
         }
         const existing = conditionMap.get(key);
-        const oldHasThen = existing.hasThen;
-        const oldHasElse = existing.hasElse;
         existing.hasThen = existing.hasThen || cond.hasThen;
         existing.hasElse = existing.hasElse || cond.hasElse;
-        if (oldHasThen !== existing.hasThen || oldHasElse !== existing.hasElse) {
-          console.log(`[DEBUG] 合并条件 "${key}": hasThen ${oldHasThen}->${existing.hasThen}, hasElse ${oldHasElse}->${existing.hasElse}`);
-        }
         if (!existing.affectedRenderFunctions.includes(renderCall.funcName)) {
           existing.affectedRenderFunctions.push(renderCall.funcName);
         }
@@ -86,13 +74,6 @@ class ConditionalAnalyzer {
       ...c,
       hasRender: true, // 所有返回的条件都包含渲染函数
     }));
-    
-    console.log("[DEBUG] 最终合并后的条件:", conditions.map(c => ({
-      condition: c.condition,
-      hasThen: c.hasThen,
-      hasElse: c.hasElse,
-      affectedRenderFunctions: c.affectedRenderFunctions
-    })));
     
     return conditions;
   }
@@ -496,8 +477,6 @@ class ConditionalAnalyzer {
           const inThen = this.isNodeDescendant(renderNode, stmt.consequent);
           const inElse = stmt.alternate && this.isNodeDescendant(renderNode, stmt.alternate);
 
-          console.log(`[DEBUG] 渲染函数 ${renderCall.funcName}: 检查 if 语句, inThen=${inThen}, inElse=${inElse}`);
-
           if (inThen) {
             // 渲染函数在 then 分支中，需要强制执行 then 分支
             // 但也要检查 then 分支中是否有嵌套的 if return 会阻止渲染函数执行
@@ -511,7 +490,6 @@ class ConditionalAnalyzer {
 
             // 强制执行外层 if 的 then 分支（让渲染函数能够执行）
             const conditionStr = this.extractConditionExpression(stmt.test);
-            console.log(`[DEBUG] 渲染函数在 then 分支中，条件: "${conditionStr}"`);
             conditions.push({
               condition: conditionStr,
               hasThen: true,
@@ -531,7 +509,6 @@ class ConditionalAnalyzer {
 
             // 强制执行外层 if 的 else 分支（让渲染函数能够执行）
             const conditionStr = this.extractConditionExpression(stmt.test);
-            console.log(`[DEBUG] 渲染函数在 else 分支中，条件: "${conditionStr}"`);
             conditions.push({
               condition: conditionStr,
               hasThen: false,
@@ -833,29 +810,6 @@ class ConditionalAnalyzer {
   }
 
   /**
-   * 检查在 renderNode 之前，targetNode 子树中是否有 return/throw（在同一函数作用域内）
-   */
-  hasEarlyReturn(renderNode, targetNode, functionScope) {
-    if (!targetNode) return false;
-
-    let hasReturn = false;
-
-    this.walkNode(targetNode, (node) => {
-      if (
-        (node.type === "ReturnStatement" || node.type === "ThrowStatement") &&
-        node.start < renderNode.start &&
-        this.isInSameFunctionScope(node, renderNode, functionScope)
-      ) {
-        hasReturn = true;
-        return true; // 停止遍历
-      }
-      return false;
-    });
-
-    return hasReturn;
-  }
-
-  /**
    * 判断两个节点是否在同一函数作用域内
    */
   isInSameFunctionScope(node1, node2, functionScope) {
@@ -869,20 +823,6 @@ class ConditionalAnalyzer {
     const node2InScope = this.isNodeDescendant(node2, functionScope) || node2 === functionScope;
 
     return node1InScope && node2InScope;
-  }
-
-  /**
-   * 找到包含指定节点的最内层 IfStatement
-   */
-  findParentIfStatement(node) {
-    let current = node.parent;
-    while (current) {
-      if (current.type === "IfStatement") {
-        return current;
-      }
-      current = current.parent;
-    }
-    return null;
   }
 
   /**
@@ -961,29 +901,6 @@ class ConditionalAnalyzer {
   }
 
   /**
-   * 检查节点是否包含渲染函数（保留用于向后兼容）
-   */
-  containsRenderFunction(node) {
-    if (!node) return false;
-
-    let contains = false;
-
-    this.walkNode(node, (n) => {
-      if (n.type === "CallExpression") {
-        const funcName =
-          n.callee.name || (n.callee.property && n.callee.property.name);
-        if (this.renderFunctions.includes(funcName)) {
-          contains = true;
-          return true; // 停止遍历
-        }
-      }
-      return false;
-    });
-
-    return contains;
-  }
-
-  /**
    * 遍历节点
    */
   walkNode(node, callback) {
@@ -1008,58 +925,6 @@ class ConditionalAnalyzer {
     }
 
     return false;
-  }
-
-  /**
-   * 强制条件分支执行
-   * @param {string} code - 原始代码
-   * @param {string|Object} conditionOrNode - 条件表达式字符串或条件对象（包含 condition 和 node）
-   * @param {string} branch - 'then' 或 'else'
-   * @returns {string} 修改后的代码
-   */
-  forceBranch(code, conditionOrNode, branch) {
-    // 如果传入的是对象（包含 node），使用 AST 方式精确修改
-    if (typeof conditionOrNode === "object" && conditionOrNode.node) {
-      return this.forceBranchByNode(code, conditionOrNode.node, branch);
-    }
-    // 否则，使用字符串条件（向后兼容）
-    const condition = typeof conditionOrNode === "string" 
-      ? conditionOrNode 
-      : conditionOrNode.condition;
-    return this.forceBranchByString(code, condition, branch);
-  }
-
-  /**
-   * 使用 AST 节点精确修改条件分支
-   * @param {string} code - 原始代码
-   * @param {Object} ifNode - IfStatement AST 节点
-   * @param {string} branch - 'then' 或 'else'
-   * @returns {string} 修改后的代码
-   */
-  forceBranchByNode(code, ifNode, branch) {
-    if (!ifNode || ifNode.type !== "IfStatement") {
-      console.warn(`[ConditionalAnalyzer] 无效的 ifNode:`, ifNode);
-      return code;
-    }
-
-    const testStart = ifNode.test.start;
-    const testEnd = ifNode.test.end;
-    const forcedCondition = branch === "then" ? "true /* forced */" : "false /* forced */";
-    return code.substring(0, testStart) + forcedCondition + code.substring(testEnd);
-  }
-
-  /**
-   * 使用字符串匹配修改条件分支（向后兼容，不够精确）
-   * @param {string} code - 原始代码
-   * @param {string} condition - 条件表达式字符串
-   * @param {string} branch - 'then' 或 'else'
-   * @returns {string} 修改后的代码
-   */
-  forceBranchByString(code, condition, branch) {
-    const escapedCondition = condition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`if\\s*\\(${escapedCondition}\\)`, "g");
-    const replacement = branch === "then" ? "if (true /* forced */)" : "if (false /* forced */)";
-    return code.replace(pattern, replacement);
   }
 
   /**
@@ -1151,8 +1016,6 @@ class ConditionalAnalyzer {
       // hasThen: true 表示需要执行 then 分支
       // hasElse: true 表示需要执行 else 分支
       
-      console.log(`[DEBUG] 处理条件节点: "${condition.condition}", hasThen: ${condition.hasThen}, hasElse: ${condition.hasElse}, 有alternate: ${!!node.alternate}`);
-      
       // 1. 处理条件表达式
       if (node.test) {
         if (condition.hasThen && !condition.hasElse) {
@@ -1203,7 +1066,6 @@ class ConditionalAnalyzer {
 
       // 2. 如果有 else/else if，且需要执行 else 分支，转换为独立 if
       if (node.alternate && condition.hasElse) {
-        console.log(`[DEBUG] 准备转换 else 分支，条件: "${condition.condition}"`);
         // 找到 else 的位置（consequent 的结束位置）
         let elseStart = node.consequent.end;
         
@@ -1280,27 +1142,22 @@ class ConditionalAnalyzer {
     for (const mod of modifications) {
       if (mod.type === "forceCondition") {
         const value = mod.value || "true";
-        console.log(`[DEBUG] 强制条件: ${code.substring(mod.start, mod.end)} -> ${value}`);
         modifiedCode =
           modifiedCode.substring(0, mod.start) +
           `${value} /* forced */` +
           modifiedCode.substring(mod.end);
       } else if (mod.type === "convertElseIf") {
-        console.log(`[DEBUG] 转换 else if 为独立 if`);
         modifiedCode =
           modifiedCode.substring(0, mod.elseStart) +
           "if (true /* forced */)" +
           modifiedCode.substring(mod.conditionEnd);
       } else if (mod.type === "convertElse") {
-        console.log(`[DEBUG] 转换 else 为独立 if`);
         modifiedCode =
           modifiedCode.substring(0, mod.elseStart) +
           "if (true /* forced */)" +
           modifiedCode.substring(mod.elseContentStart);
       }
     }
-    
-    console.log("[DEBUG] 转换后的代码:\n", modifiedCode);
 
     return modifiedCode;
   }

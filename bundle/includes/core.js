@@ -171,6 +171,22 @@ function isRegistryAvailable() {
 }
 
 /**
+ * 设置合成背景色
+ * @param {CompItem} comp - 合成对象
+ * @param {boolean} hasSetupOrDraw - 是否有 setup 或 draw 函数
+ */
+function setCompBackgroundColor(comp, hasSetupOrDraw) {
+  if (hasSetupOrDraw) {
+    // 纯白色 RGB(255, 255, 255)
+    comp.bgColor = [1, 1, 1];
+  } else {
+    // p5.js 默认灰色 RGB(200, 200, 200)
+    // After Effects 中颜色值范围是 0-1
+    comp.bgColor = [200 / 255, 200 / 255, 200 / 255];
+  }
+}
+
+/**
  * 获取图形类型的槽位数（使用 registry）
  * @param {string} type - 图形类型
  * @returns {number} 槽位数
@@ -191,15 +207,11 @@ pub.runParsed = function (
   compWidth,
   compHeight,
   compFrameRate,
-  renderLayersArg,
   dependenciesArg,
   setupRenderLayersArg,
   drawRenderLayersArg,
   hasBackgroundWithoutOpacityArg,
   hasSetupOrDrawArg,
-  renderOrderArg,
-  setupRenderOrderArg,
-  drawRenderOrderArg,
 ) {
   try {
     // 1. 初始化变量
@@ -233,20 +245,7 @@ pub.runParsed = function (
       parsedDrawRenderLayers = null;
     }
 
-    // 调试日志
-    if (parsedSetupRenderLayers) {
-      $.writeln("[Core] parsedSetupRenderLayers 存在，长度: " + (isArray(parsedSetupRenderLayers) ? parsedSetupRenderLayers.length : "N/A"));
-    } else {
-      $.writeln("[Core] parsedSetupRenderLayers 为 null");
-    }
-    if (parsedDrawRenderLayers) {
-      $.writeln("[Core] parsedDrawRenderLayers 存在，长度: " + (isArray(parsedDrawRenderLayers) ? parsedDrawRenderLayers.length : "N/A"));
-    } else {
-      $.writeln("[Core] parsedDrawRenderLayers 为 null");
-    }
-
-    // 3. 处理前端传递的 renderLayers（保持向后兼容）
-    // 如果新的分别分析结果可用，优先使用；否则使用旧的renderLayersArg
+    // 3. 处理前端传递的 renderLayers（仅使用新的分别分析结果）
     if (parsedSetupRenderLayers || parsedDrawRenderLayers) {
       // 使用新的分别分析结果
       if (parsedSetupRenderLayers && isArray(parsedSetupRenderLayers) && parsedSetupRenderLayers.length > 0) {
@@ -255,17 +254,8 @@ pub.runParsed = function (
       if (parsedDrawRenderLayers && isArray(parsedDrawRenderLayers) && parsedDrawRenderLayers.length > 0) {
         drawShapeQueue = processRenderLayers(parsedDrawRenderLayers);
       }
-      // 合并到shapeQueue（用于向后兼容）
+      // 合并到shapeQueue，供后续统计使用
       shapeQueue = setupShapeQueue.concat(drawShapeQueue);
-    } else if (
-      renderLayersArg &&
-      isArray(renderLayersArg) &&
-      renderLayersArg.length > 0
-    ) {
-      // 向后兼容：使用旧的renderLayersArg
-      shapeQueue = processRenderLayers(renderLayersArg);
-      // 如果没有分别分析结果，将所有shape都放到draw中（默认行为）
-      drawShapeQueue = shapeQueue;
     }
 
     // 提取环境配置并创建合成
@@ -288,17 +278,10 @@ pub.runParsed = function (
     );
     // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
     // 否则使用 p5.js 默认灰色 RGB(200, 200, 200)
-    // After Effects 中颜色值范围是 0-1
     var hasSetupOrDraw = hasSetupOrDrawArg !== undefined && hasSetupOrDrawArg !== null 
       ? Boolean(hasSetupOrDrawArg) 
       : false;
-    if (hasSetupOrDraw) {
-      // 纯白色 RGB(255, 255, 255)
-      engineComp.bgColor = [1, 1, 1];
-    } else {
-      // p5.js 默认灰色 RGB(200, 200, 200)
-      engineComp.bgColor = [200 / 255, 200 / 255, 200 / 255];
-    }
+    setCompBackgroundColor(engineComp, hasSetupOrDraw);
 
     // 5. 检查代码块存在性
     var hasDraw = drawCode && drawCode.length > 0;
@@ -322,25 +305,7 @@ pub.runParsed = function (
       throw new Error("No code provided");
     }
 
-    // 9. 如果 renderLayersArg 是 "null"（分析失败或未分析），添加默认图形
-    //    如果 renderLayersArg 是 "[]"（分析完成但没有可追踪的渲染函数），不添加
-    //    如果 renderLayersArg 有具体内容，使用分析结果
-    if (shapeQueue.length === 0 && renderLayersArg === "null") {
-      // 使用 registry 获取默认图形的槽位数
-      var defaultType = "ellipse";
-      var defaultSlots = isRegistryAvailable() ? getShapeSlots(defaultType) : 7; // 仅在 registry 完全不可用时使用默认值
-      shapeQueue.push({
-        type: defaultType,
-        outputIndex: 0,
-        slots: defaultSlots,
-      });
-      // 如果没有分别分析结果，将默认图形放到draw中
-      if (drawShapeQueue.length === 0) {
-        drawShapeQueue = shapeQueue;
-      }
-    }
-
-    // 10. 解析依赖信息
+    // 9. 解析依赖信息
     var deps = null;
     try {
       deps =
@@ -352,21 +317,14 @@ pub.runParsed = function (
     }
     globalDeps = deps; // 存储依赖信息到全局变量
 
-    // 11. 解析 hasBackgroundWithoutOpacity 参数（前端 AST 分析结果）
+    // 10. 解析 hasBackgroundWithoutOpacity 参数（前端 AST 分析结果）
     var hasBackgroundWithoutOpacity = false;
     if (hasBackgroundWithoutOpacityArg !== undefined && hasBackgroundWithoutOpacityArg !== null) {
       hasBackgroundWithoutOpacity = Boolean(hasBackgroundWithoutOpacityArg);
     }
 
-    // 12. 根据是否有分别分析结果，决定创建方式
+    // 11. 根据是否有分别分析结果，决定创建方式
     var useSeparatedComps = setupShapeQueue.length > 0 || drawShapeQueue.length > 0;
-    
-    // 调试日志：输出setup和draw的shape队列信息
-    $.writeln("[Core] setupShapeQueue.length: " + setupShapeQueue.length);
-    $.writeln("[Core] drawShapeQueue.length: " + drawShapeQueue.length);
-    $.writeln("[Core] useSeparatedComps: " + useSeparatedComps);
-    $.writeln("[Core] hasSetup: " + hasSetup);
-    $.writeln("[Core] hasDraw: " + hasDraw);
     
     if (useSeparatedComps) {
       // 新架构：分别创建setup和draw预合成
@@ -376,7 +334,6 @@ pub.runParsed = function (
       
       // 创建setup预合成（如果有setup中的shape）
       if (setupShapeQueue.length > 0 && hasSetup) {
-        $.writeln("[Core] 创建setup预合成，shape数量: " + setupShapeQueue.length);
         var setupCompName = getUniqueCompName(uniqueMainCompName + "_Setup");
         setupComp = app.project.items.addComp(
           setupCompName,
@@ -387,13 +344,7 @@ pub.runParsed = function (
           env.frameRate,
         );
         // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
-        if (hasSetupOrDraw) {
-          // 纯白色 RGB(255, 255, 255)
-          setupComp.bgColor = [1, 1, 1];
-        } else {
-          // p5.js 默认灰色 RGB(200, 200, 200)
-          setupComp.bgColor = [200 / 255, 200 / 255, 200 / 255];
-        }
+        setCompBackgroundColor(setupComp, hasSetupOrDraw);
         
         // 临时设置engineComp为setupComp，创建setup中的图层
         var originalEngineComp = engineComp;
@@ -407,7 +358,6 @@ pub.runParsed = function (
       
       // 创建draw预合成（如果有draw中的shape）
       if (drawShapeQueue.length > 0 && hasDraw) {
-        $.writeln("[Core] 创建draw预合成，shape数量: " + drawShapeQueue.length);
         var drawCompName = getUniqueCompName(uniqueMainCompName + "_Draw");
         drawComp = app.project.items.addComp(
           drawCompName,
@@ -418,13 +368,7 @@ pub.runParsed = function (
           env.frameRate,
         );
         // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
-        if (hasSetupOrDraw) {
-          // 纯白色 RGB(255, 255, 255)
-          drawComp.bgColor = [1, 1, 1];
-        } else {
-          // p5.js 默认灰色 RGB(200, 200, 200)
-          drawComp.bgColor = [200 / 255, 200 / 255, 200 / 255];
-        }
+        setCompBackgroundColor(drawComp, hasSetupOrDraw);
         
         // 临时设置engineComp为drawComp，创建draw中的图层
         var originalEngineComp2 = engineComp;
@@ -578,9 +522,8 @@ pub.composition = function (
     defaults.duration,
     defaults.frameRate,
   );
-  // 设置合成背景色为 p5.js 默认灰色 RGB(200, 200, 200)
-  // After Effects 中颜色值范围是 0-1
-  comp.bgColor = [200 / 255, 200 / 255, 200 / 255];
+  // 设置合成背景色为 p5.js 默认灰色（pub.composition 默认没有 setup/draw）
+  setCompBackgroundColor(comp, false);
   comp.openInViewer();
   return comp;
 };
@@ -686,25 +629,42 @@ function processRenderLayers(renderLayersArg) {
     var currentIndex = 0;
     var typeCounters = {};
 
-    // 格式: [{ type: "ellipse", count: 50 }, ...]
+    // 支持精确调用序列格式：
+    // ["ellipse", "rect", "ellipse", ...] 或 [{ type: "ellipse" }, { type: "rect" }, ...]
     for (var i = 0; i < renderLayersArg.length; i++) {
       var item = renderLayersArg[i];
-      var slots = getShapeSlots(item.type);
+      var type = null;
 
-      if (!typeCounters[item.type]) {
-        typeCounters[item.type] = 0;
+      // 对象格式：{ type: "ellipse" }
+      if (item && typeof item === "object") {
+        if (item.type) {
+          type = item.type;
+        }
+      } else if (typeof item === "string") {
+        // 字符串格式："ellipse"
+        type = item;
       }
 
-      for (var j = 0; j < item.count; j++) {
-        typeCounters[item.type]++;
-        queue.push({
-          type: item.type,
-          outputIndex: currentIndex,
-          slots: slots,
-          shapeIndex: typeCounters[item.type],
-        });
-        currentIndex += slots;
+      // 无法识别的条目直接跳过
+      if (!type) {
+        continue;
       }
+
+      var slots = getShapeSlots(type);
+
+      if (!typeCounters[type]) {
+        typeCounters[type] = 0;
+      }
+
+      // 每个条目对应一次精确调用
+      typeCounters[type]++;
+      queue.push({
+        type: type,
+        outputIndex: currentIndex,
+        slots: slots,
+        shapeIndex: typeCounters[type],
+      });
+      currentIndex += slots;
     }
   }
   return queue;
@@ -832,26 +792,8 @@ function buildExpression(
     mathDeps.noiseSeed = true;
   }
 
-  // 环境依赖：如果前端未提供，则自动检测环境变量和常量使用
+  // 环境依赖：由前端的 parseConstantsAndVariables 统一处理
   var envDeps = deps && deps.environment ? deps.environment : {};
-
-  // 自动检测环境变量和常量使用（如果前端未提供）
-  // 注意：现在统一由前端的 parseConstantsAndVariables 处理，这里只作为备用
-  if (!deps || !deps.environment) {
-    var allCode = [processedDraw, processedSetup, processedGlobal].join(" ");
-    if (isRegistryAvailable() && functionRegistry.environment) {
-      var envItems = functionRegistry.environment;
-      for (var envName in envItems) {
-        if (envItems.hasOwnProperty(envName)) {
-          var item = envItems[envName];
-          // 检测所有类型（variable 和 constant）
-          if (item.type === "variable" || item.type === "constant") {
-            envDeps[envName] = detectUsage(allCode, envName);
-          }
-        }
-      }
-    }
-  }
 
   // 检查是否有任何形状需要渲染（动态检查）
   var hasShapes = false;

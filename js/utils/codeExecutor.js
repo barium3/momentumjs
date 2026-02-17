@@ -246,7 +246,7 @@ window.codeExecutor = (function () {
           "\n" +
           (drawFullCode || "");
 
-        // 使用 P5Analyzer 进行完整分析（包含 renderLayers 和 dependencies）
+        // 使用 P5Analyzer 进行完整分析（包含 dependencies 等信息）
         let fullResult = null;
         try {
           fullResult = await fullAnalyzeAsync(analysisCode);
@@ -273,14 +273,6 @@ window.codeExecutor = (function () {
         const setupArg = JSON.stringify(parsed.setupCode || "");
         const globalArg = JSON.stringify(parsed.globalCode || "");
         const nameArg = JSON.stringify(compName);
-
-        // 将 P5Analyzer 分析结果转换为 JSON 字符串（保持向后兼容）
-        const renderLayersArg =
-          fullResult &&
-          fullResult.renderLayers &&
-          fullResult.renderLayers.length > 0
-            ? JSON.stringify(fullResult.renderLayers)
-            : "null";
 
         // 分别传递setup和draw的renderLayers
         const setupRenderLayersArg =
@@ -338,8 +330,6 @@ window.codeExecutor = (function () {
           heightArg +
           ", " +
           frameRateArg +
-          ", " +
-          renderLayersArg +
           ", " +
           dependenciesArg +
           ", " +

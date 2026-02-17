@@ -193,13 +193,6 @@ function recordShapeExecution(context, baseType, funcName) {
       throw new Error("循环次数超过上限");
     }
   }
-  if (context.renderCounts) {
-    var countKey = funcName || baseType;
-    if (typeof context.renderCounts[countKey] !== "number") {
-      context.renderCounts[countKey] = 0;
-    }
-    context.renderCounts[countKey]++;
-  }
   if (context.renderOrder) {
     context.renderOrder.push(baseType);
   }
@@ -298,7 +291,6 @@ function exposeFunctions(context, mode) {
   var getShapeTypeMap = context.getShapeTypeMap;
   
   // 执行模式特有的参数
-  var renderCounts = context.renderCounts;
   var renderOrder = context.renderOrder;
   var loopExecutions = context.loopExecutions;
   var maxLoopCount = context.maxLoopCount;
@@ -327,7 +319,6 @@ function exposeFunctions(context, mode) {
       // 处理 shape 构建器函数（需要状态管理）
       if (builderInfo) {
         var builderContext = mode === "execution" ? {
-          renderCounts: renderCounts,
           renderOrder: renderOrder,
           loopExecutions: loopExecutions,
           maxLoopCount: maxLoopCount,
@@ -356,7 +347,6 @@ function exposeFunctions(context, mode) {
             funcName: funcName,
             baseType: shapeTypeMap[funcName] || funcName,
             context: {
-              renderCounts: renderCounts,
               renderOrder: renderOrder,
               loopExecutions: loopExecutions,
               maxLoopCount: maxLoopCount,
@@ -588,13 +578,8 @@ class P5Runtime {
 
       try {
         var p = self.p5Instance;
-        var renderCounts = {};
         var renderOrder = [];
         var loopExecutions = { value: 0 };
-
-        self.renderFunctions.forEach(function (func) {
-          renderCounts[func] = 0;
-        });
 
         exposeVariables(self.allVariables, p);
 
@@ -602,7 +587,6 @@ class P5Runtime {
           p: p,
           allFunctions: self.allFunctions,
           renderFunctions: self.renderFunctions,
-          renderCounts: renderCounts,
           renderOrder: renderOrder,
           getShapeTypeMap: getShapeTypeMap,
           cache: self,
@@ -646,7 +630,6 @@ class P5Runtime {
         cleanupGlobals(self.allFunctions, self.allVariables);
 
         const result = {
-          renderCounts: renderCounts,
           renderOrder: renderOrder,
           loopExecutions: loopExecutions.value,
         };
@@ -728,19 +711,12 @@ class P5Runtime {
         var p = self.p5Instance;
         
         // setup 的统计
-        var setupRenderCounts = {};
         var setupRenderOrder = [];
         var setupLoopExecutions = { value: 0 };
         
         // draw 的统计
-        var drawRenderCounts = {};
         var drawRenderOrder = [];
         var drawLoopExecutions = { value: 0 };
-
-        self.renderFunctions.forEach(function (func) {
-          setupRenderCounts[func] = 0;
-          drawRenderCounts[func] = 0;
-        });
 
         exposeVariables(self.allVariables, p);
 
@@ -749,7 +725,6 @@ class P5Runtime {
           p: p,
           allFunctions: self.allFunctions,
           renderFunctions: self.renderFunctions,
-          renderCounts: setupRenderCounts,
           renderOrder: setupRenderOrder,
           getShapeTypeMap: getShapeTypeMap,
           cache: self,
@@ -783,7 +758,6 @@ class P5Runtime {
           p: p,
           allFunctions: self.allFunctions,
           renderFunctions: self.renderFunctions,
-          renderCounts: drawRenderCounts,
           renderOrder: drawRenderOrder,
           getShapeTypeMap: getShapeTypeMap,
           cache: self,
@@ -804,13 +778,11 @@ class P5Runtime {
         cleanupGlobals(self.allFunctions, self.allVariables);
 
         const setupResult = {
-          renderCounts: setupRenderCounts,
           renderOrder: setupRenderOrder,
           loopExecutions: setupLoopExecutions.value,
         };
         
         const drawResult = {
-          renderCounts: drawRenderCounts,
           renderOrder: drawRenderOrder,
           loopExecutions: drawLoopExecutions.value,
         };
@@ -948,22 +920,6 @@ class P5Runtime {
     });
   }
 
-  /**
-   * 解析代码中的常量和变量依赖
-   * @param {string} code - 用户代码
-   * @param {Object} dependencies - 依赖对象（会被修改）
-   */
-  parseConstantsAndVariables(code, dependencies) {
-    parseConstantsAndVariables(code, dependencies);
-  }
-
-  /**
-   * 解析代码中的数学函数依赖（保持向后兼容）
-   * @deprecated 使用 parseConstantsAndVariables 代替
-   */
-  parseMathDependencies(code, dependencies) {
-    parseConstantsAndVariables(code, dependencies);
-  }
 }
 
 // ========================================
