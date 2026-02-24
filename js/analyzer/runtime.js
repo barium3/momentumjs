@@ -542,7 +542,7 @@ class P5Runtime {
   async executeWithBranches(code, globalCode, entryPoint) {
     const fullCode = globalCode ? (globalCode + "\n" + code) : code;
     const conditions = this.conditionalAnalyzer.findBranchesWithRender(fullCode);
-    
+
     if (conditions.length === 0) {
       return await this.executeCodeBlock(fullCode, entryPoint);
     }

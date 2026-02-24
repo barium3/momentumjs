@@ -44,13 +44,20 @@ class ConditionalAnalyzer {
     const renderCalls = this.collectRenderFunctions(ast);
 
     // 阶段3：对每个渲染函数，找出影响它的条件
-    const conditionMap = new Map(); // key: condition string, value: condition info
+    // 这里用「条件表达式在源码中的起止位置」作为 key，避免仅依赖字符串表达式导致匹配失败
+    // key 形式："start:end"
+    const conditionMap = new Map(); // key: "start:end", value: condition info
 
     for (const renderCall of renderCalls) {
       const affectingConditions = this.findAffectingBranches(renderCall, ast);
       
       for (const cond of affectingConditions) {
-        const key = cond.condition;
+        // 对于正常的 IfStatement，一定会有 cond.node.test
+        // 如果没有（极端情况），退回用 condition 字符串以保持兼容
+        let key = cond.condition;
+        if (cond.node && cond.node.test && typeof cond.node.test.start === "number" && typeof cond.node.test.end === "number") {
+          key = `${cond.node.test.start}:${cond.node.test.end}`;
+        }
         if (!conditionMap.has(key)) {
           conditionMap.set(key, {
             condition: cond.condition,
@@ -953,11 +960,15 @@ class ConditionalAnalyzer {
 
     // 收集所有需要处理的 IfStatement 节点
     const ifNodesToProcess = [];
-    const conditionMap = new Map(); // key: condition string, value: condition info
+    // 这里同样用 "start:end" 作为 key，和 findBranchesWithRender 中保持一致
+    const conditionMap = new Map(); // key: "start:end", value: condition info
 
     // 建立条件字符串到条件信息的映射
     for (const cond of conditions) {
-      const key = cond.condition;
+      let key = cond.condition;
+      if (cond.node && cond.node.test && typeof cond.node.test.start === "number" && typeof cond.node.test.end === "number") {
+        key = `${cond.node.test.start}:${cond.node.test.end}`;
+      }
       if (!conditionMap.has(key)) {
         conditionMap.set(key, cond);
       }
@@ -969,11 +980,17 @@ class ConditionalAnalyzer {
       if (!node) return;
       
       if (node.type === "IfStatement") {
-        const conditionStr = self.extractConditionExpression(node.test);
-        if (conditionMap.has(conditionStr)) {
+        // 优先使用 test 的源码位置信息进行匹配，避免仅依赖字符串表达式
+        let key = null;
+        if (node.test && typeof node.test.start === "number" && typeof node.test.end === "number") {
+          key = `${node.test.start}:${node.test.end}`;
+        } else {
+          key = self.extractConditionExpression(node.test);
+        }
+        if (conditionMap.has(key)) {
           ifNodesToProcess.push({
             node: node,
-            condition: conditionMap.get(conditionStr),
+            condition: conditionMap.get(key),
           });
         }
       }
@@ -1008,7 +1025,7 @@ class ConditionalAnalyzer {
     });
 
     let modifiedCode = code;
-    const modifications = []; // 存储所有修改操作
+    let modifications = []; // 存储所有修改操作
 
     // 收集所有需要进行的修改
     for (const { node, condition } of ifNodesToProcess) {
@@ -1064,8 +1081,12 @@ class ConditionalAnalyzer {
         }
       }
 
-      // 2. 如果有 else/else if，且需要执行 else 分支，转换为独立 if
-      if (node.alternate && condition.hasElse) {
+      // 2. 如果有 else/else if，需要执行 else 分支，或者存在 else if 结构本身，就转换为独立 if
+      // 说明：
+      // - 原逻辑只在 condition.hasElse 为 true 时才处理 else/else if
+      // - 这会导致某些只有 then 分支包含渲染、但 else if 分支也需要被统一强制执行的情况遗漏
+      // - 为了更好地支持 `else if`，当 alternate 是 IfStatement（即 else if）时也一并转换为独立 if
+      if (node.alternate && (condition.hasElse || node.alternate.type === "IfStatement")) {
         // 找到 else 的位置（consequent 的结束位置）
         let elseStart = node.consequent.end;
         
@@ -1089,34 +1110,17 @@ class ConditionalAnalyzer {
           
           if (isElseIf) {
             // else if -> 转换为独立 if
-            // 找到 else if 的条件表达式
-            let ifStart = elseContentStart + 2;
-            while (ifStart < code.length && code[ifStart] === " ") {
-              ifStart++;
-            }
-            
-            // 找到条件表达式的结束位置（右括号）
-            let parenCount = 0;
-            let conditionStart = ifStart;
-            let conditionEnd = ifStart;
-            
-            if (conditionStart < code.length && code[conditionStart] === "(") {
-              parenCount = 1;
-              conditionStart++;
-              conditionEnd = conditionStart;
-              
-              while (conditionEnd < code.length && parenCount > 0) {
-                if (code[conditionEnd] === "(") parenCount++;
-                if (code[conditionEnd] === ")") parenCount--;
-                if (parenCount > 0) conditionEnd++;
-              }
-            }
+            // 这里不要再手动解析括号，直接依赖 AST 位置信息，避免换行/空格格式导致语法截断
+            // parent `node` 的 alternate 一定是 IfStatement，本身的 `consequent.start` 是条件后面第一个语句的位置
+            // 因此从 elseStart 一直到 alternate.consequent.start 之间的源码就是 "else if (condition)" 这一段
+            let elseIfEnd = node.alternate && node.alternate.consequent
+              ? node.alternate.consequent.start
+              : elseContentStart + 2; // 兜底：至少吃掉 "else if"
 
-            // 记录修改：将 "else if (condition)" 替换为 "if (true /* forced */)"
             modifications.push({
               type: "convertElseIf",
               elseStart: elseStart,
-              conditionEnd: conditionEnd + 1, // 包括右括号
+              elseIfEnd: elseIfEnd,
             });
           } else {
             // else -> 转换为独立 if (true)
@@ -1128,6 +1132,39 @@ class ConditionalAnalyzer {
             });
           }
         }
+      }
+    }
+
+    // 在应用修改前，先移除会与 else/else if 头部改写产生冲突的条件强制修改
+    // 场景说明：
+    // - 对于 `else if (cond)`，我们会：
+    //   1) 对 cond 做一次 `forceCondition`（把 cond 改成 true/false）
+    //   2) 再用 `convertElseIf` 把整段 `else if (cond)` 头部替换成 `if (true /* forced */)`
+    // - 如果两个修改都生效，会导致头部被部分覆盖，出现诸如 `if (true /* forced */)rced */)` 之类的语法残片
+    // 解决方案：
+    // - 对所有 `convertElseIf` / `convertElse` 的覆盖区间，删除落在这些区间内的 `forceCondition`
+    if (modifications.length > 0) {
+      const headerRanges = [];
+      for (const mod of modifications) {
+        if (mod.type === "convertElseIf") {
+          headerRanges.push({
+            start: mod.elseStart,
+            end: mod.elseIfEnd,
+          });
+        } else if (mod.type === "convertElse") {
+          headerRanges.push({
+            start: mod.elseStart,
+            end: mod.elseContentStart,
+          });
+        }
+      }
+
+      if (headerRanges.length > 0) {
+        modifications = modifications.filter((mod) => {
+          if (mod.type !== "forceCondition") return true;
+          const pos = mod.start;
+          return !headerRanges.some((range) => pos >= range.start && pos < range.end);
+        });
       }
     }
 
@@ -1150,7 +1187,7 @@ class ConditionalAnalyzer {
         modifiedCode =
           modifiedCode.substring(0, mod.elseStart) +
           "if (true /* forced */)" +
-          modifiedCode.substring(mod.conditionEnd);
+          modifiedCode.substring(mod.elseIfEnd);
       } else if (mod.type === "convertElse") {
         modifiedCode =
           modifiedCode.substring(0, mod.elseStart) +
