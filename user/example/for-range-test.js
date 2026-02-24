@@ -1,25 +1,1 @@
-// @filename: for-range-test
-// For...of 循环 - 遍历数组
-
-function setup() {
-  size(800, 400);
-  noStroke();
-}
-
-function draw() {
-  // 遍历数组并绘制
-  const colors = [
-    { r: 255, g: 100, b: 100 },
-    { r: 100, g: 255, b: 100 },
-    { r: 100, g: 100, b: 255 },
-    { r: 255, g: 255, b: 100 },
-    { r: 255, g: 100, b: 255 }
-  ];
-
-  let index = 0;
-  for (const color of colors) {
-    fill(color.r, color.g, color.b);
-    ellipse(100 + index * 120, 200, 60, 60);
-    index++;
-  }
-}
+// @filename: for-range-test// For...of 循环 - 遍历数组function setup() {  createCanvas(800, 400);  noStroke();}function draw() {  // 遍历数组并绘制  const colors = [    { r: 255, g: 100, b: 100 },    { r: 100, g: 255, b: 100 },    { r: 100, g: 100, b: 255 },    { r: 255, g: 255, b: 100 },    { r: 255, g: 100, b: 255 }  ];  let index = 0;  for (const color of colors) {    fill(color.r, color.g, color.b);    ellipse(100 + index * 120, 200, 60, 60);    index++;  }}

@@ -55,6 +55,12 @@ function getColorStateLib() {
     "var _strokeWeight = " + defaults.strokeWeight + ";",
     "var _noFill = false;",
     "var _noStroke = false;",
+    "var _lastFillColor = null;",
+    "var _lastStrokeColor = null;",
+    "var _lastNoFill = null;",
+    "var _lastNoStroke = null;",
+    "var _lastStrokeWeight = null;",
+    "var _lastEncodedColorState = null;",
   ].join("\n");
 }
 
@@ -437,22 +443,6 @@ function getLerpColorLib() {
 }
 
 /**
- * 获取颜色重置函数
- */
-function getResetColorsLib() {
-  var defaults = COLOR_DEFAULTS;
-  return [
-    "function resetColors() {",
-    "  _fillColor = [" + defaults.fillColor.join(", ") + "];",
-    "  _strokeColor = [" + defaults.strokeColor.join(", ") + "];",
-    "  _strokeWeight = " + defaults.strokeWeight + ";",
-    "  _noFill = false;",
-    "  _noStroke = false;",
-    "}",
-  ].join("\n");
-}
-
-/**
  * 获取颜色编码函数（形状函数依赖）
  * 编码结构: [fill1, fill2, stroke1, stroke2, opacity]
  * - fill1: [r, g]
@@ -464,6 +454,14 @@ function getResetColorsLib() {
 function getEncodeColorStateLib() {
   return [
     "function _encodeColorState() {",
+    "  if (_fillColor === _lastFillColor &&",
+    "      _strokeColor === _lastStrokeColor &&",
+    "      _noFill === _lastNoFill &&",
+    "      _noStroke === _lastNoStroke &&",
+    "      _strokeWeight === _lastStrokeWeight &&",
+    "      _lastEncodedColorState !== null) {",
+    "    return _lastEncodedColorState;",
+    "  }",
     "  var fill1 = _noFill ? [-1, -1] : [_fillColor[0], _fillColor[1]];",
     "  var fill2 = _noFill ? [-1, -1] : [_fillColor[2], _fillColor[3] !== undefined ? _fillColor[3] : 1];",
     "  var stroke1 = _noStroke ? [-1, -1] : [_strokeColor[0], _strokeColor[1]];",
@@ -472,7 +470,13 @@ function getEncodeColorStateLib() {
     "    _noFill ? 0 : (_fillColor[3] !== undefined ? _fillColor[3] : 1) * 100,",
     "    _noStroke ? 0 : (_strokeColor[3] !== undefined ? _strokeColor[3] : 1) * 100",
     "  ];",
-    "  return [fill1, fill2, stroke1, stroke2, opacity, [_strokeWeight, 0]];",
+    "  _lastFillColor = _fillColor;",
+    "  _lastStrokeColor = _strokeColor;",
+    "  _lastNoFill = _noFill;",
+    "  _lastNoStroke = _noStroke;",
+    "  _lastStrokeWeight = _strokeWeight;",
+    "  _lastEncodedColorState = [fill1, fill2, stroke1, stroke2, opacity, [_strokeWeight, 0]];",
+    "  return _lastEncodedColorState;",
     "}",
   ].join("\n");
 }
@@ -517,7 +521,6 @@ function getColorLib(deps) {
       lib.push(getColorConversionLib());
     }
     lib.push(getEncodeColorStateLib());
-    lib.push(getResetColorsLib());
     return lib.join("\n\n");
   }
 
@@ -632,10 +635,9 @@ function getColorLib(deps) {
     lib.push(getLerpColorLib());
   }
 
-  // 形状函数需要 _encodeColorState 和 resetColors
+  // 形状函数需要 _encodeColorState
   if (deps.shape) {
     lib.push(getEncodeColorStateLib());
-    lib.push(getResetColorsLib());
   }
 
   return lib.join("\n\n");
@@ -651,7 +653,7 @@ function getColorLib(deps) {
  * p5 逻辑：background 完全独立于 fill/stroke，仅使用传入的参数
  * 支持: background(gray), background(gray,a), background(v1,v2,v3), background(v1,v2,v3,a)
  * 以及 background(c) 其中 c 为 color() 返回的数组
- * 输出格式: [fill1, fill2, marker] = [[r,g], [b,a], [index, 1005]]
+ * 输出格式（语义化 JSON）: { id, type:"background", color:[r,g,b,a] }
  */
 function getBackgroundLib() {
   return [
@@ -659,11 +661,11 @@ function getBackgroundLib() {
     "  if (!_render) return;",
     "  _backgroundCount++;",
     "  var m = _backgroundCount;",
+    "  var id = _shapeTypeCode.background * 10000 + m;",
     "  var c = color.apply(null, arguments);",
-    "  var mk = [m, 1005];",
     "  var col = [c[0], c[1], c[2], c[3] !== undefined ? c[3] : 1];",
     "  _backgrounds.push({",
-    '    id:m, marker:mk, markerType:1005, type:"background",',
+    '    id:id, type:"background",',
     "    color: col",
     "  });",
     "}",
@@ -673,9 +675,9 @@ function getBackgroundLib() {
 /**
  * 创建 background 图层
  * 纯色图层，使用形状矩形 + 填色效果（效果-生成-填色）
- * 数据格式: [fill1, fill2, marker] 偏移: fill1=-2, fill2=-1
+ * 数据格式（语义化 JSON）: { id, type:"background", color:[r,g,b,a] }
  */
-function createBackgroundFromContext(index, shapeIndex, mainCompName) {
+function createBackgroundFromContext(index, renderIndex, mainCompName) {
   var layer = engineComp.layers.addShape();
   layer.name = "Background_" + index;
 
@@ -696,17 +698,15 @@ function createBackgroundFromContext(index, shapeIndex, mainCompName) {
     engineLayerExpr = 'thisComp.layer("__engine__").text.sourceText';
   }
 
-  var markerFind = [
+  var indexFind = [
     'var raw = ' + engineLayerExpr + ';',
     "var json = raw && raw.toString ? raw.toString() : raw;",
     "var data = JSON.parse(json);",
     "var backgrounds = data.backgrounds || [];",
-    "var targetType = 1005;",
-    "var targetIndex = " + shapeIndex + ";",
+    "var targetId = " + renderIndex + ";",
     "var bg = null;",
     "for (var i = backgrounds.length - 1; i >= 0; i--) {",
-    "  var mk = backgrounds[i].marker;",
-    "  if (mk && mk.length === 2 && mk[1] === targetType && mk[0] === targetIndex) {",
+    "  if (backgrounds[i] && backgrounds[i].id === targetId) {",
     "    bg = backgrounds[i];",
     "    break;",
     "  }",
@@ -716,9 +716,10 @@ function createBackgroundFromContext(index, shapeIndex, mainCompName) {
   // 矩形覆盖整个合成：锚点左上角，位置 (0,0)，尺寸为合成宽高
   transform.property("Anchor Point").setValue([0, 0]);
   transform.property("Position").setValue([0, 0]);
-  rect.property("Size").expression = ["[thisComp.width, thisComp.height]"].join(
-    "\n",
-  );
+  rect.property("Size").expression = [
+    indexFind,
+    "!bg ? [0, 0] : [thisComp.width, thisComp.height]",
+  ].join("\n");
   transform.property("Rotation").setValue(0);
 
   // 填色效果：颜色和不透明度从 path 读取
@@ -727,14 +728,14 @@ function createBackgroundFromContext(index, shapeIndex, mainCompName) {
     .addProperty("ADBE Vector Graphic - Fill");
 
   fill.property("Color").expression = [
-    markerFind,
+    indexFind,
     "if (!bg || !bg.color) [1, 1, 1, 1];",
     "var c = bg.color;",
     "[c[0], c[1], c[2], 1]",
   ].join("\n");
 
   fill.property("Opacity").expression = [
-    markerFind,
+    indexFind,
     "if (!bg || !bg.color) 100;",
     "var c = bg.color;",
     "c[3] !== undefined ? c[3] * 100 : 100",

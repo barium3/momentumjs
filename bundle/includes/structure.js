@@ -95,7 +95,8 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
     }
     expr.push("    _render = (f === targetFrame);");
     if (hasShapes) {
-      expr.push("    resetMatrix(); resetColors(); draw();");
+      // 与 p5 保持一致：保留用户在 setup / draw 中设置的颜色状态
+      expr.push("    resetMatrix(); draw();");
     } else {
       expr.push("    draw();");
     }
@@ -106,7 +107,8 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
     expr.push("  // 当前帧已计算过，只更新渲染标志");
     expr.push("  _render = true;");
     if (hasShapes) {
-      expr.push("  resetMatrix(); resetColors();");
+      // 这里只需要恢复矩阵，颜色状态保持用户上一次设置
+      expr.push("  resetMatrix();");
     }
     expr.push("}");
 
@@ -127,7 +129,8 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
     }
     expr.push("    _render = (f === targetFrame);");
     if (hasShapes) {
-      expr.push("    resetMatrix(); resetColors(); draw();");
+      // 与 p5 保持一致：不在每帧前重置颜色
+      expr.push("    resetMatrix(); draw();");
     } else {
       expr.push("    draw();");
     }
@@ -138,7 +141,8 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
     expr.push("  // 当前帧已计算过，只更新渲染标志");
     expr.push("  _render = true;");
     if (hasShapes) {
-      expr.push("  resetMatrix(); resetColors();");
+      // 只重置矩阵，不动颜色
+      expr.push("  resetMatrix();");
     }
     expr.push("}");
 
@@ -150,7 +154,8 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
     expr.push("if (_lastComputedFrame === -1) {");
     expr.push("  setup();");
     if (hasShapes) {
-      expr.push("  resetMatrix(); resetColors();");
+      // 不在 setup 之后重置颜色，这样 setup 中设置的 fill/stroke/noStroke 会保留
+      expr.push("  resetMatrix();");
     }
     expr.push("}");
     expr.push("// ========================================");
@@ -200,7 +205,19 @@ function buildFrameLoop(envDeps) {
  * @returns {string} 上下文创建代码（返回 JSON 字符串）
  */
 function buildPathCreation(hasShapes) {
-  // 这里直接返回 JSON 字符串，_ctx 结构在 core.js 中定义
+  // 这里返回 JSON 字符串，_ctx 结构在 core.js 中定义
   // 即使没有形状，_ctx 仍然包含环境信息（fps、frame、time、env 等）
-  return "JSON.stringify(_ctx)";
+  //
+  // 性能优化：为 shape 图层表达式提供 id -> index 的快速索引，避免每次都线性扫描 shapes 数组
+  // 注意：只存索引（不存对象引用），避免 JSON 体积指数膨胀
+  return [
+    "var _shapeIndex = {};",
+    "var _arr = _ctx.shapes || [];",
+    "for (var i = 0; i < _arr.length; i++) {",
+    "  var s = _arr[i];",
+    "  if (s && s.id !== undefined) _shapeIndex[s.id] = i;",
+    "}",
+    "_ctx.shapeIndex = _shapeIndex;",
+    "JSON.stringify(_ctx)",
+  ].join("\n");
 }

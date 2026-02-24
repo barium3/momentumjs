@@ -5,33 +5,6 @@
 // 从 registry 获取形状函数信息
 // #include "registry.js"
 
-// 获取图形类型的槽位数（使用 registry）
-function getShapeSlots(type) {
-  // 优先使用 registry
-  if (
-    typeof functionRegistry !== "undefined" &&
-    functionRegistry.getShapeSlots
-  ) {
-    return functionRegistry.getShapeSlots(type);
-  }
-
-  // 备用：硬编码的插槽定义
-  var slots = {
-    ellipse: 9,
-    circle: 9,
-    arc: 10,
-    quad: 10,
-    triangle: 9,
-    rect: 9,
-    square: 9,
-    line: 8,
-    point: 7,
-    background: 3,
-    polygon: 9,
-  };
-  return slots[type] || 7;
-}
-
 /**
  * 创建形状图层
  * 根据 shapeQueue 中的数据创建对应的 AE 图层
@@ -56,21 +29,21 @@ function createShapeLayers(mainCompName) {
   
   for (var i = 0; i < shapeQueue.length; i++) {
     var shape = shapeQueue[i];
-    var shapeIndex = shape.shapeIndex || 1;
+    // 渲染图层使用稳定的 id（类型前缀 + 调用次数），与运行时生成规则对齐
+    var id = shape.id;
     var creator = shapeCreators[shape.type];
     if (creator) {
-      creator(i, shapeIndex, mainCompName);
+      creator(i, id, mainCompName);
     }
   }
 }
 
 /**
- * 生成查找 marker 的表达式代码片段
- * @param {number} markerType - marker 类型代码
- * @param {number} shapeIndex - 形状索引
+ * 生成查找 shape.id 的表达式代码片段
+ * @param {number} shapeId - 形状唯一 id（类型前缀 + 调用次数）
  * @param {string} mainCompName - 主合成名称（可选，如果提供则从主合成读取）
  */
-function _getMarkerFindExpr(markerType, shapeIndex, mainCompName) {
+function _getIdFindExpr(shapeId, mainCompName) {
   var engineLayerExpr;
   if (mainCompName) {
     // 从主合成读取，通过合成名称直接调用
@@ -84,19 +57,13 @@ function _getMarkerFindExpr(markerType, shapeIndex, mainCompName) {
   
   return [
     'var raw = ' + engineLayerExpr + ';',
-    "var json = raw && raw.toString ? raw.toString() : raw;",
+    // TextDocument -> string：优先使用 .text（更直接），回退到 toString()
+    "var json = (raw && raw.text !== undefined) ? raw.text : (raw && raw.toString ? raw.toString() : raw);",
     "var data = JSON.parse(json);",
     "var shapes = data.shapes || [];",
-    "var targetType = " + markerType + ";",
-    "var targetIndex = " + shapeIndex + ";",
-    "var shape = null;",
-    "for (var i = shapes.length - 1; i >= 0; i--) {",
-    "  var mk = shapes[i].marker;",
-    "  if (mk && mk.length === 2 && mk[1] === targetType && mk[0] === targetIndex) {",
-    "    shape = shapes[i];",
-    "    break;",
-    "  }",
-    "}",
+    "var idx = data.shapeIndex;",
+    "var targetId = " + shapeId + ";",
+    "var shape = (idx && idx[targetId] !== undefined) ? shapes[idx[targetId]] : null;",
   ].join("\n");
 }
 
@@ -116,143 +83,140 @@ function _createBaseShapeLayer(index) {
 
 /**
  * 生成 Fill 颜色表达式
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @returns {string} Fill 颜色表达式
  */
-function _getFillColorExpr(markerFind) {
+function _getFillColorExpr(indexFind) {
   return [
-    markerFind,
-    "if (!shape || !shape.fillColor) [0,0,0,0];",
-    "var fc = shape.fillColor;",
-    "[fc[0], fc[1], fc[2], 1]",
+    indexFind,
+    "var fc = shape && shape.fillColor;",
+    "!fc ? [0,0,0,0] : [fc[0], fc[1], fc[2], 1]",
   ].join("\n");
 }
 
 /**
  * 生成 Fill 透明度表达式
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @returns {string} Fill 透明度表达式
  */
-function _getFillOpacityExpr(markerFind) {
+function _getFillOpacityExpr(indexFind) {
   return [
-    markerFind,
-    "if (!shape) 100;",
-    "shape.fillOpacity !== undefined ? shape.fillOpacity : 100",
+    indexFind,
+    "var o = shape && shape.fillOpacity;",
+    "o === undefined ? 100 : o",
   ].join("\n");
 }
 
 /**
  * 生成 Stroke 颜色表达式
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @returns {string} Stroke 颜色表达式
  */
-function _getStrokeColorExpr(markerFind) {
+function _getStrokeColorExpr(indexFind) {
   return [
-    markerFind,
-    "if (!shape || !shape.strokeColor) [0,0,0,0];",
-    "var sc = shape.strokeColor;",
-    "[sc[0], sc[1], sc[2], 1]",
+    indexFind,
+    "var sc = shape && shape.strokeColor;",
+    "!sc ? [0,0,0,0] : [sc[0], sc[1], sc[2], 1]",
   ].join("\n");
 }
 
 /**
  * 生成 Stroke 透明度表达式
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @returns {string} Stroke 透明度表达式
  */
-function _getStrokeOpacityExpr(markerFind) {
+function _getStrokeOpacityExpr(indexFind) {
   return [
-    markerFind,
-    "if (!shape) 100;",
-    "shape.strokeOpacity !== undefined ? shape.strokeOpacity : 100",
+    indexFind,
+    "var o = shape && shape.strokeOpacity;",
+    "o === undefined ? 100 : o",
   ].join("\n");
 }
 
 /**
  * 生成 Stroke 宽度表达式
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @param {number} defaultValue - 默认宽度值
  * @returns {string} Stroke 宽度表达式
  */
-function _getStrokeWidthExpr(markerFind, defaultValue) {
+function _getStrokeWidthExpr(indexFind, defaultValue) {
   defaultValue = defaultValue !== undefined ? defaultValue : 1;
   return [
-    markerFind,
-    "if (!shape) " + defaultValue + ";",
-    "shape.strokeWeight !== undefined ? shape.strokeWeight : " + defaultValue,
+    indexFind,
+    "var w = shape && shape.strokeWeight;",
+    "w === undefined ? " + defaultValue + " : w",
   ].join("\n");
 }
 
 /**
  * 生成 Position 表达式
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @returns {string} Position 表达式
  */
-function _getPositionExpr(markerFind) {
+function _getPositionExpr(indexFind) {
   return [
-    markerFind,
-    "!shape ? [-9999, -9999] : (function() {",
-    "var p = shape.pos;",
-    "return p ? [p[0], p[1]] : [-9999, -9999];",
-    "})()",
+    indexFind,
+    "var p = shape && shape.pos;",
+    "!p ? [-9999, -9999] : [p[0], p[1]]",
   ].join("\n");
 }
 
 /**
  * 生成 Rotation 表达式
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @returns {string} Rotation 表达式
  */
-function _getRotationExpr(markerFind) {
+function _getRotationExpr(indexFind) {
   return [
-    markerFind,
-    "if (!shape) 0;",
-    "shape.rot !== undefined ? shape.rot : 0",
+    indexFind,
+    "var r = shape && shape.rot;",
+    "r === undefined ? 0 : r",
   ].join("\n");
 }
 
 /**
  * 为形状组添加 Fill 属性
  * @param {Object} shapeGroup - 形状组
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @returns {Object} Fill 属性对象
  */
-function _addFillProperties(shapeGroup, markerFind) {
+function _addFillProperties(shapeGroup, indexFind) {
   var fill = shapeGroup
     .property("Contents")
     .addProperty("ADBE Vector Graphic - Fill");
-  fill.property("Color").expression = _getFillColorExpr(markerFind);
-  fill.property("Opacity").expression = _getFillOpacityExpr(markerFind);
+  fill.property("Color").expression = _getFillColorExpr(indexFind);
+  fill.property("Opacity").expression = _getFillOpacityExpr(indexFind);
   return fill;
 }
 
 /**
  * 为形状组添加 Stroke 属性
  * @param {Object} shapeGroup - 形状组
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @param {number} defaultWidth - 默认描边宽度
  * @returns {Object} Stroke 属性对象
  */
-function _addStrokeProperties(shapeGroup, markerFind, defaultWidth) {
+function _addStrokeProperties(shapeGroup, indexFind, defaultWidth) {
   var stroke = shapeGroup
     .property("Contents")
     .addProperty("ADBE Vector Graphic - Stroke");
-  stroke.property("Color").expression = _getStrokeColorExpr(markerFind);
-  stroke.property("Opacity").expression = _getStrokeOpacityExpr(markerFind);
-  stroke.property("Stroke Width").expression = _getStrokeWidthExpr(markerFind, defaultWidth);
+  stroke.property("Color").expression = _getStrokeColorExpr(indexFind);
+  stroke.property("Opacity").expression = _getStrokeOpacityExpr(indexFind);
+  stroke.property("Stroke Width").expression =
+    _getStrokeWidthExpr(indexFind, defaultWidth);
   return stroke;
 }
 
 /**
  * 生成 arc 路径表达式
- * @param {string} markerFind - marker 查找表达式
+ * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
  * @param {number} defaultMode - 默认模式（0=OPEN, 1=CHORD, 2=PIE）
  * @returns {string} arc 路径表达式
  */
-function _getArcPathExpr(markerFind, defaultMode) {
+function _getArcPathExpr(indexFind, defaultMode) {
   var modeCode = defaultMode || 0;
   return [
-    markerFind,
+    indexFind,
     "if (!shape) createPath([[-9999,-9999]], [], [], false);",
     "var pos = shape.pos;",
     "var size = shape.size;",
@@ -263,15 +227,19 @@ function _getArcPathExpr(markerFind, defaultMode) {
     "var cy = pos[1];",
     "var w = size[0];",
     "var h = size[1];",
-    "var rx = w/2;",
-    "var ry = h/2;",
+    "var rx = w * 0.5;",
+    "var ry = h * 0.5;",
     "var start = angs[0];",
     "var stop = angs[1];",
     "// 规范化角度（确保非 NaN）",
     "if (!(start===start) || !(stop===stop)) createPath([[-9999,-9999]], [], [], false);",
     "if (start === stop) createPath([[-9999,-9999]], [], [], false);",
     "// 将 stop 规范化到 >= start 的范围，接近 p5 的行为",
-    "while (stop < start) { stop += Math.PI*2; }",
+    "var twoPi = Math.PI * 2;",
+    "if (stop < start) {",
+    "  // 直接计算需要加的圈数，避免 while 循环",
+    "  stop += twoPi * Math.ceil((start - stop) / twoPi);",
+    "}",
     "var total = stop - start;",
     "if (total <= 0) createPath([[-9999,-9999]], [], [], false);",
     "var segs = Math.ceil(total / (Math.PI/2));",
@@ -333,11 +301,17 @@ function _getArcPathExpr(markerFind, defaultMode) {
 }
 
 /**
- * ellipse 数据结构 (slots=9):
- * [pos, size, rot, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移: pos=-9, size=-8, rot=-7, fill1=-6, fill2=-5, stroke1=-4, stroke2=-3, opacity=-2, strokeWeight=-1
+ * ellipse 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "ellipse",
+ *   pos, size, rot,
+ *   fillColor, strokeColor,
+ *   fillOpacity, strokeOpacity,
+ *   strokeWeight
+ * }
  */
-function createEllipseFromContext(index, shapeIndex, mainCompName) {
+function createEllipseFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
   var ellipse = shapeGroup
@@ -345,32 +319,30 @@ function createEllipseFromContext(index, shapeIndex, mainCompName) {
     .addProperty("ADBE Vector Shape - Ellipse");
   var transform = shapeGroup.property("Transform");
 
-  var markerFind = _getMarkerFindExpr(1001, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Position (pos at -9)
-  transform.property("Position").expression = _getPositionExpr(markerFind);
+  transform.property("Position").expression = _getPositionExpr(indexFind);
 
   // Size (size at -8)
   ellipse.property("Size").expression = [
-    markerFind,
-    "!shape ? [0, 0] : (function() {",
-    "var s = shape.size;",
-    "return s ? [s[0], s[1]] : [0, 0];",
-    "})()",
+    indexFind,
+    "var s = shape && shape.size;",
+    "!s ? [0, 0] : [s[0], s[1]]",
   ].join("\n");
 
   // Rotation (rot at -7)
-  transform.property("Rotation").expression = _getRotationExpr(markerFind);
+  transform.property("Rotation").expression = _getRotationExpr(indexFind);
 
   // Fill and Stroke
-  _addFillProperties(shapeGroup, markerFind);
-  _addStrokeProperties(shapeGroup, markerFind, 1);
+  _addFillProperties(shapeGroup, indexFind);
+  _addStrokeProperties(shapeGroup, indexFind, 1);
 }
 
 /**
  * polygon 数据结构（语义化 JSON）:
  * {
- *   id, marker, markerType,
+ *   id,
  *   type: "polygon",
  *   points: [[x,y], ...],    // 已应用当前变换后的顶点（主轮廓）
  *   contours: [[[x,y], ...], ...],  // 所有轮廓数组，包括主轮廓和子轮廓（洞）
@@ -383,11 +355,11 @@ function createEllipseFromContext(index, shapeIndex, mainCompName) {
  * 顶点数量可变，支持多个轮廓（洞形）。
  * 主轮廓从 points 构建，子轮廓从 contours 数组构建。
  */
-function createPolygonFromContext(index, shapeIndex, mainCompName) {
+function createPolygonFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
 
-  var markerFind = _getMarkerFindExpr(1009, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // 主路径 Group：包含主路径和子轮廓路径（复合路径）
   var mainPathGroup = shapeGroup
@@ -398,7 +370,7 @@ function createPolygonFromContext(index, shapeIndex, mainCompName) {
   // 注意：在 After Effects 中，要创建带洞的路径，需要在同一个 Vector Group 内
   // 主路径和子轮廓路径都需要在同一个 Group 中，且子轮廓需要反向
   mainPathGroup.property("Path").expression = [
-    markerFind,
+    indexFind,
     "if (!shape) {",
     "  createPath([[-9999,-9999]], [], [], false);",
     "} else {",
@@ -468,7 +440,7 @@ function createPolygonFromContext(index, shapeIndex, mainCompName) {
     // 子轮廓路径：从 contours[1] 开始构建（第一个子轮廓）
     // 注意：不在表达式中反转顶点顺序，反转由脚本中的 Reverse Path 属性处理
     contourPathGroup.property("Path").expression = [
-      markerFind,
+      indexFind,
       "// 使用第一个子轮廓（contours[1]）",
       "var contour = shape.contours[1];",
       "if (!contour || contour.length < 2) {",
@@ -506,16 +478,22 @@ function createPolygonFromContext(index, shapeIndex, mainCompName) {
   }
 
   // Fill and Stroke
-  _addFillProperties(shapeGroup, markerFind);
-  _addStrokeProperties(shapeGroup, markerFind, 1);
+  _addFillProperties(shapeGroup, indexFind);
+  _addStrokeProperties(shapeGroup, indexFind, 1);
 }
 
 /**
- * rect 数据结构 (slots=9):
- * [pos, size, rot, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移: pos=-9, size=-8, rot=-7, fill1=-6, fill2=-5, stroke1=-4, stroke2=-3, opacity=-2, strokeWeight=-1
+ * rect 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "rect",
+ *   pos, size, rot,
+ *   fillColor, strokeColor,
+ *   fillOpacity, strokeOpacity,
+ *   strokeWeight
+ * }
  */
-function createRectFromContext(index, shapeIndex, mainCompName) {
+function createRectFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
   var rect = shapeGroup
@@ -523,44 +501,38 @@ function createRectFromContext(index, shapeIndex, mainCompName) {
     .addProperty("ADBE Vector Shape - Rect");
   var transform = shapeGroup.property("Transform");
 
-  var markerFind = _getMarkerFindExpr(1002, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Position (pos at -9)
-  transform.property("Position").expression = _getPositionExpr(markerFind);
+  transform.property("Position").expression = _getPositionExpr(indexFind);
 
   // Size (size at -8)
   rect.property("Size").expression = [
-    markerFind,
-    "!shape ? [0, 0] : (function() {",
-    "var s = shape.size;",
-    "return s ? [s[0], s[1]] : [0, 0];",
-    "})()",
+    indexFind,
+    "var s = shape && shape.size;",
+    "!s ? [0, 0] : [s[0], s[1]]",
   ].join("\n");
 
   // Rotation (rot at -7)
-  transform.property("Rotation").expression = _getRotationExpr(markerFind);
+  transform.property("Rotation").expression = _getRotationExpr(indexFind);
 
   // Fill and Stroke
-  _addFillProperties(shapeGroup, markerFind);
-  _addStrokeProperties(shapeGroup, markerFind, 1);
+  _addFillProperties(shapeGroup, indexFind);
+  _addStrokeProperties(shapeGroup, indexFind, 1);
 }
 
 /**
- * quad 数据结构 (slots=10):
- * [p1, p2, p3, p4, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移:
- *   p1         = -10
- *   p2         = -9
- *   p3         = -8
- *   p4         = -7
- *   fill1      = -6
- *   fill2      = -5
- *   stroke1    = -4
- *   stroke2    = -3
- *   opacity    = -2
- *   strokeWeight = -1
+ * quad 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "quad",
+ *   points: [p1,p2,p3,p4],
+ *   fillColor, strokeColor,
+ *   fillOpacity, strokeOpacity,
+ *   strokeWeight
+ * }
  */
-function createQuadFromContext(index, shapeIndex, mainCompName) {
+function createQuadFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
 
@@ -568,11 +540,11 @@ function createQuadFromContext(index, shapeIndex, mainCompName) {
     .property("Contents")
     .addProperty("ADBE Vector Shape - Group");
 
-  var markerFind = _getMarkerFindExpr(1007, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Path (p1~p4 at -10..-7)
   path.property("Path").expression = [
-    markerFind,
+    indexFind,
     "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
     "var p1 = shape.points[0];",
     "var p2 = shape.points[1];",
@@ -586,25 +558,22 @@ function createQuadFromContext(index, shapeIndex, mainCompName) {
   ].join("\n");
 
   // Fill and Stroke
-  _addFillProperties(shapeGroup, markerFind);
-  _addStrokeProperties(shapeGroup, markerFind, 1);
+  _addFillProperties(shapeGroup, indexFind);
+  _addStrokeProperties(shapeGroup, indexFind, 1);
 }
 
 /**
- * triangle 数据结构 (slots=9):
- * [p1, p2, p3, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移:
- *   p1         = -9
- *   p2         = -8
- *   p3         = -7
- *   fill1      = -6
- *   fill2      = -5
- *   stroke1    = -4
- *   stroke2    = -3
- *   opacity    = -2
- *   strokeWeight = -1
+ * triangle 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "triangle",
+ *   points: [p1,p2,p3],
+ *   fillColor, strokeColor,
+ *   fillOpacity, strokeOpacity,
+ *   strokeWeight
+ * }
  */
-function createTriangleFromContext(index, shapeIndex, mainCompName) {
+function createTriangleFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
 
@@ -612,11 +581,11 @@ function createTriangleFromContext(index, shapeIndex, mainCompName) {
     .property("Contents")
     .addProperty("ADBE Vector Shape - Group");
 
-  var markerFind = _getMarkerFindExpr(1008, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Path (p1~p3 at -9..-7)
   path.property("Path").expression = [
-    markerFind,
+    indexFind,
     "if (!shape || !shape.points || shape.points.length < 3) createPath([[-9999,-9999]], [], [], false);",
     "var p1 = shape.points[0];",
     "var p2 = shape.points[1];",
@@ -629,43 +598,53 @@ function createTriangleFromContext(index, shapeIndex, mainCompName) {
   ].join("\n");
 
   // Fill and Stroke
-  _addFillProperties(shapeGroup, markerFind);
-  _addStrokeProperties(shapeGroup, markerFind, 1);
+  _addFillProperties(shapeGroup, indexFind);
+  _addStrokeProperties(shapeGroup, indexFind, 1);
 }
 
 /**
- * line 数据结构 (slots=8):
- * [p1, p2, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移: p1=-8, p2=-7, fill1=-6, fill2=-5, stroke1=-4, stroke2=-3, opacity=-2, strokeWeight=-1
+ * line 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "line",
+ *   points: [p1,p2],
+ *   strokeColor, strokeOpacity,
+ *   strokeWeight
+ * }
  */
-function createLineFromContext(index, shapeIndex, mainCompName) {
+function createLineFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
   var path = shapeGroup
     .property("Contents")
     .addProperty("ADBE Vector Shape - Group");
 
-  var markerFind = _getMarkerFindExpr(1003, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Path (p1 at -8, p2 at -7)
   path.property("Path").expression = [
-    markerFind,
+    indexFind,
     "if (!shape || !shape.points || shape.points.length < 2) createPath([[-9999,-9999],[-9999,-9999]], [], [], false);",
     "var p1 = shape.points[0], p2 = shape.points[1];",
     "createPath([p1||[-9999,-9999], p2||[-9999,-9999]], [], [], false)",
   ].join("\n");
 
   // Stroke only (line has no fill)
-  _addStrokeProperties(shapeGroup, markerFind, 2);
+  _addStrokeProperties(shapeGroup, indexFind, 2);
 }
 
 /**
- * point 数据结构 (slots=7):
- * [pos, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移: pos=-7, fill1=-6, fill2=-5, stroke1=-4, stroke2=-3, opacity=-2, strokeWeight=-1
- * 注意: point 使用 strokeWeight 控制点的大小，使用 stroke 颜色填充
+ * point 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "point",
+ *   pos, size,
+ *   fillColor, fillOpacity,
+ *   strokeWeight
+ * }
+ * 注意: point 使用 strokeWeight 控制点的大小，颜色使用 stroke 作为可见颜色（导出到 fillColor）
  */
-function createPointFromContext(index, shapeIndex, mainCompName) {
+function createPointFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
   var ellipse = shapeGroup
@@ -673,14 +652,14 @@ function createPointFromContext(index, shapeIndex, mainCompName) {
     .addProperty("ADBE Vector Shape - Ellipse");
   var transform = shapeGroup.property("Transform");
 
-  var markerFind = _getMarkerFindExpr(1004, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Position (pos at -7)
-  transform.property("Position").expression = _getPositionExpr(markerFind);
+  transform.property("Position").expression = _getPositionExpr(indexFind);
 
   // Size (based on strokeWeight at -1, 与 p5 对齐：strokeWeight 直接作为直径)
   ellipse.property("Size").expression = [
-    markerFind,
+    indexFind,
     "if (!shape) [2,2];",
     "var d = shape.size;",
     "d ? [d[0], d[1]] : [2,2]",
@@ -691,43 +670,43 @@ function createPointFromContext(index, shapeIndex, mainCompName) {
     .property("Contents")
     .addProperty("ADBE Vector Graphic - Fill");
   fill.property("Color").expression = [
-    markerFind,
+    indexFind,
     "if (!shape || !shape.fillColor) [0,0,0,1];",
     "var fc = shape.fillColor;",
     "[fc[0], fc[1], fc[2], 1]",
   ].join("\n");
   fill.property("Opacity").expression = [
-    markerFind,
+    indexFind,
     "if (!shape) 100;",
     "shape.strokeOpacity !== undefined ? shape.strokeOpacity : 100",
   ].join("\n");
 }
 
 /**
- * bezier 数据结构 (slots=10):
- * [p1, p2, p3, p4, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移: p1=-10, p2=-9, p3=-8, p4=-7, fill1=-6, fill2=-5, stroke1=-4, stroke2=-3, opacity=-2, strokeWeight=-1
- * 其中:
- * - p1: 起点 [x1, y1]
- * - p2: 第一个控制点 [x2, y2]
- * - p3: 第二个控制点 [x3, y3]
- * - p4: 终点 [x4, y4]
+ * bezier 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "bezier",
+ *   points: [p1,p2,p3,p4],
+ *   strokeColor, strokeOpacity,
+ *   strokeWeight
+ * }
  */
-function createBezierFromContext(index, shapeIndex, mainCompName) {
+function createBezierFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
   var path = shapeGroup
     .property("Contents")
     .addProperty("ADBE Vector Shape - Group");
 
-  var markerFind = _getMarkerFindExpr(1010, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Path (p1 at -10, p2 at -9, p3 at -8, p4 at -7)
   // 贝塞尔曲线：起点 p1，终点 p4，控制点 p2 和 p3
   // After Effects 使用顶点和切线：起点 p1，终点 p4
   // 起点出切线：p2 - p1，终点入切线：p3 - p4
   path.property("Path").expression = [
-    markerFind,
+    indexFind,
     "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
     "var p1 = shape.points[0] || [-9999,-9999];",
     "var p2 = shape.points[1] || [-9999,-9999];",
@@ -741,28 +720,28 @@ function createBezierFromContext(index, shapeIndex, mainCompName) {
   ].join("\n");
 
   // Stroke only (bezier has no fill)
-  _addStrokeProperties(shapeGroup, markerFind, 2);
+  _addStrokeProperties(shapeGroup, indexFind, 2);
 }
 
 /**
- * curve 数据结构 (slots=10):
- * [p1, p2, p3, p4, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移: p1=-10, p2=-9, p3=-8, p4=-7, fill1=-6, fill2=-5, stroke1=-4, stroke2=-3, opacity=-2, strokeWeight=-1
- * 其中:
- * - p1: 第一个控制点 [x1, y1] (不绘制)
- * - p2: 第一个锚点 [x2, y2] (可见起点)
- * - p3: 第二个锚点 [x3, y3] (可见终点)
- * - p4: 最后一个控制点 [x4, y4] (不绘制)
- * 使用标准 Catmull-Rom 样条曲线公式绘制
+ * curve 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "curve",
+ *   points: [p1,p2,p3,p4],
+ *   tightness,
+ *   strokeColor, strokeOpacity,
+ *   strokeWeight
+ * }
  */
-function createCurveFromContext(index, shapeIndex, mainCompName) {
+function createCurveFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
   var path = shapeGroup
     .property("Contents")
     .addProperty("ADBE Vector Shape - Group");
 
-  var markerFind = _getMarkerFindExpr(1011, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Path (p1 at -10, p2 at -9, p3 at -8, p4 at -7)
   // Catmull-Rom 样条曲线：
@@ -773,7 +752,7 @@ function createCurveFromContext(index, shapeIndex, mainCompName) {
   // 使用标准 Catmull-Rom 样条曲线公式：P(t) = 0.5 * [2*P1 + (-P0+P2)*t + (2*P0-5*P1+4*P2-P3)*t^2 + (-P0+3*P1-3*P2+P3)*t^3]
   // 其中 P0=p1, P1=p2, P2=p3, P3=p4, t ∈ [0, 1]
   path.property("Path").expression = [
-    markerFind,
+    indexFind,
     "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
     "var p0 = shape.points[0] || [-9999,-9999];", // P0: 第一个控制点 (x1, y1)
     "var p1 = shape.points[1] || [-9999,-9999];", // P1: 第一个锚点 (x2, y2) - 起点
@@ -819,17 +798,14 @@ function createCurveFromContext(index, shapeIndex, mainCompName) {
   ].join("\n");
 
   // Stroke only (curve has no fill)
-  _addStrokeProperties(shapeGroup, markerFind, 2);
+  _addStrokeProperties(shapeGroup, indexFind, 2);
 }
 
 /**
  * 获取形状函数库（根据依赖动态构建）
  * @param {Object} deps - 依赖对象，包含 shapes: { ellipse, rect, line, point }
  *
- * 形状数据格式说明：
- * - ellipse/rect: [pos, size, rot, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * - line: [p1, p2, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * - point: [pos, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
+ * 形状数据格式说明：当前使用语义化 JSON（每个对象包含全局 index），不再使用 path 槽位方案
  *
  * 颜色编码 (_encodeColorState 返回):
  * - c2[0] = fill1: [r, g]
@@ -853,6 +829,37 @@ function getShapeLib(deps) {
 
   // 渲染标记
   funcs.push("var _render = true;");
+
+  // 形状类型前缀映射（用于生成 id = typeCode * 10000 + 调用次数）
+  // 从 registry 中读取各基础图形类型的前缀编码，保证与前端/宿主逻辑一致
+  var _typeCodeMap =
+    typeof functionRegistry !== "undefined" && functionRegistry.shapeTypeCode
+      ? functionRegistry.shapeTypeCode
+      : {
+          ellipse: 1,
+          rect: 2,
+          line: 3,
+          point: 4,
+          polygon: 5,
+          arc: 6,
+          quad: 7,
+          triangle: 8,
+          bezier: 9,
+          curve: 10,
+          background: 11,
+        };
+
+  var _typeCodeParts = [];
+  for (var _k in _typeCodeMap) {
+    if (_typeCodeMap.hasOwnProperty(_k)) {
+      _typeCodeParts.push("  " + _k + ": " + _typeCodeMap[_k]);
+    }
+  }
+  funcs.push("var _shapeTypeCode = {");
+  if (_typeCodeParts.length > 0) {
+    funcs.push(_typeCodeParts.join(",\n"));
+  }
+  funcs.push("};");
 
   // 计数器初始化
   if (deps.ellipse || deps.circle) {
@@ -894,6 +901,7 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _ellipseCount++;",
         "  var m=_ellipseCount;",
+        "  var id = _shapeTypeCode.ellipse * 10000 + m;",
         "  var p=_applyTransform(a,b);",
         "  var s=[c*_scaleX,(d||c)*_scaleY];",
         "  var r=_rotation*180/Math.PI;",
@@ -905,9 +913,8 @@ function getShapeLib(deps) {
         "  var fillOp = hasFill ? c2[4][0] : 0;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk=[m,1001];",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1001, type:"ellipse",',
+        '    id:id, type:"ellipse",',
         "    pos:p, size:s, rot:r,",
         "    fillColor:fillColor, strokeColor:strokeColor,",
         "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
@@ -924,6 +931,7 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _arcCount++;",
         "  var m = _arcCount;",
+        "  var id = _shapeTypeCode.arc * 10000 + m;",
         "  var p = _applyTransform(x,y);",
         "  var ww = w * _scaleX;",
         "  var hh = (h || w) * _scaleY;",
@@ -945,9 +953,8 @@ function getShapeLib(deps) {
         "  var fillOp = hasFill ? c2[4][0] : 0;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk = [m, 1006];",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1006, type:"arc",',
+        '    id:id, type:"arc",',
         "    pos:p, size:[ww,hh], angles:ang, mode:md,",
         "    fillColor:fillColor, strokeColor:strokeColor,",
         "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
@@ -964,6 +971,7 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _quadCount++;",
         "  var m=_quadCount;",
+        "  var id = _shapeTypeCode.quad * 10000 + m;",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
@@ -976,9 +984,8 @@ function getShapeLib(deps) {
         "  var fillOp = hasFill ? c2[4][0] : 0;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk=[m,1007];",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1007, type:"quad",',
+        '    id:id, type:"quad",',
         "    points:[p1,p2,p3,p4],",
         "    fillColor:fillColor, strokeColor:strokeColor,",
         "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
@@ -995,6 +1002,7 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _triangleCount++;",
         "  var m=_triangleCount;",
+        "  var id = _shapeTypeCode.triangle * 10000 + m;",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
@@ -1006,9 +1014,8 @@ function getShapeLib(deps) {
         "  var fillOp = hasFill ? c2[4][0] : 0;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk=[m,1008];",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1008, type:"triangle",',
+        '    id:id, type:"triangle",',
         "    points:[p1,p2,p3],",
         "    fillColor:fillColor, strokeColor:strokeColor,",
         "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
@@ -1025,6 +1032,7 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _rectCount++;",
         "  var m=_rectCount;",
+        "  var id = _shapeTypeCode.rect * 10000 + m;",
         "  var w=c,h=d||c;",
         "  var p=_applyTransform(a+w/2,b+h/2);",
         "  var s=[w*_scaleX,h*_scaleY];",
@@ -1037,9 +1045,8 @@ function getShapeLib(deps) {
         "  var fillOp = hasFill ? c2[4][0] : 0;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk=[m,1002];",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1002, type:"rect",',
+        '    id:id, type:"rect",',
         "    pos:p, size:s, rot:r,",
         "    fillColor:fillColor, strokeColor:strokeColor,",
         "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
@@ -1056,6 +1063,7 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _lineCount++;",
         "  var m=_lineCount;",
+        "  var id = _shapeTypeCode.line * 10000 + m;",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var c2=_encodeColorState();",
@@ -1063,9 +1071,8 @@ function getShapeLib(deps) {
         "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk=[m,1003];",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1003, type:"line",',
+        '    id:id, type:"line",',
         "    points:[p1,p2],",
         "    fillColor:null, strokeColor:strokeColor,",
         "    fillOpacity:0, strokeOpacity:strokeOp,",
@@ -1082,15 +1089,15 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _pointCount++;",
         "  var m=_pointCount;",
+        "  var id = _shapeTypeCode.point * 10000 + m;",
         "  var p=_applyTransform(x,y);",
         "  var c2=_encodeColorState();",
         "  var hasStroke = !(c2[2][0] < 0);",
         "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk=[m,1004];",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1004, type:"point",',
+        '    id:id, type:"point",',
         "    pos:p, size:[sw,sw],",
         "    // point 使用 stroke 作为可见颜色",
         "    fillColor:strokeColor, strokeColor:strokeColor,",
@@ -1108,6 +1115,7 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _bezierCount++;",
         "  var m=_bezierCount;",
+        "  var id = _shapeTypeCode.bezier * 10000 + m;",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
@@ -1117,9 +1125,8 @@ function getShapeLib(deps) {
         "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk=[m,1010];",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1010, type:"bezier",',
+        '    id:id, type:"bezier",',
         "    points:[p1,p2,p3,p4],",
         "    fillColor:null, strokeColor:strokeColor,",
         "    fillOpacity:0, strokeOpacity:strokeOp,",
@@ -1136,6 +1143,7 @@ function getShapeLib(deps) {
         "  if(!_render){return;}",
         "  _curveCount++;",
         "  var m=_curveCount;",
+        "  var id = _shapeTypeCode.curve * 10000 + m;",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
@@ -1145,10 +1153,9 @@ function getShapeLib(deps) {
         "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
         "  var strokeOp = hasStroke ? c2[4][1] : 0;",
         "  var sw = c2[5][0];",
-        "  var mk=[m,1011];",
         "  var tightness = typeof _curveTightness !== 'undefined' ? _curveTightness : 0.5;",
         "  _shapes.push({",
-        '    id:m, marker:mk, markerType:1011, type:"curve",',
+        '    id:id, type:"curve",',
         "    points:[p1,p2,p3,p4],",
         "    tightness:tightness,",
         "    fillColor:null, strokeColor:strokeColor,",
@@ -1174,8 +1181,6 @@ function getShapeLib(deps) {
         "  if(!_render){ _currentPolygon = null; return; }",
         "  _currentPolygon = {",
         "    id: 0,",
-        "    marker: null,",
-        "    markerType: 1009,",
         '    type: "polygon",',
         "    points: [],           // 主轮廓的顶点（向后兼容）",
         "    closed: false,",
@@ -1356,9 +1361,8 @@ function getShapeLib(deps) {
         "  if (mode !== undefined) {",
         "    closed = (mode === true || mode === CLOSE);",
         "  }",
-        "  _currentPolygon.id = m;",
-        "  _currentPolygon.marker = [m,1009];",
-        "  _currentPolygon.markerType = 1009;",
+        "  var id = _shapeTypeCode.polygon * 10000 + m;",
+        "  _currentPolygon.id = id;",
         "  _currentPolygon.fillColor = fillColor;",
         "  _currentPolygon.strokeColor = strokeColor;",
         "  _currentPolygon.fillOpacity = fillOp;",
@@ -1380,24 +1384,23 @@ function getShapeLib(deps) {
 }
 
 /**
- * arc 数据结构 (slots=10):
- * [pos, size, angles, mode, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * 偏移:
- *   pos       = -10
- *   size      = -9
- *   angles    = -8  // [start, stop] 弧度
- *   mode      = -7  // [mode, 0]  0=OPEN, 1=CHORD, 2=PIE
- *   fill1     = -6
- *   fill2     = -5
- *   stroke1   = -4
- *   stroke2   = -3
- *   opacity   = -2
- *   strokeWeight = -1
+ * arc 数据结构（语义化 JSON）:
+ * {
+ *   id,
+ *   type: "arc",
+ *   pos, size, angles, mode,
+ *   fillColor, strokeColor,
+ *   fillOpacity, strokeOpacity,
+ *   strokeWeight
+ * }
+ *
+ * 与 ellipse/rect 等保持一致，使用稳定的 id（类型前缀 + 调用次数）进行查找，
+ * 这样表达式层的查找逻辑完全由 _getIdFindExpr 统一负责。
  */
-function createArcFromContext(index, shapeIndex, mainCompName) {
+function createArcFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-  var markerFind = _getMarkerFindExpr(1006, shapeIndex, mainCompName);
+  var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Stroke 子 group（用于描边，仅画 OPEN 弧线）——先添加 Stroke，让其渲染在 Fill 之上
   var strokeGroup = shapeGroup
@@ -1409,20 +1412,20 @@ function createArcFromContext(index, shapeIndex, mainCompName) {
     .addProperty("ADBE Vector Shape - Group");
 
   // Path for Stroke (默认使用 OPEN 弧线)
-  strokePath.property("Path").expression = _getArcPathExpr(markerFind, 0);
+  strokePath.property("Path").expression = _getArcPathExpr(indexFind, 0);
 
   // Stroke
   var stroke = strokeGroup
     .property("Contents")
     .addProperty("ADBE Vector Graphic - Stroke");
   stroke.property("Color").expression = [
-    markerFind,
+    indexFind,
     "if (!shape || !shape.strokeColor) [0,0,0,1];",
     "var sc = shape.strokeColor;",
     "[sc[0], sc[1], sc[2], 1]",
   ].join("\n");
-  stroke.property("Opacity").expression = _getStrokeOpacityExpr(markerFind);
-  stroke.property("Stroke Width").expression = _getStrokeWidthExpr(markerFind, 1);
+  stroke.property("Opacity").expression = _getStrokeOpacityExpr(indexFind);
+  stroke.property("Stroke Width").expression = _getStrokeWidthExpr(indexFind, 1);
 
   // Fill 子 group（用于扇形填充）
   var fillGroup = shapeGroup
@@ -1434,12 +1437,12 @@ function createArcFromContext(index, shapeIndex, mainCompName) {
     .addProperty("ADBE Vector Shape - Group");
 
   // Path for Fill (默认使用 PIE 形状)
-  fillPath.property("Path").expression = _getArcPathExpr(markerFind, 2);
+  fillPath.property("Path").expression = _getArcPathExpr(indexFind, 2);
 
   // Fill（与 ellipse/rect 一致，支持 fill()/noFill() 状态）
   var fill = fillGroup
     .property("Contents")
     .addProperty("ADBE Vector Graphic - Fill");
-  fill.property("Color").expression = _getFillColorExpr(markerFind);
-  fill.property("Opacity").expression = _getFillOpacityExpr(markerFind);
+  fill.property("Color").expression = _getFillColorExpr(indexFind);
+  fill.property("Opacity").expression = _getFillOpacityExpr(indexFind);
 }

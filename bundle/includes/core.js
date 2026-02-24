@@ -14,7 +14,6 @@ function isArray(arg) {
 var engineLayer = null;
 var engineComp = null;
 var shapeQueue = [];
-var globalDeps = null; // 存储依赖信息，用于按需创建图层属性
 var setupComp = null; // setup预合成
 var drawComp = null; // draw预合成
 var setupShapeQueue = []; // setup中的shape队列
@@ -186,18 +185,6 @@ function setCompBackgroundColor(comp, hasSetupOrDraw) {
   }
 }
 
-/**
- * 获取图形类型的槽位数（使用 registry）
- * @param {string} type - 图形类型
- * @returns {number} 槽位数
- */
-function getShapeSlots(type) {
-  if (isRegistryAvailable() && functionRegistry.getShapeSlots) {
-    return functionRegistry.getShapeSlots(type);
-  }
-  // 如果 registry 不可用，抛出错误而不是使用硬编码值
-  throw new Error("functionRegistry.getShapeSlots is not available");
-}
 
 pub.runParsed = function (
   drawCode,
@@ -315,7 +302,6 @@ pub.runParsed = function (
     } catch (e) {
       deps = null;
     }
-    globalDeps = deps; // 存储依赖信息到全局变量
 
     // 10. 解析 hasBackgroundWithoutOpacity 参数（前端 AST 分析结果）
     var hasBackgroundWithoutOpacity = false;
@@ -626,8 +612,7 @@ function processRenderLayers(renderLayersArg) {
     isArray(renderLayersArg) &&
     renderLayersArg.length > 0
   ) {
-    var currentIndex = 0;
-    var typeCounters = {};
+    var renderIndex = 0;
 
     // 支持精确调用序列格式：
     // ["ellipse", "rect", "ellipse", ...] 或 [{ type: "ellipse" }, { type: "rect" }, ...]
@@ -650,25 +635,45 @@ function processRenderLayers(renderLayersArg) {
         continue;
       }
 
-      var slots = getShapeSlots(type);
-
-      if (!typeCounters[type]) {
-        typeCounters[type] = 0;
+      // 归一化到基础类型（circle -> ellipse, square -> rect, ...）
+      // 保证后续 createShapeLayers 的 creator map 可以命中
+      if (isRegistryAvailable() && functionRegistry.getShapeInfo) {
+        var info = functionRegistry.getShapeInfo(type);
+        if (info && info.baseType) {
+          type = info.baseType;
+        }
       }
 
-      // 每个条目对应一次精确调用
-      typeCounters[type]++;
+      // 计算该类型的调用次数，用于生成稳定的 id（类型前缀 + 调用次数）
+      if (!renderIndex) {
+        renderIndex = {};
+      }
+      if (!renderIndex[type]) {
+        renderIndex[type] = 0;
+      }
+      renderIndex[type]++;
+
+      // 从 registry 中读取各基础图形类型的前缀编码（1xxxx = ellipse, 2xxxx = rect, ...）
+      var typeCode = 0;
+      if (typeof functionRegistry !== "undefined" && functionRegistry.shapeTypeCode) {
+        var map = functionRegistry.shapeTypeCode;
+        if (map.hasOwnProperty(type)) {
+          typeCode = map[type];
+        }
+      }
+
+      var id = typeCode * 10000 + renderIndex[type];
+
       queue.push({
         type: type,
-        outputIndex: currentIndex,
-        slots: slots,
-        shapeIndex: typeCounters[type],
+        id: id,
       });
-      currentIndex += slots;
     }
   }
   return queue;
 }
+
+// （已废弃）静态 renderIndex 注入逻辑已移除，运行时改为简单顺序 index
 
 /**
  * 检查对象是否有属性值（AEScript 兼容，不支持 Object.keys）
@@ -759,13 +764,6 @@ function buildExpression(
   deps,
   mainCompNameParam,
 ) {
-  // 计算每种图形的槽位数（使用 registry）
-  var totalSlots = 0;
-  for (var type in shapeCounts) {
-    var slots = getShapeSlots(type);
-    totalSlots += shapeCounts[type] * slots;
-  }
-
   // 解析依赖对象
   var mathDeps = deps && deps.math ? deps.math : {};
   var transformDeps = deps && deps.transforms ? deps.transforms : {};
@@ -894,7 +892,7 @@ function buildExpression(
   }
 
   // 按需加载颜色库
-  // state 模式：只加载形状函数需要的内部函数（颜色状态 + _encodeColorState + resetColors）
+  // state 模式：只加载形状函数需要的内部函数（颜色状态 + _encodeColorState）
   // 用户函数模式：加载用户显式使用的颜色函数
   if (hasShapes) {
     expr.push("// 颜色库（内部函数）");

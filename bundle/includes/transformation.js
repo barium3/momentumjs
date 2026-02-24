@@ -11,6 +11,7 @@ function getTransformStateLib() {
     "// ===== Transformation State =====",
     "var _tx = 0, _ty = 0;",
     "var _rotation = 0;",
+    "var _cosR = 1, _sinR = 0;",
     "var _scaleX = 1, _scaleY = 1;",
     "var _stack = [];",
   ].join("\n");
@@ -22,8 +23,21 @@ function getTransformStateLib() {
 function getTransformBasicLib() {
   return [
     "// Basic Transform Functions",
-    "function translate(x, y) { _tx += x; _ty = y !== undefined ? y : _ty + y; }",
-    "function rotate(a) { _rotation += a; }",
+    // p5.js: translate(x, y) 在“当前变换”的坐标系下平移
+    // 这里用当前的旋转角度，把局部位移 (x,y) 转成全局，再累加到 (_tx,_ty)
+    "function translate(x, y) {",
+    "  if (y === undefined) y = 0;",
+    "  var c = _cosR, s = _sinR;",
+    "  var dx = x * c - y * s;",
+    "  var dy = x * s + y * c;",
+    "  _tx += dx;",
+    "  _ty += dy;",
+    "}",
+    "function rotate(a) {",
+    "  _rotation += a;",
+    "  _cosR = Math.cos(_rotation);",
+    "  _sinR = Math.sin(_rotation);",
+    "}",
     "function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }",
   ].join("\n");
 }
@@ -49,7 +63,13 @@ function getTransformStackLib() {
  */
 function getResetMatrixLib() {
   return [
-    "function resetMatrix() { _tx = 0; _ty = 0; _rotation = 0; _scaleX = 1; _scaleY = 1; _stack = []; }",
+    "function resetMatrix() {",
+    "  _tx = 0; _ty = 0;",
+    "  _rotation = 0;",
+    "  _cosR = 1; _sinR = 0;",
+    "  _scaleX = 1; _scaleY = 1;",
+    "  _stack = [];",
+    "}",
   ].join("\n");
 }
 
@@ -60,7 +80,7 @@ function getApplyTransformLib() {
   return [
     "function _applyTransform(x, y) {",
     "  var sx = x * _scaleX, sy = y * _scaleY;",
-    "  var c = Math.cos(_rotation), s = Math.sin(_rotation);",
+    "  var c = _cosR, s = _sinR;",
     "  return [sx * c - sy * s + _tx, sx * s + sy * c + _ty];",
     "}",
   ].join("\n");
@@ -89,11 +109,26 @@ function getTransformationLib(deps) {
   // 用户使用的变换函数
   if (deps.translate) {
     lib.push(
-      "function translate(x, y) { _tx += x; _ty = y !== undefined ? y : _ty + y; }",
+      // p5.js: translate(x, y) 在“当前变换”的坐标系下平移
+      // 这里用当前的旋转角度，把局部位移 (x,y) 转成全局，再累加到 (_tx,_ty)
+      "function translate(x, y) {",
+      "  if (y === undefined) y = 0;",
+      "  var c = _cosR, s = _sinR;",
+      "  var dx = x * c - y * s;",
+      "  var dy = x * s + y * c;",
+      "  _tx += dx;",
+      "  _ty += dy;",
+      "}",
     );
   }
   if (deps.rotate) {
-    lib.push("function rotate(a) { _rotation += a; }");
+    lib.push(
+      "function rotate(a) {",
+      "  _rotation += a;",
+      "  _cosR = Math.cos(_rotation);",
+      "  _sinR = Math.sin(_rotation);",
+      "}",
+    );
   }
   if (deps.scale) {
     lib.push(

@@ -13,115 +13,69 @@ var functionRegistry = {};
  * key: 用户调用的函数名 (p5.js API)
  * value: 内部实现配置
  *   - internal: 引擎表达式中使用的内部函数名
- *   - slots: 数据槽位数（从 path 读取的数据长度）
- *   - markerType: 标记类型（用于在 path 中标识）
- */
-/**
- * 形状数据槽位说明：
- * 每个形状存储的数据格式为: [...geometry, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
- * - geometry: 形状特定的几何数据（位置、大小、旋转等）
- * - fill1: [r, g] 填充颜色的红绿分量
- * - fill2: [b, a] 填充颜色的蓝和透明度分量
- * - stroke1: [r, g] 描边颜色的红绿分量
- * - stroke2: [b, a] 描边颜色的蓝和透明度分量
- * - opacity: [fillOpacity, strokeOpacity] 填充和描边的不透明度 (0-100)
- * - strokeWeight: [weight, 0] 描边宽度
- * - marker: [index, type] 形状标记
- *
- * slots 计算: geometry slots + 6 (颜色数据)
  */
 functionRegistry.shapes = {
-  // 椭圆/圆形: geometry = [pos, size, rot] = 3 slots
+  // 椭圆/圆形
   ellipse: {
     internal: "_ellipse",
     baseType: "ellipse",
-    slots: 9, // 3 geometry + 6 color（不含 marker）
-    markerType: 1001,
   },
   circle: {
     internal: "_ellipse",
     baseType: "ellipse",
-    slots: 9,
-    markerType: 1001,
   },
 
-  // 三角形: geometry = [p1, p2, p3] = 3 slots
-  // 数据结构: [p1, p2, p3, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
+  // 三角形
   triangle: {
     internal: "_triangle",
     baseType: "triangle",
-    slots: 9, // 3 geometry + 6 color（不含 marker）
-    markerType: 1008,
   },
 
-  // 四边形: geometry = [p1, p2, p3, p4] = 4 slots
-  // 数据结构: [p1, p2, p3, p4, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
-  // 其中:
-  // - p1~p4: 顶点位置（已应用当前变换） [x, y]
+  // 四边形
   quad: {
     internal: "_quad",
     baseType: "quad",
-    slots: 10, // 4 geometry + 6 color（不含 marker）
-    markerType: 1007,
   },
 
-  // 圆弧: geometry = [pos, size, angles, mode] = 4 slots
-  // 数据结构: [pos, size, angles, mode, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
-  // 其中:
-  // - pos:    圆心位置（已应用当前变换）      [x, y]
-  // - size:   椭圆宽高（已应用 scale）       [w, h]
-  // - angles: 起止角度（弧度）             [start, stop]
-  // - mode:   模式码：0=OPEN, 1=CHORD, 2=PIE [mode, 0]
+  // 圆弧
   arc: {
     internal: "_arc",
     baseType: "arc",
-    slots: 10, // 4 geometry + 6 color（不含 marker）
-    markerType: 1006,
   },
 
-  // 矩形/正方形: geometry = [pos, size, rot] = 3 slots
+  // 矩形/正方形
   rect: {
     internal: "_rect",
     baseType: "rect",
-    slots: 9, // 3 geometry + 6 color
-    markerType: 1002,
   },
   square: {
     internal: "_rect",
     baseType: "rect",
-    slots: 9,
-    markerType: 1002,
   },
 
-  // 直线: geometry = [p1, p2] = 2 slots
+  // 直线
   line: {
     internal: "_line",
     baseType: "line",
-    slots: 8, // 2 geometry + 6 color
-    markerType: 1003,
   },
 
-  // 点: geometry = [pos] = 1 slot
+  // 点
   point: {
     internal: "_point",
     baseType: "point",
-    slots: 7, // 1 geometry + 6 color
-    markerType: 1004,
   },
 
   // 背景: 纯色图层，颜色由效果-生成-填色控制
-  // 数据格式: [fill1, fill2, marker] = [r,g], [b,a], marker
+  // 数据格式（语义化 JSON）: { index, type:"background", color:[r,g,b,a] }
   background: {
     internal: "_background",
     baseType: "background",
-    slots: 3,
-    markerType: 1005,
   },
 
   // 多边形: 通过 beginShape()/vertex()/endShape() 构建的任意多边形
   // 数据结构（语义化 JSON）:
   //   {
-  //     id, marker, markerType,
+  //     index,
   //     type: "polygon",
   //     points: [[x,y], ...],    // 已应用当前变换后的顶点
   //     closed: true/false,      // 是否闭合（endShape(CLOSE)）
@@ -129,12 +83,9 @@ functionRegistry.shapes = {
   //     fillOpacity, strokeOpacity,
   //     strokeWeight
   //   }
-  // 注意：slots 仅用于旧版 path 索引，占位即可（几何数据不再依赖 slots）
   polygon: {
     internal: "_polygon",
     baseType: "polygon",
-    slots: 9, // 占位值：与 triangle/ellipse 一致，实际几何数据由 points 承载
-    markerType: 1009,
     // 构建器函数配置：定义用于构建此 shape 的函数及其角色
     builders: {
       beginShape: { role: "begin" },  // 开始构建
@@ -148,33 +99,52 @@ functionRegistry.shapes = {
     },
   },
 
-  // 贝塞尔曲线: geometry = [p1, p2, p3, p4] = 4 slots
-  // 数据结构: [p1, p2, p3, p4, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
-  // 其中:
-  // - p1: 起点 [x1, y1]
-  // - p2: 第一个控制点 [x2, y2]
-  // - p3: 第二个控制点 [x3, y3]
-  // - p4: 终点 [x4, y4]
+  // 贝塞尔曲线
   bezier: {
     internal: "_bezier",
     baseType: "bezier",
-    slots: 10, // 4 geometry + 6 color（不含 marker）
-    markerType: 1010,
   },
 
-  // Catmull-Rom 样条曲线: geometry = [p1, p2, p3, p4] = 4 slots
-  // 数据结构: [p1, p2, p3, p4, fill1, fill2, stroke1, stroke2, opacity, strokeWeight, marker]
-  // 其中:
-  // - p1: 第一个控制点 [x1, y1]
-  // - p2: 起点 [x2, y2]
-  // - p3: 终点 [x3, y3]
-  // - p4: 第二个控制点 [x4, y4]
+  // Catmull-Rom 样条曲线
   curve: {
     internal: "_curve",
     baseType: "curve",
-    slots: 10, // 4 geometry + 6 color（不含 marker）
-    markerType: 1011,
   },
+};
+
+/**
+ * 形状类型前缀编码表
+ * 用于生成稳定的 id：id = typeCode * 10000 + 调用次数
+ * key 为基础图形类型（baseType），value 为前缀编码
+ *
+ * 约定（默认值）：
+ *   1xxxx = ellipse
+ *   2xxxx = rect
+ *   3xxxx = line
+ *   4xxxx = point
+ *   5xxxx = polygon
+ *   6xxxx = arc
+ *   7xxxx = quad
+ *   8xxxx = triangle
+ *   9xxxx = bezier
+ *  10xxxx = curve
+ *  11xxxx = background
+ *
+ * 如需新增渲染图层，只需在此处为新的 baseType 分配唯一前缀编码，
+ * 其余逻辑（id 生成与表达式查找）都会自动对齐。
+ */
+functionRegistry.shapeTypeCode = {
+  ellipse: 1,
+  rect: 2,
+  line: 3,
+  point: 4,
+  polygon: 5,
+  arc: 6,
+  quad: 7,
+  triangle: 8,
+  bezier: 9,
+  curve: 10,
+  background: 11,
 };
 
 /**
@@ -342,16 +312,6 @@ functionRegistry.getShapeNames = function () {
  */
 functionRegistry.getShapeInfo = function (name) {
   return this.shapes[name] || null;
-};
-
-/**
- * 获取形状函数的槽位数
- * @param {string} type - 形状类型
- * @returns {number} 槽位数
- */
-functionRegistry.getShapeSlots = function (type) {
-  var info = this.getShapeInfo(type);
-  return info ? info.slots : 7;
 };
 
 /**
