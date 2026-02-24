@@ -19,6 +19,9 @@ functionRegistry.shapes = {
   ellipse: {
     internal: "_ellipse",
     baseType: "ellipse",
+    // 椭圆/矩形模式常量（与 p5.ellipseMode / rectMode 对齐）
+    // 0=CENTER, 1=RADIUS, 2=CORNER, 3=CORNERS
+    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"],
   },
   circle: {
     internal: "_ellipse",
@@ -41,12 +44,17 @@ functionRegistry.shapes = {
   arc: {
     internal: "_arc",
     baseType: "arc",
+    // 圆弧模式常量（与 p5.arc 的 mode 对齐）
+    // 0=OPEN, 1=CHORD, 2=PIE
+    modes: ["OPEN", "CHORD", "PIE"],
   },
 
   // 矩形/正方形
   rect: {
     internal: "_rect",
     baseType: "rect",
+    // 与 ellipse 共用的模式常量
+    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"],
   },
   square: {
     internal: "_rect",
@@ -86,6 +94,8 @@ functionRegistry.shapes = {
   polygon: {
     internal: "_polygon",
     baseType: "polygon",
+    // 多边形闭合模式常量：endShape(CLOSE)
+    closeModes: ["CLOSE"],
     // 构建器函数配置：定义用于构建此 shape 的函数及其角色
     builders: {
       beginShape: { role: "begin" },  // 开始构建
@@ -212,6 +222,17 @@ functionRegistry.math = {
   PIE: { internal: "PIE", type: "constant" },
   // beginShape/endShape 模式常量
   CLOSE: { internal: "CLOSE", type: "constant" },
+
+  // 椭圆/矩形模式常量（与 p5.ellipseMode / rectMode 对齐）
+  // 0=CENTER, 1=RADIUS, 2=CORNER, 3=CORNERS
+  CENTER: { internal: "CENTER", type: "constant" },
+  RADIUS: { internal: "RADIUS", type: "constant" },
+  CORNER: { internal: "CORNER", type: "constant" },
+  CORNERS: { internal: "CORNERS", type: "constant" },
+
+  // 椭圆/矩形模式设置函数（非渲染函数）
+  ellipseMode: { internal: "ellipseMode" },
+  rectMode: { internal: "rectMode" },
 
   // 基本数学函数（三角与反三角）
   sin: { internal: "sin" },

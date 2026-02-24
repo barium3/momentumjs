@@ -610,6 +610,29 @@ function getMathLib(deps) {
   if (deps.HALF_PI) lines.push("const HALF_PI = Math.PI / 2;");
   if (deps.QUARTER_PI) lines.push("const QUARTER_PI = Math.PI / 4;");
 
+  // 椭圆/矩形模式常量与状态（与 p5.ellipseMode / rectMode 对齐）
+  // 只有在依赖中出现任意一个相关项时才注入
+  if (
+    deps.ellipseMode ||
+    deps.rectMode ||
+    deps.CENTER ||
+    deps.RADIUS ||
+    deps.CORNER ||
+    deps.CORNERS
+  ) {
+    lines.push("const CENTER = 0;");
+    lines.push("const RADIUS = 1;");
+    lines.push("const CORNER = 2;");
+    lines.push("const CORNERS = 3;");
+    // 默认值与 p5 对齐：
+    // - ellipseMode 默认为 CENTER
+    // - rectMode 默认为 CORNER
+    lines.push("var _ellipseMode = CENTER;");
+    lines.push("var _rectMode = CORNER;");
+    lines.push("var ellipseMode = function(m) { _ellipseMode = m; };");
+    lines.push("var rectMode = function(m) { _rectMode = m; };");
+  }
+
   // --- 三角函数与角度 ---
   if (deps.sin) lines.push("var sin = Math.sin;");
   if (deps.cos) lines.push("var cos = Math.cos;");
