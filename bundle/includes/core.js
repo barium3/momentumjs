@@ -19,6 +19,8 @@ var drawComp = null; // draw预合成
 var setupShapeQueue = []; // setup中的shape队列
 var drawShapeQueue = []; // draw中的shape队列
 var mainCompName = null; // 主合成名称（用于跨合成表达式通讯）
+// renderLayers 全局计数器（按基础类型统计调用序号，确保 setup 和 draw 共用同一套 id 序列）
+var _globalRenderIndex = null;
 
 // ========================================
 // Public API - 公共接口
@@ -197,8 +199,8 @@ pub.runParsed = function (
   dependenciesArg,
   setupRenderLayersArg,
   drawRenderLayersArg,
-  hasBackgroundWithoutOpacityArg,
   hasSetupOrDrawArg,
+  drawBackgroundHasAlphaArg
 ) {
   try {
     // 1. 初始化变量
@@ -207,6 +209,8 @@ pub.runParsed = function (
     drawShapeQueue = [];
     setupComp = null;
     drawComp = null;
+    // 重置全局 renderIndex 计数器，保证每次编译从 0 开始累加
+    _globalRenderIndex = {};
 
     // 2. 解析renderLayers参数（可能是字符串或对象）
     var parsedSetupRenderLayers = null;
@@ -303,13 +307,7 @@ pub.runParsed = function (
       deps = null;
     }
 
-    // 10. 解析 hasBackgroundWithoutOpacity 参数（前端 AST 分析结果）
-    var hasBackgroundWithoutOpacity = false;
-    if (hasBackgroundWithoutOpacityArg !== undefined && hasBackgroundWithoutOpacityArg !== null) {
-      hasBackgroundWithoutOpacity = Boolean(hasBackgroundWithoutOpacityArg);
-    }
-
-    // 11. 根据是否有分别分析结果，决定创建方式
+    // 10. 根据是否有分别分析结果，决定创建方式
     var useSeparatedComps = setupShapeQueue.length > 0 || drawShapeQueue.length > 0;
     
     if (useSeparatedComps) {
@@ -399,25 +397,55 @@ pub.runParsed = function (
         drawLayer.startTime = 0;
         
         // 计算draw中background的数量
+        // 注意：前端传入的 drawRenderLayers 目前是「调用顺序数组」：
+        // - 字符串形式："background"
+        // - 或对象形式：{ type: "background", count: N }
+        // 这里需要同时兼容两种格式
         var drawBackgroundCount = 0;
         if (parsedDrawRenderLayers && isArray(parsedDrawRenderLayers)) {
           for (var i = 0; i < parsedDrawRenderLayers.length; i++) {
-            if (parsedDrawRenderLayers[i].type === "background") {
-              drawBackgroundCount = parsedDrawRenderLayers[i].count || 0;
-              break;
+            var item = parsedDrawRenderLayers[i];
+            if (!item) continue;
+
+            // 字符串形式："background"
+            if (typeof item === "string") {
+              if (item === "background") {
+                drawBackgroundCount++;
+              }
+            }
+            // 对象形式：{ type: "background", count: N }
+            else if (item.type === "background") {
+              if (typeof item.count === "number") {
+                drawBackgroundCount += item.count;
+              } else {
+                drawBackgroundCount++;
+              }
             }
           }
         }
         
-        // 添加Echo效果来模拟draw中的透明background拖尾效果
-        // 如果draw中有background且没有不透明度参数，则不添加残影（由前端AST分析决定）
-        if (!hasBackgroundWithoutOpacity) {
+        // 是否在 draw 中使用了带 alpha 参数的 background（由前端运行时统计）
+        var drawBackgroundHasAlpha =
+          drawBackgroundHasAlphaArg !== undefined && drawBackgroundHasAlphaArg !== null
+            ? !!drawBackgroundHasAlphaArg
+            : false;
+
+        // - 除非 draw 中「有 background 且它们的 hasAlpha 全为 false」
+        // - 否则一律挂 Echo，以便保留拖尾能力
+        //    drawBackgroundCount === 0 || drawBackgroundHasAlpha
+        if (drawBackgroundCount === 0 || drawBackgroundHasAlpha) {
+          // 添加Echo效果来模拟draw中的透明background拖尾效果
+          // 是否真正产生拖尾、以及衰减多少，完全由 __engine__ JSON 中的 backgrounds 数组与透明度决定
           addEchoEffect(drawLayer, engineComp, uniqueMainCompName, drawBackgroundCount);
         }
       }
       
       // 组织合成到文件夹中
       organizeCompsIntoFolder(engineComp, setupComp, drawComp, uniqueMainCompName);
+      
+      // 在主合成中为 createSlider() 创建控制图层与 Slider 控件（放在所有图层创建之后，保证控制图层置顶）
+      // 仅从 __engine__ JSON 上下文中自动提取 controllers（已移除旧版 sliderConfigArg 兼容逻辑）
+      controllerSliderCount = setupControllersFromConfigs(engineComp, null);
       
       // 最终跳转到主合成
       engineComp.openInViewer();
@@ -444,6 +472,10 @@ pub.runParsed = function (
       
       // 组织合成到文件夹中
       organizeCompsIntoFolder(engineComp, null, null, uniqueMainCompName);
+      
+      // 在主合成中为 createSlider() 创建控制图层与 Slider 控件（放在所有图层创建之后，保证控制图层置顶）
+      // 仅从 __engine__ JSON 上下文中自动提取 controllers（已移除旧版 sliderConfigArg 兼容逻辑）
+      controllerSliderCount = setupControllersFromConfigs(engineComp, null);
       
       // 最终跳转到主合成
       engineComp.openInViewer();
@@ -576,7 +608,7 @@ function createEngineLayer(drawCode, setupCode, globalVars, deps, mainCompNamePa
     hasSetup,
     shapeCounts,
     deps,
-    mainCompNameParam,
+    mainCompNameParam
   );
 
   // 6. 应用表达式并设置图层属性（Source Text 表达式返回 JSON 字符串）
@@ -602,6 +634,10 @@ function cleanupEngineLayer() {
 
 /**
  * 处理renderLayers数组，构建shapeQueue
+ * 使用全局的 _globalRenderIndex 按基础类型累加调用次数，
+ * 确保 setup 与 draw 共用同一套稳定的 id 序列：
+ *   id = typeCode * 10000 + 调用次数
+ *
  * @param {Array} renderLayersArg - renderLayers数组
  * @returns {Array} shapeQueue数组
  */
@@ -612,7 +648,8 @@ function processRenderLayers(renderLayersArg) {
     isArray(renderLayersArg) &&
     renderLayersArg.length > 0
   ) {
-    var renderIndex = 0;
+    // 如果还没有初始化，全局 renderIndex 从空对象开始
+    var renderIndex = _globalRenderIndex || {};
 
     // 支持精确调用序列格式：
     // ["ellipse", "rect", "ellipse", ...] 或 [{ type: "ellipse" }, { type: "rect" }, ...]
@@ -645,9 +682,6 @@ function processRenderLayers(renderLayersArg) {
       }
 
       // 计算该类型的调用次数，用于生成稳定的 id（类型前缀 + 调用次数）
-      if (!renderIndex) {
-        renderIndex = {};
-      }
       if (!renderIndex[type]) {
         renderIndex[type] = 0;
       }
@@ -669,6 +703,8 @@ function processRenderLayers(renderLayersArg) {
         id: id,
       });
     }
+    // 将本次统计结果写回全局，供后续的 processRenderLayers 继续累加
+    _globalRenderIndex = renderIndex;
   }
   return queue;
 }
@@ -762,13 +798,14 @@ function buildExpression(
   hasSetup,
   shapeCounts,
   deps,
-  mainCompNameParam,
+  mainCompNameParam
 ) {
   // 解析依赖对象
   var mathDeps = deps && deps.math ? deps.math : {};
   var transformDeps = deps && deps.transforms ? deps.transforms : {};
   var colorDeps = deps && deps.colors ? deps.colors : {};
   var shapeDeps = deps && deps.shapes ? deps.shapes : {};
+  var controllerDeps = deps && deps.controllers ? deps.controllers : {};
 
   // background 依赖 color()，确保加载 color 函数
   if (shapeCounts.background > 0) {
@@ -790,7 +827,7 @@ function buildExpression(
     mathDeps.noiseSeed = true;
   }
 
-  // 环境依赖：由前端的 parseConstantsAndVariables 统一处理
+  // 环境依赖：由前端的 AST 依赖分析统一处理
   var envDeps = deps && deps.environment ? deps.environment : {};
 
   // 检查是否有任何形状需要渲染（动态检查）
@@ -853,6 +890,7 @@ function buildExpression(
   // - shapes: 形状对象数组（由形状库填充）
   // - backgrounds: 背景对象数组（由 background 库填充）
   // - globals: 全局变量对象（用于跨合成访问）
+  // - controllers: 控制器配置数组（由 controller 库填充）
   expr.push("var _ctx = {");
   expr.push("  version: 1,");
   expr.push("  fps: fps,");
@@ -864,10 +902,19 @@ function buildExpression(
   expr.push("  shapes: [],");
   expr.push("  backgrounds: [],");
   expr.push("  globals: {},");
+  expr.push("  controllers: [],");
   expr.push("  _lastComputedFrame: -1  // 帧循环缓存：记录上次计算的帧号");
   expr.push("};");
   expr.push("var _shapes = _ctx.shapes;");
   expr.push("var _backgrounds = _ctx.backgrounds;");
+
+  // 控制器库（按需加载）
+  if (hasKeys(controllerDeps)) {
+    expr.push("// 控制器库（按需加载）");
+    expr.push(
+      getControllerLib(buildDepsFromRegistry(controllerDeps, "controllers")),
+    );
+  }
 
   // 按需加载数学库（每个函数单独判断）
   if (hasKeys(mathDeps)) {

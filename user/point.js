@@ -1,0 +1,1 @@
+function setup(){var center = createPoint(width / 2, height / 2);var x = center.x();var y = center.y();// 比如画一个跟随点控件的圆ellipse(x, y, 50, 50);}

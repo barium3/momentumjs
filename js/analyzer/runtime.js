@@ -125,6 +125,25 @@ function cleanupGlobals(allFunctions, allVariables) {
       delete window[varName];
     }
   });
+
+  // 清理我们安装的 Momentum stub，避免污染下一次分析/执行
+  if (window.__momentumStubs) {
+    for (var k in window.__momentumStubs) {
+      if (window.__momentumStubs.hasOwnProperty(k) && window.__momentumStubs[k]) {
+        try {
+          delete window[k];
+        } catch (e) {
+          // 某些环境 delete 可能失败，退回为 undefined
+          window[k] = undefined;
+        }
+      }
+    }
+    try {
+      delete window.__momentumStubs;
+    } catch (e2) {
+      window.__momentumStubs = undefined;
+    }
+  }
 }
 
 /**
@@ -272,8 +291,37 @@ function createShapeWrapper(options) {
   var funcName = options.funcName;
   var baseType = options.baseType;
   var context = options.context || {};
+  var backgroundInfo = options.backgroundInfo;
   
   return function() {
+    // 专门处理 background：记录是否显式传入了 alpha 参数
+    if (baseType === "background" && backgroundInfo) {
+      var hasAlpha = false;
+      var len = arguments.length;
+
+      // background(gray, a) 或 background(r, g, b, a)
+      if (len === 2 || len === 4) {
+        hasAlpha = true;
+      } else if (len === 1) {
+        // background(c)：c 可能是 color() 返回的对象或数组
+        var arg0 = arguments[0];
+        if (arg0 && typeof arg0 === "object") {
+          // p5.Color：有 levels 数组，长度 >= 4 视为显式带 alpha
+          if (arg0.levels && arg0.levels.length >= 4) {
+            hasAlpha = true;
+          }
+          // 数组形式 [r, g, b, a]
+          else if (typeof arg0.length === "number" && arg0.length >= 4) {
+            hasAlpha = true;
+          }
+        }
+      }
+
+      if (hasAlpha) {
+        backgroundInfo.hasAlpha = true;
+      }
+    }
+
     recordShapeExecution(context, baseType, funcName);
     return original.apply(p, arguments);
   };
@@ -301,6 +349,9 @@ function exposeFunctions(context, mode) {
   var getEnvironmentFunctionNames = context.getEnvironmentFunctionNames;
   var collectDeps = context.collectDeps;
   var collectShape = context.collectShape;
+
+  // 执行模式下，可能携带 background 统计信息
+  var backgroundInfo = context.backgroundInfo;
 
   var shapeTypeMap = getShapeTypeMap ? getShapeTypeMap(context.cache) : {};
   var transformFuncs = mode === "analysis" && getTransformFunctionNames ? getTransformFunctionNames() : [];
@@ -351,6 +402,7 @@ function exposeFunctions(context, mode) {
               loopExecutions: loopExecutions,
               maxLoopCount: maxLoopCount,
             },
+            backgroundInfo: backgroundInfo,
           });
         } else {
           // 分析模式：普通 shape 函数
@@ -432,16 +484,8 @@ class P5Runtime {
     this.container = null;
     this.initPromise = null;
 
-    // 条件分支识别器
+    // 条件分支识别器（仅用于渲染统计阶段）
     this.conditionalAnalyzer = new ConditionalAnalyzer();
-
-    // Momentum 库函数映射（用于依赖分析）
-    this.momentumFunctions = {
-      shapes: buildCategoryMappings("shapes", ["transform", "color"]),
-      transforms: buildCategoryMappings("transforms", ["transform"]),
-      colors: buildCategoryMappings("colors", ["color"]),
-      math: buildCategoryMappings("math", ["math"]),
-    };
 
     // 缓存形状类型映射
     this._shapeTypeMapCache = null;
@@ -580,6 +624,7 @@ class P5Runtime {
         var p = self.p5Instance;
         var renderOrder = [];
         var loopExecutions = { value: 0 };
+        var backgroundInfo = { hasAlpha: false };
 
         exposeVariables(self.allVariables, p);
 
@@ -588,11 +633,15 @@ class P5Runtime {
           allFunctions: self.allFunctions,
           renderFunctions: self.renderFunctions,
           renderOrder: renderOrder,
+          backgroundInfo: backgroundInfo,
           getShapeTypeMap: getShapeTypeMap,
           cache: self,
           loopExecutions: loopExecutions,
           maxLoopCount: self.options.maxLoopCount,
         }, "execution");
+
+        // 安装 Momentum 运行时 stub（如 createPoint），避免分析阶段缺少函数导致报错
+        installMomentumStubs();
 
         clearUserEntryPoints();
         
@@ -632,6 +681,9 @@ class P5Runtime {
         const result = {
           renderOrder: renderOrder,
           loopExecutions: loopExecutions.value,
+          background: {
+            hasAlpha: backgroundInfo.hasAlpha,
+          },
         };
         
         clearTimeout(timeoutId);
@@ -713,10 +765,12 @@ class P5Runtime {
         // setup 的统计
         var setupRenderOrder = [];
         var setupLoopExecutions = { value: 0 };
+        var setupBackgroundInfo = { hasAlpha: false };
         
         // draw 的统计
         var drawRenderOrder = [];
         var drawLoopExecutions = { value: 0 };
+        var drawBackgroundInfo = { hasAlpha: false };
 
         exposeVariables(self.allVariables, p);
 
@@ -726,11 +780,15 @@ class P5Runtime {
           allFunctions: self.allFunctions,
           renderFunctions: self.renderFunctions,
           renderOrder: setupRenderOrder,
+          backgroundInfo: setupBackgroundInfo,
           getShapeTypeMap: getShapeTypeMap,
           cache: self,
           loopExecutions: setupLoopExecutions,
           maxLoopCount: self.options.maxLoopCount,
         }, "execution");
+
+        // 安装 Momentum 运行时 stub（如 createPoint），避免分析阶段缺少函数导致报错
+        installMomentumStubs();
 
         clearUserEntryPoints();
         
@@ -759,6 +817,7 @@ class P5Runtime {
           allFunctions: self.allFunctions,
           renderFunctions: self.renderFunctions,
           renderOrder: drawRenderOrder,
+          backgroundInfo: drawBackgroundInfo,
           getShapeTypeMap: getShapeTypeMap,
           cache: self,
           loopExecutions: drawLoopExecutions,
@@ -780,11 +839,17 @@ class P5Runtime {
         const setupResult = {
           renderOrder: setupRenderOrder,
           loopExecutions: setupLoopExecutions.value,
+          background: {
+            hasAlpha: setupBackgroundInfo.hasAlpha,
+          },
         };
         
         const drawResult = {
           renderOrder: drawRenderOrder,
           loopExecutions: drawLoopExecutions.value,
+          background: {
+            hasAlpha: drawBackgroundInfo.hasAlpha,
+          },
         };
         
         clearTimeout(timeoutId);
@@ -813,111 +878,17 @@ class P5Runtime {
    * @returns {Promise<Object>} 依赖分析结果
    */
   async analyzeDependencies(code) {
+    // 依赖分析完全改为基于 AST 的静态分析，不再通过运行时包装和执行收集
     await this.init();
 
-    var self = this;
-
-    var shapeRequires = {};
-    if (!functionRegistry.shapes) {
-      throw new Error("[Runtime] functionRegistry.shapes not found!");
-    }
-    for (var name in functionRegistry.shapes) {
-      if (functionRegistry.shapes.hasOwnProperty(name)) {
-        var info = functionRegistry.shapes[name];
-        var baseType = info.baseType || name;
-        if (!shapeRequires.hasOwnProperty(baseType)) {
-          shapeRequires[baseType] = false;
-        }
-      }
+    if (typeof analyzeDependenciesAST !== "function") {
+      throw new Error(
+        "[Runtime] analyzeDependenciesAST not found. Please ensure dependencyAnalyzer.js is loaded.",
+      );
     }
 
-    const dependencies = {
-      shapes: {},
-      transforms: {},
-      colors: {},
-      math: {},
-      requires: {
-        transform: false,
-        color: false,
-        math: false,
-        shape: shapeRequires,
-      },
-    };
-
-    const collectDeps = function (category, funcName) {
-      if (
-        self.momentumFunctions[category] &&
-        self.momentumFunctions[category][funcName]
-      ) {
-        const info = self.momentumFunctions[category][funcName];
-        dependencies[category][funcName] = true;
-        if (info.deps) {
-          info.deps.forEach(function (dep) {
-            dependencies.requires[dep] = true;
-          });
-        }
-      } else {
-        // 即使函数不在 momentumFunctions 中，也收集依赖（用于构建器函数如 beginContour）
-        // 这样可以检测到使用了哪些构建器函数
-        if (!dependencies[category]) {
-          dependencies[category] = {};
-        }
-        dependencies[category][funcName] = true;
-      }
-    };
-
-    const collectShape = function (shapeType) {
-      if (dependencies.requires.shape.hasOwnProperty(shapeType)) {
-        dependencies.requires.shape[shapeType] = true;
-      }
-    };
-
-    return new Promise(function (resolve, reject) {
-      var timeoutId = setTimeout(function () {
-        reject(new Error("依赖分析超时"));
-      }, self.options.timeout);
-
-      try {
-        var p = self.p5Instance;
-
-        exposeVariables(self.allVariables, p);
-
-        exposeP5Functions({
-          p: p,
-          allFunctions: self.allFunctions,
-          renderFunctions: self.renderFunctions,
-          cache: self,
-          getShapeTypeMap: getShapeTypeMap,
-          getTransformFunctionNames: getTransformFunctionNames,
-          getColorFunctionNames: getColorFunctionNames,
-          getEnvironmentFunctionNames: getEnvironmentFunctionNames,
-          collectDeps: collectDeps,
-          collectShape: collectShape,
-        }, "analysis");
-
-        clearUserEntryPoints();
-        window.eval(code);
-
-        parseConstantsAndVariables(code, dependencies);
-
-        if (typeof window.setup === "function") {
-          window.setup();
-        }
-
-        if (typeof window.draw === "function") {
-          window.draw();
-        }
-
-        cleanupGlobals(self.allFunctions, self.allVariables);
-
-        clearTimeout(timeoutId);
-        resolve(dependencies);
-      } catch (err) {
-        clearTimeout(timeoutId);
-        cleanupGlobals(self.allFunctions, self.allVariables);
-        reject(new Error(err.message || "依赖分析错误"));
-      }
-    });
+    // analyzeDependenciesAST 是同步函数，这里保持 async 接口向后兼容
+    return analyzeDependenciesAST(code);
   }
 
 }

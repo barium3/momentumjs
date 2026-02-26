@@ -1,1 +1,1 @@
-var x = 100;var speed = 5;function draw() {  // 变量 x 会每帧累积增加，实现移动动画  x += speed;     // 结合三角函数  var y = 500 + sin(frameCount * 0.1) * 100;    ellipse(x, y, 50, 50);}
+let myPicker;function setup() {  createCanvas(100, 100);  // Create a color picker and set its position.  myPicker = createColorPicker(200,0,10,10);    // Use the color picker to paint the background.  }function draw() {  let c = myPicker.color();  if(frameCount%20==5){     background(0);  }else{  background(c);   }  ellipse(frameCount,10,10,10);}

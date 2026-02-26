@@ -289,15 +289,13 @@ window.codeExecutor = (function () {
             ? JSON.stringify(separatedResult.drawRenderLayers)
             : "null";
 
+        // 是否在 draw 中使用了带 alpha 参数的 background（由运行时统计）
+        const drawBackgroundHasAlpha =
+          separatedResult && separatedResult.drawBackgroundHasAlpha === true;
+
         // 调试日志
         console.log(`[CodeExecutor] setupRenderLayersArg:`, setupRenderLayersArg);
         console.log(`[CodeExecutor] drawRenderLayersArg:`, drawRenderLayersArg);
-
-        // 传递 draw 中是否有 background 且没有不透明度参数的信息
-        const hasBackgroundWithoutOpacityArg =
-          separatedResult && separatedResult.hasBackgroundWithoutOpacity !== undefined
-            ? separatedResult.hasBackgroundWithoutOpacity
-            : false;
 
         // 检测是否有 setup 或 draw 函数（前端 AST 判断）
         const hasSetup = !!(parsed.setupCode && parsed.setupCode.length > 0);
@@ -332,14 +330,14 @@ window.codeExecutor = (function () {
           frameRateArg +
           ", " +
           dependenciesArg +
-          ", " +
+          ", " + // deps
           setupRenderLayersArg +
-          ", " +
+          ", " + // setupRenderLayers
           drawRenderLayersArg +
-          ", " +
-          hasBackgroundWithoutOpacityArg +
-          ", " +
+          ", " + // drawRenderLayers
           hasSetupOrDraw +
+          ", " +
+          drawBackgroundHasAlpha +
           ")";
 
         const scriptToRun = `try { ${finalCode}; "SUCCESS"; } catch(e) { "ERROR: " + e.message + " at line " + e.line; }`;

@@ -288,6 +288,34 @@ functionRegistry.math = {
 };
 
 /**
+ * 控制器/交互函数定义
+ * 统一管理所有与 UI 控件、交互相关但本身不产生渲染输出的函数
+ * 这些函数在浏览器侧通常转发到真实 UI 控件，在 AE 表达式侧由 core/controller 模块提供实现
+ */
+functionRegistry.controllers = {
+  // Slider 控件：在浏览器侧通常对应 p5.js DOM Slider，
+  // 在 AE 表达式侧由 core.js 注入同名辅助函数（返回 { value() } 接口）
+  // 两端保持 API 一致：slider = createSlider(min, max, value, step); slider.value()
+  createSlider: { internal: "createSlider" },
+  // Angle 控件：角度控制，在 AE 表达式侧由 createAngle() 提供角度数值
+  // API：var ang = createAngle(defaultDegrees); var v = ang.value(); // 以“度”为单位
+  createAngle: { internal: "createAngle" },
+  // Color 控件：在浏览器侧对应颜色选择器，在 AE 表达式侧由 createColorPicker() 提供
+  // API：picker = createColorPicker([r, g, b, a]); picker.value()
+  createColorPicker: { internal: "createColorPicker" },
+  // Checkbox 控件：在浏览器侧通常对应 p5.js DOM createCheckbox，
+  // 在 AE 表达式侧由 createCheckbox() 提供布尔控制器（勾选/取消）
+  // 建议使用：var cb = createCheckbox(initialChecked); if (cb.checked()) { ... }
+  createCheckbox: { internal: "createCheckbox" },
+  // Select 控件：下拉选择器/枚举选择，在 AE 表达式侧由 createSelect() 提供离散选项控制
+  // 建议使用：var sel = createSelect(optionsArray, defaultIndex); var v = sel.value();
+  createSelect: { internal: "createSelect" },
+  // Point 控件：二维点控制，在 AE 表达式侧由 createPoint() 提供 [x, y] 控制
+  // API：var pt = createPoint(defaultX, defaultY); var v = pt.value(); var x = pt.x(); var y = pt.y();
+  createPoint: { internal: "createPoint" },
+};
+
+/**
  * 环境配置函数和变量定义
  * 包含：配置函数（createCanvas, frameRate）和环境变量（frameCount, width, height）
  * 环境变量按需注入，内部使用 currentFrame/fps 等语义化命名
@@ -296,28 +324,14 @@ functionRegistry.environment = {
   // 配置函数
   createCanvas: { internal: "createCanvas" },
   frameRate: { internal: "frameRate" },
-
   // 环境变量（按需注入）
   frameCount: { internal: "frameCount", type: "variable" },
   width: { internal: "width", type: "constant" },
   height: { internal: "height", type: "constant" },
 };
 
-/**
- * 多边形构建函数定义（已废弃，信息已整合到 shapes.polygon.builders）
- * 保留此定义以保持向后兼容，但建议使用 shapes.polygon.builders
- * @deprecated 使用 shapes.polygon.builders 代替
- */
-functionRegistry.polygonBuilders = {
-  beginShape: { internal: "beginShape", type: "polygonBuilder" },
-  vertex: { internal: "vertex", type: "polygonBuilder" },
-  beginContour: { internal: "beginContour", type: "polygonBuilder" },
-  endContour: { internal: "endContour", type: "polygonBuilder" },
-  bezierVertex: { internal: "bezierVertex", type: "polygonBuilder" },
-  quadraticVertex: { internal: "quadraticVertex", type: "polygonBuilder" },
-  curveVertex: { internal: "curveVertex", type: "polygonBuilder" },
-  endShape: { internal: "endShape", type: "polygonBuilder" },
-};
+// polygonBuilders 旧定义已废弃，相关信息已完全整合到 shapes.polygon.builders，
+// 为避免混淆，这里不再暴露额外的 polygonBuilders 别名。
 
 /**
  * 获取所有形状函数名（供前端渲染统计使用）
@@ -353,6 +367,10 @@ functionRegistry.getP5Functions = function () {
   result.push.apply(result, Object.keys(this.colors));
   result.push.apply(result, Object.keys(this.math));
   result.push.apply(result, Object.keys(this.environment));
+  // 控制器/交互函数（如 createSlider）
+  if (this.controllers) {
+    result.push.apply(result, Object.keys(this.controllers));
+  }
   // 收集所有 shape 的构建器函数
   if (this.shapes) {
     for (var shapeName in this.shapes) {
@@ -363,10 +381,6 @@ functionRegistry.getP5Functions = function () {
         }
       }
     }
-  }
-  // 向后兼容：如果存在旧的 polygonBuilders，也包含进来
-  if (this.polygonBuilders) {
-    result.push.apply(result, Object.keys(this.polygonBuilders));
   }
   return result;
 };

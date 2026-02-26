@@ -16,6 +16,7 @@ var m = {};
   #include "includes/shape.js"
   #include "includes/environment.js"
   #include "includes/structure.js"
+  #include "includes/controller.js"
   #include "includes/core.js"
 
 

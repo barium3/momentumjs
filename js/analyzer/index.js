@@ -42,59 +42,6 @@ class P5Analyzer {
   }
 
   /**
-   * AST 分析：检测 draw 代码中是否有 background 调用且没有不透明度参数
-   * background 调用格式：
-   * - background(gray) - 1个参数，没有不透明度
-   * - background(gray, a) - 2个参数，有不透明度
-   * - background(v1, v2, v3) - 3个参数，没有不透明度
-   * - background(v1, v2, v3, a) - 4个参数，有不透明度
-   * - background(c) - 1个参数，c可能是color()的结果（可能包含不透明度）
-   * 
-   * 如果检测到 background 调用且参数数量是 1 或 3（没有不透明度参数），返回 true
-   * @param {string} drawCode - draw函数代码
-   * @returns {boolean} 是否有 background 调用且没有不透明度参数
-   */
-  hasBackgroundWithoutOpacity(drawCode) {
-    if (!drawCode) return false;
-    
-    // 匹配 background( 调用，提取参数部分
-    // 使用正则表达式匹配 background( 到对应的 )
-    const backgroundPattern = /\bbackground\s*\(/g;
-    const matches = [];
-    let match;
-    
-    while ((match = backgroundPattern.exec(drawCode)) !== null) {
-      const startPos = match.index + match[0].length;
-      let depth = 1;
-      let i = startPos;
-      let paramStr = "";
-      
-      // 找到匹配的右括号
-      while (i < drawCode.length && depth > 0) {
-        const char = drawCode[i];
-        if (char === '(') depth++;
-        else if (char === ')') depth--;
-        else if (depth === 1) paramStr += char;
-        i++;
-      }
-      
-      if (depth === 0) {
-        // 解析参数：去除空白，按逗号分割
-        const params = paramStr.split(',').map(p => p.trim()).filter(p => p.length > 0);
-        const paramCount = params.length;
-        
-        // 如果参数数量是 1 或 3，认为没有不透明度参数
-        // 注意：background(c) 中 c 可能是 color() 的结果，但为了简化，我们假设单参数时没有不透明度
-        if (paramCount === 1 || paramCount === 3) {
-          return true;
-        }
-      }
-    }
-    
-    return false;
-  }
-
-  /**
    * 分别分析 setup 和 draw 中的 shape 调用
    * @param {string} setupCode - setup函数代码
    * @param {string} drawCode - draw函数代码
@@ -111,13 +58,17 @@ class P5Analyzer {
     // 构建draw的renderLayers：直接使用完整的调用顺序
     const drawRenderLayers = (result.drawResult.renderOrder || []).slice();
 
-    // AST 分析：检测 draw 中是否有 background 调用且没有不透明度参数
-    const hasBackgroundWithoutOpacity = this.hasBackgroundWithoutOpacity(drawCode);
+    // 统计 background 是否显式带 alpha 参数（分别针对 setup / draw）
+    const setupBackgroundHasAlpha =
+      !!(result.setupResult.background && result.setupResult.background.hasAlpha);
+    const drawBackgroundHasAlpha =
+      !!(result.drawResult.background && result.drawResult.background.hasAlpha);
 
     return {
       setupRenderLayers: setupRenderLayers,
       drawRenderLayers: drawRenderLayers,
-      hasBackgroundWithoutOpacity: hasBackgroundWithoutOpacity,
+      setupBackgroundHasAlpha: setupBackgroundHasAlpha,
+      drawBackgroundHasAlpha: drawBackgroundHasAlpha,
       error: null,
       fallback: false,
     };
