@@ -382,7 +382,8 @@ pub.runParsed = function (
       // 主合成的 __engine__ 图层需要执行所有代码（setup + draw），以便生成 shapes 数据
       // 子合成中的形状图层会通过表达式从主合成的 __engine__ 图层读取数据
       // 主合成中的 engine 图层不需要跨合成访问，传入 null
-      createEngineLayer(drawCode || "", setupCode || "", globalCode || "", deps, null, mergedShapeCounts);
+      // 传入 allShapesQueue 以便 buildExpression 可以收集 fontMetrics
+      createEngineLayer(drawCode || "", setupCode || "", globalCode || "", deps, null, mergedShapeCounts, allShapesQueue);
       shapeQueue = originalShapeQueue;
       
       // 在主合成中添加预合成图层
@@ -465,7 +466,8 @@ pub.runParsed = function (
       
       // 在主合成中创建engine图层
       // 主合成中的 engine 图层不需要跨合成访问，传入 null
-      createEngineLayer(drawCode || "", setupCode || "", globalCode || "", deps, null, mergedShapeCounts);
+      // 传递 shapeQueue 以便 buildExpression 可以收集 fontMetrics
+      createEngineLayer(drawCode || "", setupCode || "", globalCode || "", deps, null, mergedShapeCounts, shapeQueue);
       
       // 在主合成中创建shape图层
       createShapeLayers(mainCompName);
@@ -554,7 +556,7 @@ error = pub.error = function (msg) {
 // Engine Layer - 引擎图层
 // ========================================
 
-function createEngineLayer(drawCode, setupCode, globalVars, deps, mainCompNameParam, shapeCountsParam) {
+function createEngineLayer(drawCode, setupCode, globalVars, deps, mainCompNameParam, shapeCountsParam, shapeQueueParam) {
   // 1. 清理已存在的 __engine__ 图层
   cleanupEngineLayer();
 
@@ -608,7 +610,8 @@ function createEngineLayer(drawCode, setupCode, globalVars, deps, mainCompNamePa
     hasSetup,
     shapeCounts,
     deps,
-    mainCompNameParam
+    mainCompNameParam,
+    shapeQueueParam
   );
 
   // 6. 应用表达式并设置图层属性（Source Text 表达式返回 JSON 字符串）
@@ -698,10 +701,22 @@ function processRenderLayers(renderLayersArg) {
 
       var id = typeCode * 10000 + renderIndex[type];
 
-      queue.push({
+      // 保留来自前端的附加元数据（如 textKind），便于后端根据更多信息创建图层
+      var entry = {
         type: type,
         id: id,
-      });
+      };
+
+      // 如果是对象格式，拷贝除 type 以外的字段（例如 textKind）
+      if (item && typeof item === "object") {
+        for (var key in item) {
+          if (item.hasOwnProperty(key) && key !== "type") {
+            entry[key] = item[key];
+          }
+        }
+      }
+
+      queue.push(entry);
     }
     // 将本次统计结果写回全局，供后续的 processRenderLayers 继续累加
     _globalRenderIndex = renderIndex;
@@ -798,13 +813,15 @@ function buildExpression(
   hasSetup,
   shapeCounts,
   deps,
-  mainCompNameParam
+  mainCompNameParam,
+  shapeQueueParam
 ) {
   // 解析依赖对象
   var mathDeps = deps && deps.math ? deps.math : {};
   var transformDeps = deps && deps.transforms ? deps.transforms : {};
   var colorDeps = deps && deps.colors ? deps.colors : {};
   var shapeDeps = deps && deps.shapes ? deps.shapes : {};
+  var typographyDeps = deps && deps.typography ? deps.typography : {};
   var controllerDeps = deps && deps.controllers ? deps.controllers : {};
 
   // background 依赖 color()，确保加载 color 函数
@@ -817,6 +834,15 @@ function buildExpression(
   if (shapeCounts.curve > 0) {
     if (!mathDeps._curveTightnessVar) mathDeps = mathDeps || {};
     mathDeps._curveTightnessVar = true;
+  }
+
+  // text 在 box 模式下依赖 rectMode，确保加载 rectMode 相关代码
+  // 注意：即使没有显式调用 rectMode，box 文本也需要 _rectMode 变量（使用默认值 CORNER）
+  if (shapeCounts.text > 0) {
+    if (!mathDeps.rectMode) mathDeps = mathDeps || {};
+    mathDeps.rectMode = true;
+    // 确保 CORNER 常量也被注入（rectMode 默认值）
+    if (!mathDeps.CORNER) mathDeps.CORNER = true;
   }
 
   // setup 函数中自动调用 randomSeed() 和 noiseSeed()，确保这两个函数始终被注入
@@ -883,6 +909,26 @@ function buildExpression(
     expr.push(getEnvironmentLib(envDeps));
   }
 
+  // 收集 text 图层的 fontMetrics，构建映射表供表达式使用
+  // key 格式：fontFamily_fontSize（例如 "Arial_12"）
+  // 优先使用传入的 shapeQueueParam，否则使用全局 shapeQueue（向后兼容）
+  var queueForMetrics = shapeQueueParam || shapeQueue;
+  var fontMetricsMap = {};
+  if (queueForMetrics && queueForMetrics.length > 0) {
+    for (var i = 0; i < queueForMetrics.length; i++) {
+      var item = queueForMetrics[i];
+      if (item && item.type === "text" && item.fontMetrics) {
+        var fontFamily = item.fontFamily || "Arial";
+        var fontSize = item.fontSize || 12;
+        var key = fontFamily + "_" + fontSize;
+        // 如果该 key 已存在，跳过（避免重复）
+        if (!fontMetricsMap[key]) {
+          fontMetricsMap[key] = item.fontMetrics;
+        }
+      }
+    }
+  }
+
   // 上下文对象：统一承载环境信息与渲染结果（语义化 JSON）
   // - version: 协议版本，便于未来演进
   // - fps/frame/time: 当前合成播放状态
@@ -891,6 +937,7 @@ function buildExpression(
   // - backgrounds: 背景对象数组（由 background 库填充）
   // - globals: 全局变量对象（用于跨合成访问）
   // - controllers: 控制器配置数组（由 controller 库填充）
+  // - fontMetrics: 字体 metrics 映射表（key: "fontFamily_fontSize", value: {baselineOffsetRatio, ...}）
   expr.push("var _ctx = {");
   expr.push("  version: 1,");
   expr.push("  fps: fps,");
@@ -903,6 +950,9 @@ function buildExpression(
   expr.push("  backgrounds: [],");
   expr.push("  globals: {},");
   expr.push("  controllers: [],");
+  // 将 fontMetrics 映射表序列化为 JSON 字符串，然后在表达式中解析
+  var fontMetricsJson = JSON.stringify(fontMetricsMap);
+  expr.push("  fontMetrics: " + fontMetricsJson + ",");
   expr.push("  _lastComputedFrame: -1  // 帧循环缓存：记录上次计算的帧号");
   expr.push("};");
   expr.push("var _shapes = _ctx.shapes;");
@@ -956,6 +1006,19 @@ function buildExpression(
     expr.push("// 形状函数库（按需加载）");
     // 从 registry 自动构建形状依赖对象，不需要手动维护函数列表
     expr.push(getShapeLib(buildShapeDepsFromRegistry(shapeCounts)));
+  }
+
+  // 按需加载排版/文本库（不直接产生形状 path，只负责 text 相关表达式）
+  var needsTextShape = shapeCounts && shapeCounts.text > 0;
+  var hasTypographyFuncs = hasKeys(typographyDeps);
+  if (needsTextShape || hasTypographyFuncs) {
+    var typoDepsForLib = {
+      text: needsTextShape,
+      textSize: !!typographyDeps.textSize,
+      textLeading: !!typographyDeps.textLeading,
+    };
+    expr.push("// 排版 / 文本库（按需加载）");
+    expr.push(getTypographyLib(typoDepsForLib));
   }
 
   // 跨合成全局变量访问支持（仅在子合成中生成，主合成不需要）

@@ -21,7 +21,8 @@ var COLOR_DEFAULTS = {
   maxRGB: [255, 255, 255, 255], // [r, g, b, a] max values for RGB
   maxHSB: [360, 100, 100, 1], // [h, s, b, a] max values for HSB
   maxHSL: [360, 100, 100, 1], // [h, s, l, a] max values for HSL
-  fillColor: [1, 1, 1, 1], // 默认填充色 (白色)
+  // 全局默认填充仍然保持白色，保证与 p5 默认一致
+  fillColor: [1, 1, 1, 1],
   strokeColor: [0, 0, 0, 1], // 默认描边色 (黑色)
   strokeWeight: 1,
 };
@@ -53,6 +54,11 @@ function getColorStateLib() {
     "var _fillColor = [" + defaults.fillColor.join(", ") + "];",
     "var _strokeColor = [" + defaults.strokeColor.join(", ") + "];",
     "var _strokeWeight = " + defaults.strokeWeight + ";",
+    // 标记是否用户显式调用过 fill()/stroke()，用于让 text 拥有独立的“首帧默认样式”",
+    "var _hasUserFill = false;",
+    "var _hasUserStroke = false;",
+    // text 专用默认填充色（0-1 空间，黑色）；stroke 默认依赖 text 自己的“无描边”设置",
+    "var _defaultTextFillColor = [0, 0, 0, 1];",
     "var _noFill = false;",
     "var _noStroke = false;",
     "var _lastFillColor = null;",
@@ -548,12 +554,12 @@ function getColorLib(deps) {
   // fill/stroke 支持数组、CSS 字符串、数字参数（通过 color 解析）
   if (deps.fill) {
     lib.push(
-      'function fill() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _fillColor = arguments[0]; } else { _fillColor = color.apply(null, arguments); } _noFill = false; }',
+      'function fill() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _fillColor = arguments[0]; } else { _fillColor = color.apply(null, arguments); } _noFill = false; _hasUserFill = true; }',
     );
   }
   if (deps.stroke) {
     lib.push(
-      'function stroke() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _strokeColor = arguments[0]; } else { _strokeColor = color.apply(null, arguments); } _noStroke = false; }',
+      'function stroke() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _strokeColor = arguments[0]; } else { _strokeColor = color.apply(null, arguments); } _noStroke = false; _hasUserStroke = true; }',
     );
   }
 

@@ -199,6 +199,11 @@ window.codeExecutor = (function () {
   }
 
   /**
+   * 注：之前此处曾做过前端 font metrics 测量（canvas/DOM），并将结果注入到 renderLayers。
+   * 目前已移除该逻辑：前端不再检测 ascent/descent/baseline 等 metrics。
+   */
+
+  /**
    * 在前端解析 Processing 代码，提取关键部分
    */
   function parseProcessingCode(code) {
@@ -268,13 +273,15 @@ window.codeExecutor = (function () {
           separatedResult = null;
         }
 
+        // 不再注入任何 font metrics：setup/draw 的 renderLayers 直接透传
+
         // 构建调用参数
         const drawArg = JSON.stringify(parsed.drawCode || "");
         const setupArg = JSON.stringify(parsed.setupCode || "");
         const globalArg = JSON.stringify(parsed.globalCode || "");
         const nameArg = JSON.stringify(compName);
 
-        // 分别传递setup和draw的renderLayers
+        // 分别传递setup和draw的renderLayers（已包含字体 metrics）
         const setupRenderLayersArg =
           separatedResult &&
           separatedResult.setupRenderLayers &&

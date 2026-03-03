@@ -80,6 +80,24 @@ functionRegistry.shapes = {
     baseType: "background",
   },
 
+  // 文本: text() 渲染图层
+  // 数据结构（语义化 JSON，存放在 _ctx.shapes 中）:
+  // {
+  //   id,
+  //   type: "text",
+  //   pos: [x, y],              // 已应用当前变换后的锚点位置
+  //   text: "string",           // 文本内容
+  //   size: number,             // 文本字号（与 p5.textSize 对齐）
+  //   wh: [maxWidth, maxHeight] | null,  // “伪 box”尺寸，可选；对应 text(str,x,y,maxWidth[,maxHeight])
+  //   fillColor, strokeColor,   // [r,g,b,a] 或 null
+  //   fillOpacity, strokeOpacity,
+  //   strokeWeight
+  // }
+  text: {
+    internal: "_text",
+    baseType: "text",
+  },
+
   // 多边形: 通过 beginShape()/vertex()/endShape() 构建的任意多边形
   // 数据结构（语义化 JSON）:
   //   {
@@ -139,6 +157,7 @@ functionRegistry.shapes = {
  *   9xxxx = bezier
  *  10xxxx = curve
  *  11xxxx = background
+ *  12xxxx = text
  *
  * 如需新增渲染图层，只需在此处为新的 baseType 分配唯一前缀编码，
  * 其余逻辑（id 生成与表达式查找）都会自动对齐。
@@ -155,6 +174,7 @@ functionRegistry.shapeTypeCode = {
   bezier: 9,
   curve: 10,
   background: 11,
+  text: 12,
 };
 
 /**
@@ -202,6 +222,18 @@ functionRegistry.colors = {
   RGB: { internal: "RGB", type: "constant" },
   HSB: { internal: "HSB", type: "constant" },
   HSL: { internal: "HSL", type: "constant" },
+};
+
+/**
+ * 排版/文本函数定义
+ * 这里只包含与文本样式/排版相关但本身不直接产生命令式渲染输出的函数，
+ * 如 textSize、textLeading；真正的渲染函数 text() 仍归类在 shapes 中。
+ */
+functionRegistry.typography = {
+  // 文本字号控制：textSize()
+  textSize: { internal: "textSize" },
+  // 文本行距控制：textLeading()
+  textLeading: { internal: "textLeading" },
 };
 
 /**
@@ -367,6 +399,10 @@ functionRegistry.getP5Functions = function () {
   result.push.apply(result, Object.keys(this.colors));
   result.push.apply(result, Object.keys(this.math));
   result.push.apply(result, Object.keys(this.environment));
+  // 排版 / 文本相关函数（如 textSize），同样作为"非渲染函数"暴露给运行时
+  if (this.typography) {
+    result.push.apply(result, Object.keys(this.typography));
+  }
   // 控制器/交互函数（如 createSlider）
   if (this.controllers) {
     result.push.apply(result, Object.keys(this.controllers));

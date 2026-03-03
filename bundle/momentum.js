@@ -13,6 +13,7 @@ var m = {};
   #include "includes/math.js"
   #include "includes/transformation.js"
   #include "includes/color.js"
+#include "includes/typography.js"
   #include "includes/shape.js"
   #include "includes/environment.js"
   #include "includes/structure.js"

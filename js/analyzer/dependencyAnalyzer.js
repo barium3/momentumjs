@@ -32,6 +32,7 @@ function _buildAnalyzerCaches() {
         shapes: buildCategoryMappings("shapes", ["transform", "color"]),
         transforms: buildCategoryMappings("transforms", ["transform"]),
         colors: buildCategoryMappings("colors", ["color"]),
+        typography: buildCategoryMappings("typography", ["transform", "color"]),
         math: buildCategoryMappings("math", ["math"]),
       };
     } else {
@@ -55,7 +56,7 @@ function _buildAnalyzerCaches() {
 
   // math / environment / colors / controllers 的符号信息
   _categoryInfo = {};
-  var categories = ["math", "environment", "colors", "controllers"];
+  var categories = ["math", "environment", "colors", "controllers", "typography"];
 
   categories.forEach(function (category) {
     var data = functionRegistry[category];
@@ -123,6 +124,7 @@ function analyzeDependenciesAST(code) {
     shapes: {},
     transforms: {},
     colors: {},
+    typography: {},
     math: {},
     environment: {},
     controllers: {},
@@ -365,14 +367,10 @@ function _handleCallExpression(
     return;
   }
 
-  // 5. math / environment / colors / controllers 中声明的函数
+  // 5. 其它类别（math / environment / colors / controllers / typography）中声明的函数
   if (_categoryInfo) {
-    // 优先级：controllers > math > environment > colors
-    // 这样当同名符号同时存在于多个类别（例如 environment 与 controllers）时，
-    // 会优先归类到更具体的 controllers，而不是较泛的 environment
-    var cats = ["controllers", "math", "environment", "colors"];
-    for (var i = 0; i < cats.length; i++) {
-      var cat = cats[i];
+    for (var cat in _categoryInfo) {
+      if (!_categoryInfo.hasOwnProperty(cat)) continue;
       var info = _categoryInfo[cat];
       if (info && info.functions && info.functions[funcName]) {
         if (!dependencies[cat]) {
@@ -382,7 +380,7 @@ function _handleCallExpression(
         if (cat === "math") {
           dependencies.requires.math = true;
         }
-        break;
+        return;
       }
     }
       }
@@ -439,11 +437,9 @@ function _handleIdentifier(node, dependencies) {
     return;
   }
 
-  // 处理 math / environment / colors / controllers 中声明的常量和变量
-  // 同样使用统一的优先级顺序，确保与函数归类一致
-  var cats = ["controllers", "math", "environment", "colors"];
-  for (var i = 0; i < cats.length; i++) {
-    var cat = cats[i];
+  // 处理 math / environment / colors / controllers / typography 中声明的常量和变量
+  for (var cat in _categoryInfo) {
+    if (!_categoryInfo.hasOwnProperty(cat)) continue;
     var info = _categoryInfo[cat];
     if (!info) continue;
 
@@ -490,10 +486,8 @@ function _handleMemberExpression(node, dependencies) {
 function _markNamespaceIfNeeded(name, dependencies) {
   if (!_categoryInfo) return;
 
-  // 命名空间优先级与函数/变量保持一致
-  var cats = ["controllers", "math", "environment", "colors"];
-  for (var i = 0; i < cats.length; i++) {
-    var cat = cats[i];
+  for (var cat in _categoryInfo) {
+    if (!_categoryInfo.hasOwnProperty(cat)) continue;
     var info = _categoryInfo[cat];
     if (info && info.namespaces && info.namespaces[name]) {
       if (!dependencies[cat]) dependencies[cat] = {};
@@ -504,32 +498,5 @@ function _markNamespaceIfNeeded(name, dependencies) {
       return;
     }
   }
-}
-
-// 保持向后兼容：旧代码如果仍然调用 parseConstantsAndVariables，则直接转发到 AST 分析
-function parseConstantsAndVariables(code, dependencies) {
-  var fullDeps = analyzeDependenciesAST(code);
-  // 将 AST 结果合并到传入的 dependencies 对象中（仅限非 shapes/transforms）
-  if (!dependencies) return fullDeps;
-
-  // 合并类别时也遵循相同的顺序（虽然当前不会产生冲突，但保持一致性）
-  var categories = ["controllers", "math", "environment", "colors"];
-  for (var i = 0; i < categories.length; i++) {
-    var cat = categories[i];
-    if (!fullDeps[cat]) continue;
-    if (!dependencies[cat]) dependencies[cat] = {};
-    for (var key in fullDeps[cat]) {
-      if (fullDeps[cat].hasOwnProperty(key)) {
-        dependencies[cat][key] = fullDeps[cat][key];
-      }
-    }
-  }
-
-  if (fullDeps.requires && fullDeps.requires.math) {
-    if (!dependencies.requires) dependencies.requires = {};
-    dependencies.requires.math = true;
-}
-
-  return dependencies;
 }
 

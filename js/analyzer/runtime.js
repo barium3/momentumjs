@@ -292,7 +292,7 @@ function createShapeWrapper(options) {
   var baseType = options.baseType;
   var context = options.context || {};
   var backgroundInfo = options.backgroundInfo;
-  
+
   return function() {
     // 专门处理 background：记录是否显式传入了 alpha 参数
     if (baseType === "background" && backgroundInfo) {
@@ -322,7 +322,19 @@ function createShapeWrapper(options) {
       }
     }
 
-    recordShapeExecution(context, baseType, funcName);
+    // 在执行模式下记录 shape 调用（不再通过 recordShapeExecution，以便自定义 renderOrder 结构）
+    if (context.loopExecutions) {
+      context.loopExecutions.value++;
+      if (context.loopExecutions.value > context.maxLoopCount) {
+        throw new Error("循环次数超过上限");
+      }
+    }
+
+    if (context.renderOrder) {
+      // 统一：所有形状（包括文本）都只记录基础类型，文本一律按点文本处理
+      context.renderOrder.push(baseType);
+    }
+
     return original.apply(p, arguments);
   };
 }

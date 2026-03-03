@@ -14,6 +14,7 @@ function createShapeLayers(mainCompName) {
   
   // 形状类型到创建函数的映射表
   var shapeCreators = {
+  text: createTextFromContext,
     ellipse: createEllipseFromContext,
     arc: createArcFromContext,
     quad: createQuadFromContext,
@@ -33,7 +34,13 @@ function createShapeLayers(mainCompName) {
     var id = shape.id;
     var creator = shapeCreators[shape.type];
     if (creator) {
+      // 对于 text，额外把前端已经构建好的 shape 对象（含 wh 信息）传给后端，
+      // 后端只基于 shape.wh 做“伪 box”布局（不再创建 AE Box Text）。
+      if (shape.type === "text") {
+        creator(i, id, mainCompName, shape);
+      } else {
       creator(i, id, mainCompName);
+      }
     }
   }
 }
@@ -803,7 +810,7 @@ function createCurveFromContext(index, shapeId, mainCompName) {
 
 /**
  * 获取形状函数库（根据依赖动态构建）
- * @param {Object} deps - 依赖对象，包含 shapes: { ellipse, rect, line, point }
+ * @param {Object} deps - 依赖对象，包含 shapes: { ellipse, rect, line, point, text, ... }
  *
  * 形状数据格式说明：当前使用语义化 JSON（每个对象包含全局 index），不再使用 path 槽位方案
  *
@@ -814,6 +821,8 @@ function createCurveFromContext(index, shapeId, mainCompName) {
  * - c2[3] = stroke2: [b, a]
  * - c2[4] = opacity: [fillOpacity, strokeOpacity] (0-100)
  * - c2[5] = strokeWeight: [weight, 0]
+ *
+
  */
 function getShapeLib(deps) {
   if (!deps) deps = {};
@@ -861,7 +870,7 @@ function getShapeLib(deps) {
   }
   funcs.push("};");
 
-  // 计数器初始化
+  // 计数器初始化（非文本）
   if (deps.ellipse || deps.circle) {
     funcs.push("var _ellipseCount = 0;");
   }
@@ -893,7 +902,6 @@ function getShapeLib(deps) {
     funcs.push("var _curveCount = 0;");
   }
 
-  // 形状函数 - 语义化 JSON 上下文
   if (deps.ellipse || deps.circle) {
     funcs.push(
       [
