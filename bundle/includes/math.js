@@ -611,7 +611,7 @@ function getMathLib(deps) {
   if (deps.QUARTER_PI) lines.push("const QUARTER_PI = Math.PI / 4;");
 
   // 椭圆/矩形模式常量与状态（与 p5.ellipseMode / rectMode 对齐）
-  // 只有在依赖中出现任意一个相关项时才注入
+  // 使用 _MODE_CENTER 前缀避免与 typography 的 CENTER 常量冲突
   if (
     deps.ellipseMode ||
     deps.rectMode ||
@@ -620,14 +620,11 @@ function getMathLib(deps) {
     deps.CORNER ||
     deps.CORNERS
   ) {
-    lines.push("const CENTER = 0;");
+    lines.push("const _MODE_CENTER = 0;");
     lines.push("const RADIUS = 1;");
     lines.push("const CORNER = 2;");
     lines.push("const CORNERS = 3;");
-    // 默认值与 p5 对齐：
-    // - ellipseMode 默认为 CENTER
-    // - rectMode 默认为 CORNER
-    lines.push("var _ellipseMode = CENTER;");
+    lines.push("var _ellipseMode = _MODE_CENTER;");
     lines.push("var _rectMode = CORNER;");
     lines.push("var ellipseMode = function(m) { _ellipseMode = m; };");
     lines.push("var rectMode = function(m) { _rectMode = m; };");
@@ -731,7 +728,12 @@ function getMathLib(deps) {
   }
   // curvePoint, curveTangent, curveTightness 共享 _curveTightness 变量
   // curve 函数也需要 _curveTightness 变量（通过 _curveTightnessVar 标记）
-  if (deps.curvePoint || deps.curveTangent || deps.curveTightness || deps._curveTightnessVar) {
+  if (
+    deps.curvePoint ||
+    deps.curveTangent ||
+    deps.curveTightness ||
+    deps._curveTightnessVar
+  ) {
     lines.push("var _curveTightness = 0.5;");
   }
   if (deps.curvePoint) {

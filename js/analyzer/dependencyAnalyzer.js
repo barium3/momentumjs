@@ -56,7 +56,13 @@ function _buildAnalyzerCaches() {
 
   // math / environment / colors / controllers 的符号信息
   _categoryInfo = {};
-  var categories = ["math", "environment", "colors", "controllers", "typography"];
+  var categories = [
+    "math",
+    "environment",
+    "colors",
+    "controllers",
+    "typography",
+  ];
 
   categories.forEach(function (category) {
     var data = functionRegistry[category];
@@ -74,17 +80,17 @@ function _buildAnalyzerCaches() {
     for (var name in data) {
       if (!data.hasOwnProperty(name)) continue;
       var item = data[name] || {};
-        if (item.type === "constant") {
+      if (item.type === "constant") {
         info.constants[name] = true;
-        } else if (item.type === "variable") {
+      } else if (item.type === "variable") {
         info.variables[name] = true;
       } else if (item.type === "namespace") {
         info.namespaces[name] = true;
-        } else {
+      } else {
         // 默认视为函数（包括环境函数、控制器等）
         info.functions[name] = true;
-        }
       }
+    }
 
     _categoryInfo[category] = info;
   });
@@ -99,7 +105,7 @@ function analyzeDependenciesAST(code) {
   if (!functionRegistry) {
     throw new Error(
       "[dependencyAnalyzer] functionRegistry not initialized. Call initDependencyAnalyzer first.",
-      );
+    );
   }
 
   if (!_categoryInfo) {
@@ -148,9 +154,9 @@ function analyzeDependenciesAST(code) {
     // 解析失败时返回空依赖，避免直接抛错影响上层逻辑
     if (typeof console !== "undefined" && console.error) {
       console.error("[dependencyAnalyzer] AST 解析失败:", e);
-        }
-    return dependencies;
     }
+    return dependencies;
+  }
 
   // 补充 parent 指针，便于判断标识符的使用场景
   _addParentLinks(ast, null);
@@ -276,7 +282,11 @@ function _getCalleeName(callee) {
     return callee.name;
   }
   if (callee.type === "MemberExpression") {
-    if (callee.property && !callee.computed && callee.property.type === "Identifier") {
+    if (
+      callee.property &&
+      !callee.computed &&
+      callee.property.type === "Identifier"
+    ) {
       return callee.property.name;
     }
   }
@@ -287,12 +297,13 @@ function _getCalleeName(callee) {
  * 在使用某个函数时，记录依赖并根据 momentum 映射开启 requires 标记
  */
 function _markFunctionDependency(category, funcName, dependencies) {
-        if (!dependencies[category]) {
-          dependencies[category] = {};
-        }
+  if (!dependencies[category]) {
+    dependencies[category] = {};
+  }
   dependencies[category][funcName] = true;
 
-  if (_momentumFunctionMappings &&
+  if (
+    _momentumFunctionMappings &&
     _momentumFunctionMappings[category] &&
     _momentumFunctionMappings[category][funcName]
   ) {
@@ -307,10 +318,10 @@ function _markFunctionDependency(category, funcName, dependencies) {
   }
 
   // math 额外标记（保持与旧实现兼容）
-        if (category === "math") {
-          dependencies.requires.math = true;
-        }
-      }
+  if (category === "math") {
+    dependencies.requires.math = true;
+  }
+}
 
 /**
  * 处理函数调用（CallExpression）
@@ -331,7 +342,10 @@ function _handleCallExpression(
 
     if (dependencies.requires.shape && functionRegistry.shapes) {
       var info = functionRegistry.shapes[funcName] || {};
-      var baseType = (info && info.baseType) || (_shapeTypeMap && _shapeTypeMap[funcName]) || funcName;
+      var baseType =
+        (info && info.baseType) ||
+        (_shapeTypeMap && _shapeTypeMap[funcName]) ||
+        funcName;
       if (dependencies.requires.shape.hasOwnProperty(baseType)) {
         dependencies.requires.shape[baseType] = true;
       }
@@ -383,8 +397,8 @@ function _handleCallExpression(
         return;
       }
     }
-      }
-    }
+  }
+}
 
 /**
  * 处理 new 表达式（主要用于命名空间，如 new p5.Vector(...)）
@@ -424,7 +438,9 @@ function _handleIdentifier(node, dependencies) {
     (parent.type === "CatchClause" && parent.param === node) ||
     (parent.type === "RestElement" && parent.argument === node) ||
     (parent.type === "Property" && parent.key === node && !parent.computed) ||
-    (parent.type === "MemberExpression" && parent.property === node && !parent.computed)
+    (parent.type === "MemberExpression" &&
+      parent.property === node &&
+      !parent.computed)
   ) {
     return;
   }
@@ -499,4 +515,3 @@ function _markNamespaceIfNeeded(name, dependencies) {
     }
   }
 }
-

@@ -80,6 +80,8 @@ function getTransformStackLib() {
     "  if (typeof _textSize !== 'undefined') s.ts = _textSize;",
     "  if (typeof _textLeading !== 'undefined') s.tl = _textLeading;",
     "  if (typeof _textLeadingExplicit !== 'undefined') s.tle = _textLeadingExplicit;",
+    "  if (typeof _textAlignH !== 'undefined') s.tah = _textAlignH;",
+    "  if (typeof _textAlignV !== 'undefined') s.tav = _textAlignV;",
     "  _stack.push(s);",
     "}",
     "function pop() {",
@@ -112,6 +114,8 @@ function getTransformStackLib() {
     "    if (s.ts !== undefined) _textSize = s.ts;",
     "    if (s.tl !== undefined) _textLeading = s.tl;",
     "    if (s.tle !== undefined) _textLeadingExplicit = s.tle;",
+    "    if (s.tah !== undefined) _textAlignH = s.tah;",
+    "    if (s.tav !== undefined) _textAlignV = s.tav;",
     "  }",
     "}",
   ].join("\n");
@@ -223,6 +227,8 @@ function getTransformationLib(deps) {
       "  if (typeof _textSize !== 'undefined') s.ts = _textSize;",
       "  if (typeof _textLeading !== 'undefined') s.tl = _textLeading;",
       "  if (typeof _textLeadingExplicit !== 'undefined') s.tle = _textLeadingExplicit;",
+      "  if (typeof _textAlignH !== 'undefined') s.tah = _textAlignH;",
+      "  if (typeof _textAlignV !== 'undefined') s.tav = _textAlignV;",
       "  _stack.push(s);",
       "}",
     );
@@ -254,6 +260,8 @@ function getTransformationLib(deps) {
       "    if (s.ts !== undefined) _textSize = s.ts;",
       "    if (s.tl !== undefined) _textLeading = s.tl;",
       "    if (s.tle !== undefined) _textLeadingExplicit = s.tle;",
+      "    if (s.tah !== undefined) _textAlignH = s.tah;",
+      "    if (s.tav !== undefined) _textAlignV = s.tav;",
       "  }",
       "}",
     );

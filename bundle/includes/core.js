@@ -38,7 +38,7 @@ function getUniqueCompName(baseName) {
   if (!baseName || baseName.length === 0) {
     baseName = "New Composition";
   }
-  
+
   // 检查基础名称是否已存在
   var exists = false;
   for (var i = 1; i <= app.project.items.length; i++) {
@@ -48,12 +48,12 @@ function getUniqueCompName(baseName) {
       break;
     }
   }
-  
+
   // 如果不存在，直接返回
   if (!exists) {
     return baseName;
   }
-  
+
   // 如果存在，尝试添加编号
   var counter = 1;
   var newName;
@@ -72,7 +72,7 @@ function getUniqueCompName(baseName) {
     }
     counter++;
   } while (counter < 10000); // 防止无限循环，最多尝试10000次
-  
+
   // 如果10000次都失败（理论上不应该发生），返回带时间戳的名称
   return baseName + " " + new Date().getTime();
 }
@@ -86,7 +86,7 @@ function getUniqueFolderName(baseName) {
   if (!baseName || baseName.length === 0) {
     baseName = "New Folder";
   }
-  
+
   // 检查基础名称是否已存在
   var exists = false;
   for (var i = 1; i <= app.project.items.length; i++) {
@@ -96,12 +96,12 @@ function getUniqueFolderName(baseName) {
       break;
     }
   }
-  
+
   // 如果不存在，直接返回
   if (!exists) {
     return baseName;
   }
-  
+
   // 如果存在，尝试添加编号
   var counter = 1;
   var newName;
@@ -120,7 +120,7 @@ function getUniqueFolderName(baseName) {
     }
     counter++;
   } while (counter < 10000); // 防止无限循环，最多尝试10000次
-  
+
   // 如果10000次都失败（理论上不应该发生），返回带时间戳的名称
   return baseName + " " + new Date().getTime();
 }
@@ -136,22 +136,22 @@ function organizeCompsIntoFolder(mainComp, setupComp, drawComp, folderName) {
   if (!mainComp) {
     return; // 如果没有主合成，不执行
   }
-  
+
   try {
     // 获取唯一的文件夹名称
     var uniqueFolderName = getUniqueFolderName(folderName);
-    
+
     // 创建文件夹
     var folder = app.project.items.addFolder(uniqueFolderName);
-    
+
     // 将主合成移动到文件夹中
     mainComp.parentFolder = folder;
-    
+
     // 将setup合成移动到文件夹中（如果存在）
     if (setupComp) {
       setupComp.parentFolder = folder;
     }
-    
+
     // 将draw合成移动到文件夹中（如果存在）
     if (drawComp) {
       drawComp.parentFolder = folder;
@@ -161,7 +161,6 @@ function organizeCompsIntoFolder(mainComp, setupComp, drawComp, folderName) {
     // 可以在这里添加日志记录，但不抛出错误
   }
 }
-
 
 /**
  * 检查 registry 是否可用
@@ -187,7 +186,6 @@ function setCompBackgroundColor(comp, hasSetupOrDraw) {
   }
 }
 
-
 pub.runParsed = function (
   drawCode,
   setupCode,
@@ -200,7 +198,8 @@ pub.runParsed = function (
   setupRenderLayersArg,
   drawRenderLayersArg,
   hasSetupOrDrawArg,
-  drawBackgroundHasAlphaArg
+  drawBackgroundCountArg,
+  drawNeedsEchoArg,
 ) {
   try {
     // 1. 初始化变量
@@ -215,9 +214,12 @@ pub.runParsed = function (
     // 2. 解析renderLayers参数（可能是字符串或对象）
     var parsedSetupRenderLayers = null;
     var parsedDrawRenderLayers = null;
-    
+
     try {
-      if (typeof setupRenderLayersArg === "string" && setupRenderLayersArg !== "null") {
+      if (
+        typeof setupRenderLayersArg === "string" &&
+        setupRenderLayersArg !== "null"
+      ) {
         parsedSetupRenderLayers = JSON.parse(setupRenderLayersArg);
       } else if (isArray(setupRenderLayersArg)) {
         parsedSetupRenderLayers = setupRenderLayersArg;
@@ -227,7 +229,10 @@ pub.runParsed = function (
     }
 
     try {
-      if (typeof drawRenderLayersArg === "string" && drawRenderLayersArg !== "null") {
+      if (
+        typeof drawRenderLayersArg === "string" &&
+        drawRenderLayersArg !== "null"
+      ) {
         parsedDrawRenderLayers = JSON.parse(drawRenderLayersArg);
       } else if (isArray(drawRenderLayersArg)) {
         parsedDrawRenderLayers = drawRenderLayersArg;
@@ -239,10 +244,18 @@ pub.runParsed = function (
     // 3. 处理前端传递的 renderLayers（仅使用新的分别分析结果）
     if (parsedSetupRenderLayers || parsedDrawRenderLayers) {
       // 使用新的分别分析结果
-      if (parsedSetupRenderLayers && isArray(parsedSetupRenderLayers) && parsedSetupRenderLayers.length > 0) {
+      if (
+        parsedSetupRenderLayers &&
+        isArray(parsedSetupRenderLayers) &&
+        parsedSetupRenderLayers.length > 0
+      ) {
         setupShapeQueue = processRenderLayers(parsedSetupRenderLayers);
       }
-      if (parsedDrawRenderLayers && isArray(parsedDrawRenderLayers) && parsedDrawRenderLayers.length > 0) {
+      if (
+        parsedDrawRenderLayers &&
+        isArray(parsedDrawRenderLayers) &&
+        parsedDrawRenderLayers.length > 0
+      ) {
         drawShapeQueue = processRenderLayers(parsedDrawRenderLayers);
       }
       // 合并到shapeQueue，供后续统计使用
@@ -269,9 +282,10 @@ pub.runParsed = function (
     );
     // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
     // 否则使用 p5.js 默认灰色 RGB(200, 200, 200)
-    var hasSetupOrDraw = hasSetupOrDrawArg !== undefined && hasSetupOrDrawArg !== null 
-      ? Boolean(hasSetupOrDrawArg) 
-      : false;
+    var hasSetupOrDraw =
+      hasSetupOrDrawArg !== undefined && hasSetupOrDrawArg !== null
+        ? Boolean(hasSetupOrDrawArg)
+        : false;
     setCompBackgroundColor(engineComp, hasSetupOrDraw);
 
     // 5. 检查代码块存在性
@@ -308,14 +322,15 @@ pub.runParsed = function (
     }
 
     // 10. 根据是否有分别分析结果，决定创建方式
-    var useSeparatedComps = setupShapeQueue.length > 0 || drawShapeQueue.length > 0;
-    
+    var useSeparatedComps =
+      setupShapeQueue.length > 0 || drawShapeQueue.length > 0;
+
     if (useSeparatedComps) {
       // 新架构：分别创建setup和draw预合成
-      
+
       // 设置主合成名称（用于跨合成表达式通讯）
       mainCompName = uniqueMainCompName;
-      
+
       // 创建setup预合成（如果有setup中的shape）
       if (setupShapeQueue.length > 0 && hasSetup) {
         var setupCompName = getUniqueCompName(uniqueMainCompName + "_Setup");
@@ -329,7 +344,7 @@ pub.runParsed = function (
         );
         // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
         setCompBackgroundColor(setupComp, hasSetupOrDraw);
-        
+
         // 临时设置engineComp为setupComp，创建setup中的图层
         var originalEngineComp = engineComp;
         engineComp = setupComp;
@@ -339,7 +354,7 @@ pub.runParsed = function (
         engineComp = originalEngineComp;
         shapeQueue = [];
       }
-      
+
       // 创建draw预合成（如果有draw中的shape）
       if (drawShapeQueue.length > 0 && hasDraw) {
         var drawCompName = getUniqueCompName(uniqueMainCompName + "_Draw");
@@ -353,18 +368,18 @@ pub.runParsed = function (
         );
         // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
         setCompBackgroundColor(drawComp, hasSetupOrDraw);
-        
+
         // 临时设置engineComp为drawComp，创建draw中的图层
         var originalEngineComp2 = engineComp;
         engineComp = drawComp;
         shapeQueue = drawShapeQueue;
         // 子合成中不创建engine图层，渲染图层通过表达式引用父合成的engine
         createShapeLayers(mainCompName);
-        
+
         engineComp = originalEngineComp2;
         shapeQueue = [];
       }
-      
+
       // 在主合成中创建engine图层（用于全局代码和协调）
       // 合并所有子合成中的图形信息，用于统计 shapeCounts
       var allShapesQueue = setupShapeQueue.concat(drawShapeQueue);
@@ -383,9 +398,17 @@ pub.runParsed = function (
       // 子合成中的形状图层会通过表达式从主合成的 __engine__ 图层读取数据
       // 主合成中的 engine 图层不需要跨合成访问，传入 null
       // 传入 allShapesQueue 以便 buildExpression 可以收集 fontMetrics
-      createEngineLayer(drawCode || "", setupCode || "", globalCode || "", deps, null, mergedShapeCounts, allShapesQueue);
+      createEngineLayer(
+        drawCode || "",
+        setupCode || "",
+        globalCode || "",
+        deps,
+        null,
+        mergedShapeCounts,
+        allShapesQueue,
+      );
       shapeQueue = originalShapeQueue;
-      
+
       // 在主合成中添加预合成图层
       if (setupComp) {
         var setupLayer = engineComp.layers.add(setupComp);
@@ -396,14 +419,18 @@ pub.runParsed = function (
         var drawLayer = engineComp.layers.add(drawComp);
         drawLayer.name = "__draw__";
         drawLayer.startTime = 0;
-        
-        // 计算draw中background的数量
-        // 注意：前端传入的 drawRenderLayers 目前是「调用顺序数组」：
-        // - 字符串形式："background"
-        // - 或对象形式：{ type: "background", count: N }
-        // 这里需要同时兼容两种格式
+
+        // 计算 draw 中 background 的数量：
+        // 优先使用前端分析给出的精确值（drawBackgroundCountArg），
+        // 在缺省或异常情况下退回到旧的静态统计逻辑，保持向后兼容。
         var drawBackgroundCount = 0;
-        if (parsedDrawRenderLayers && isArray(parsedDrawRenderLayers)) {
+        if (
+          typeof drawBackgroundCountArg === "number" &&
+          !isNaN(drawBackgroundCountArg)
+        ) {
+          drawBackgroundCount = Math.max(0, drawBackgroundCountArg);
+        } else if (parsedDrawRenderLayers && isArray(parsedDrawRenderLayers)) {
+          // 旧逻辑：基于 renderLayers 粗略统计 background 次数
           for (var i = 0; i < parsedDrawRenderLayers.length; i++) {
             var item = parsedDrawRenderLayers[i];
             if (!item) continue;
@@ -424,36 +451,45 @@ pub.runParsed = function (
             }
           }
         }
-        
-        // 是否在 draw 中使用了带 alpha 参数的 background（由前端运行时统计）
-        var drawBackgroundHasAlpha =
-          drawBackgroundHasAlphaArg !== undefined && drawBackgroundHasAlphaArg !== null
-            ? !!drawBackgroundHasAlphaArg
-            : false;
 
-        // - 除非 draw 中「有 background 且它们的 hasAlpha 全为 false」
-        // - 否则一律挂 Echo，以便保留拖尾能力
-        //    drawBackgroundCount === 0 || drawBackgroundHasAlpha
-        if (drawBackgroundCount === 0 || drawBackgroundHasAlpha) {
-          // 添加Echo效果来模拟draw中的透明background拖尾效果
-          // 是否真正产生拖尾、以及衰减多少，完全由 __engine__ JSON 中的 backgrounds 数组与透明度决定
-          addEchoEffect(drawLayer, engineComp, uniqueMainCompName, drawBackgroundCount);
+        // 前端综合分析得出的「是否需要挂 Echo」标记：
+        // - 没有 background / 有透明 background / background 在条件中 -> true
+        // - 每帧实心 background 清屏 -> false
+        var drawNeedsEcho =
+          drawNeedsEchoArg !== undefined && drawNeedsEchoArg !== null
+            ? !!drawNeedsEchoArg
+            : drawBackgroundCount === 0; // 兜底：保持旧行为
+
+        if (drawNeedsEcho) {
+          // 添加 Echo 效果来模拟 draw 中的 background 拖尾效果
+          // 是否真正产生拖尾、以及衰减多少，由 __engine__ JSON 中的 backgrounds 数组与透明度决定
+          addEchoEffect(
+            drawLayer,
+            engineComp,
+            uniqueMainCompName,
+            drawBackgroundCount,
+          );
         }
       }
-      
+
       // 组织合成到文件夹中
-      organizeCompsIntoFolder(engineComp, setupComp, drawComp, uniqueMainCompName);
-      
+      organizeCompsIntoFolder(
+        engineComp,
+        setupComp,
+        drawComp,
+        uniqueMainCompName,
+      );
+
       // 在主合成中为 createSlider() 创建控制图层与 Slider 控件（放在所有图层创建之后，保证控制图层置顶）
       // 仅从 __engine__ JSON 上下文中自动提取 controllers（已移除旧版 sliderConfigArg 兼容逻辑）
       controllerSliderCount = setupControllersFromConfigs(engineComp, null);
-      
+
       // 最终跳转到主合成
       engineComp.openInViewer();
     } else {
       // 没有分别分析结果时，使用新架构但只在主合成中创建图层
       mainCompName = uniqueMainCompName;
-      
+
       // 合并所有图形信息用于统计
       var mergedShapeCounts = {};
       for (var i = 0; i < shapeQueue.length; i++) {
@@ -463,22 +499,30 @@ pub.runParsed = function (
         }
         mergedShapeCounts[item.type]++;
       }
-      
+
       // 在主合成中创建engine图层
       // 主合成中的 engine 图层不需要跨合成访问，传入 null
       // 传递 shapeQueue 以便 buildExpression 可以收集 fontMetrics
-      createEngineLayer(drawCode || "", setupCode || "", globalCode || "", deps, null, mergedShapeCounts, shapeQueue);
-      
+      createEngineLayer(
+        drawCode || "",
+        setupCode || "",
+        globalCode || "",
+        deps,
+        null,
+        mergedShapeCounts,
+        shapeQueue,
+      );
+
       // 在主合成中创建shape图层
       createShapeLayers(mainCompName);
-      
+
       // 组织合成到文件夹中
       organizeCompsIntoFolder(engineComp, null, null, uniqueMainCompName);
-      
+
       // 在主合成中为 createSlider() 创建控制图层与 Slider 控件（放在所有图层创建之后，保证控制图层置顶）
       // 仅从 __engine__ JSON 上下文中自动提取 controllers（已移除旧版 sliderConfigArg 兼容逻辑）
       controllerSliderCount = setupControllersFromConfigs(engineComp, null);
-      
+
       // 最终跳转到主合成
       engineComp.openInViewer();
     }
@@ -532,7 +576,7 @@ pub.composition = function (
 
   // 获取唯一的合成名称
   var uniqueName = getUniqueCompName(defaults.name);
-  
+
   // 创建合成并打开查看器
   var comp = app.project.items.addComp(
     uniqueName,
@@ -556,7 +600,15 @@ error = pub.error = function (msg) {
 // Engine Layer - 引擎图层
 // ========================================
 
-function createEngineLayer(drawCode, setupCode, globalVars, deps, mainCompNameParam, shapeCountsParam, shapeQueueParam) {
+function createEngineLayer(
+  drawCode,
+  setupCode,
+  globalVars,
+  deps,
+  mainCompNameParam,
+  shapeCountsParam,
+  shapeQueueParam,
+) {
   // 1. 清理已存在的 __engine__ 图层
   cleanupEngineLayer();
 
@@ -611,7 +663,7 @@ function createEngineLayer(drawCode, setupCode, globalVars, deps, mainCompNamePa
     shapeCounts,
     deps,
     mainCompNameParam,
-    shapeQueueParam
+    shapeQueueParam,
   );
 
   // 6. 应用表达式并设置图层属性（Source Text 表达式返回 JSON 字符串）
@@ -692,7 +744,10 @@ function processRenderLayers(renderLayersArg) {
 
       // 从 registry 中读取各基础图形类型的前缀编码（1xxxx = ellipse, 2xxxx = rect, ...）
       var typeCode = 0;
-      if (typeof functionRegistry !== "undefined" && functionRegistry.shapeTypeCode) {
+      if (
+        typeof functionRegistry !== "undefined" &&
+        functionRegistry.shapeTypeCode
+      ) {
         var map = functionRegistry.shapeTypeCode;
         if (map.hasOwnProperty(type)) {
           typeCode = map[type];
@@ -814,7 +869,7 @@ function buildExpression(
   shapeCounts,
   deps,
   mainCompNameParam,
-  shapeQueueParam
+  shapeQueueParam,
 ) {
   // 解析依赖对象
   var mathDeps = deps && deps.math ? deps.math : {};
@@ -969,7 +1024,6 @@ function buildExpression(
   // 按需加载数学库（每个函数单独判断）
   if (hasKeys(mathDeps)) {
     expr.push("// 数学库（按需加载）");
-    // 从 registry 自动构建数学依赖对象，每个函数单独加载
     expr.push(getMathLib(buildDepsFromRegistry(mathDeps, "math")));
   }
 
@@ -1016,6 +1070,18 @@ function buildExpression(
       text: needsTextShape,
       textSize: !!typographyDeps.textSize,
       textLeading: !!typographyDeps.textLeading,
+      textWrap: !!typographyDeps.textWrap,
+      textFont: !!typographyDeps.textFont,
+      textStyle: !!typographyDeps.textStyle,
+      textAlign: !!typographyDeps.textAlign,
+      WORD: !!typographyDeps.WORD,
+      CHAR: !!typographyDeps.CHAR,
+      LEFT: !!typographyDeps.LEFT,
+      CENTER: !!typographyDeps.CENTER,
+      RIGHT: !!typographyDeps.RIGHT,
+      TOP: !!typographyDeps.TOP,
+      BOTTOM: !!typographyDeps.BOTTOM,
+      BASELINE: !!typographyDeps.BASELINE,
     };
     expr.push("// 排版 / 文本库（按需加载）");
     expr.push(getTypographyLib(typoDepsForLib));
@@ -1029,9 +1095,9 @@ function buildExpression(
     expr.push("// ========================================");
     expr.push("function _getMainCompGlobalVar(varName) {");
     expr.push("  try {");
-    expr.push("    var mainComp = comp(\"" + mainCompNameParam + "\");");
-    expr.push("    var engineLayer = mainComp.layer(\"__engine__\");");
-    expr.push("    var ctxJson = engineLayer.property(\"Source Text\").value;");
+    expr.push('    var mainComp = comp("' + mainCompNameParam + '");');
+    expr.push('    var engineLayer = mainComp.layer("__engine__");');
+    expr.push('    var ctxJson = engineLayer.property("Source Text").value;');
     expr.push("    var ctx = JSON.parse(ctxJson);");
     expr.push("    if (ctx.globals && ctx.globals.hasOwnProperty(varName)) {");
     expr.push("      return ctx.globals[varName];");
@@ -1048,7 +1114,7 @@ function buildExpression(
   if (processedGlobal) {
     expr.push("// Global (变量声明)");
     expr.push(processedGlobal);
-    
+
     // 如果是在子合成中，在执行逻辑之前从主合成读取全局变量
     // 主合成中的 engine 图层不需要此逻辑，因为全局变量就在本地
     if (mainCompNameParam) {
@@ -1073,8 +1139,22 @@ function buildExpression(
         for (var j = 0; j < globalVarNames.length; j++) {
           var varName = globalVarNames[j];
           expr.push("{");
-          expr.push("  var " + varName + "_main = _getMainCompGlobalVar(\"" + varName + "\");");
-          expr.push("  if (" + varName + "_main !== undefined) " + varName + " = " + varName + "_main;");
+          expr.push(
+            "  var " +
+              varName +
+              '_main = _getMainCompGlobalVar("' +
+              varName +
+              '");',
+          );
+          expr.push(
+            "  if (" +
+              varName +
+              "_main !== undefined) " +
+              varName +
+              " = " +
+              varName +
+              "_main;",
+          );
           expr.push("}");
         }
       }

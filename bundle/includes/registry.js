@@ -116,14 +116,14 @@ functionRegistry.shapes = {
     closeModes: ["CLOSE"],
     // 构建器函数配置：定义用于构建此 shape 的函数及其角色
     builders: {
-      beginShape: { role: "begin" },  // 开始构建
-      vertex: { role: "add" },        // 添加顶点
-      beginContour: { role: "add" },  // 开始轮廓（用于创建洞）
-      endContour: { role: "add" },    // 结束轮廓
-      bezierVertex: { role: "add" },  // 添加三次贝塞尔曲线顶点
+      beginShape: { role: "begin" }, // 开始构建
+      vertex: { role: "add" }, // 添加顶点
+      beginContour: { role: "add" }, // 开始轮廓（用于创建洞）
+      endContour: { role: "add" }, // 结束轮廓
+      bezierVertex: { role: "add" }, // 添加三次贝塞尔曲线顶点
       quadraticVertex: { role: "add" }, // 添加二次贝塞尔曲线顶点
-      curveVertex: { role: "add" },   // 添加曲线顶点（Catmull-Rom 样条）
-      endShape: { role: "end" },      // 结束构建（触发统计）
+      curveVertex: { role: "add" }, // 添加曲线顶点（Catmull-Rom 样条）
+      endShape: { role: "end" }, // 结束构建（触发统计）
     },
   },
 
@@ -234,6 +234,38 @@ functionRegistry.typography = {
   textSize: { internal: "textSize" },
   // 文本行距控制：textLeading()
   textLeading: { internal: "textLeading" },
+  // 文本字体控制：textFont(font | config, [size])",
+  // - 字符串：直接作为 AE 的字体名称（推荐 PostScript name）",
+  // - 对象：{ postscript, family, name }，其中",
+  //   - postscript: 传给 AE setFont 的名称",
+  //   - family: 用于 fontMetrics 查表的 family 名称",
+  //   - name: 备用名称，在 postscript 缺失时可用作 setFont 名称",
+  textFont: { internal: "textFont" },
+  // 文本样式控制：textStyle(style)，支持 NORMAL / BOLD / ITALIC / BOLDITALIC
+  textStyle: { internal: "textStyle" },
+  // 文本换行策略（与 p5.js textWrap 一致）：textWrap(WORD|CHAR)
+  textWrap: { internal: "textWrap" },
+
+  // textAlign 对齐控制：textAlign([h], [v])，支持 LEFT / CENTER / RIGHT（水平）和 TOP / CENTER / BOTTOM / BASELINE（垂直）
+  textAlign: { internal: "textAlign" },
+
+  // textWrap 常量（与 p5.js 保持一致：WORD / CHAR）
+  WORD: { internal: "WORD", type: "constant" },
+  CHAR: { internal: "CHAR", type: "constant" },
+
+  // 文本对齐常量（与 p5.js textAlign 一致）
+  LEFT: { internal: "LEFT", type: "constant" },
+  CENTER: { internal: "CENTER", type: "constant" },
+  RIGHT: { internal: "RIGHT", type: "constant" },
+  TOP: { internal: "TOP", type: "constant" },
+  BOTTOM: { internal: "BOTTOM", type: "constant" },
+  BASELINE: { internal: "BASELINE", type: "constant" },
+
+  // 文本样式常量（与 p5.js textStyle 一致）",
+  NORMAL: { internal: "NORMAL", type: "constant" },
+  BOLD: { internal: "BOLD", type: "constant" },
+  ITALIC: { internal: "ITALIC", type: "constant" },
+  BOLDITALIC: { internal: "BOLDITALIC", type: "constant" },
 };
 
 /**
@@ -500,6 +532,8 @@ functionRegistry.getAllVariables = function () {
   result.push.apply(result, this.getItemsByType(this.math, types));
   result.push.apply(result, this.getItemsByType(this.transforms, types));
   result.push.apply(result, this.getItemsByType(this.colors, types));
+  // typography 也可能声明常量/变量（例如 textWrap 的 WORD / CHAR）
+  result.push.apply(result, this.getItemsByType(this.typography, types));
 
   return result;
 };

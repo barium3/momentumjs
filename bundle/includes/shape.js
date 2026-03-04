@@ -11,10 +11,10 @@
  */
 function createShapeLayers(mainCompName) {
   if (shapeQueue.length === 0) return;
-  
+
   // 形状类型到创建函数的映射表
   var shapeCreators = {
-  text: createTextFromContext,
+    text: createTextFromContext,
     ellipse: createEllipseFromContext,
     arc: createArcFromContext,
     quad: createQuadFromContext,
@@ -25,9 +25,9 @@ function createShapeLayers(mainCompName) {
     point: createPointFromContext,
     background: createBackgroundFromContext,
     bezier: createBezierFromContext,
-    curve: createCurveFromContext
+    curve: createCurveFromContext,
   };
-  
+
   for (var i = 0; i < shapeQueue.length; i++) {
     var shape = shapeQueue[i];
     // 渲染图层使用稳定的 id（类型前缀 + 调用次数），与运行时生成规则对齐
@@ -39,7 +39,7 @@ function createShapeLayers(mainCompName) {
       if (shape.type === "text") {
         creator(i, id, mainCompName, shape);
       } else {
-      creator(i, id, mainCompName);
+        creator(i, id, mainCompName);
       }
     }
   }
@@ -56,14 +56,15 @@ function _getIdFindExpr(shapeId, mainCompName) {
     // 从主合成读取，通过合成名称直接调用
     // 转义合成名称中的引号（如果存在）
     var escapedName = mainCompName.replace(/"/g, '\\"');
-    engineLayerExpr = 'comp("' + escapedName + '").layer("__engine__").text.sourceText';
+    engineLayerExpr =
+      'comp("' + escapedName + '").layer("__engine__").text.sourceText';
   } else {
     // 从当前合成读取
     engineLayerExpr = 'thisComp.layer("__engine__").text.sourceText';
   }
-  
+
   return [
-    'var raw = ' + engineLayerExpr + ';',
+    "var raw = " + engineLayerExpr + ";",
     // TextDocument -> string：优先使用 .text（更直接），回退到 toString()
     "var json = (raw && raw.text !== undefined) ? raw.text : (raw && raw.toString ? raw.toString() : raw);",
     "var data = JSON.parse(json);",
@@ -209,8 +210,10 @@ function _addStrokeProperties(shapeGroup, indexFind, defaultWidth) {
     .addProperty("ADBE Vector Graphic - Stroke");
   stroke.property("Color").expression = _getStrokeColorExpr(indexFind);
   stroke.property("Opacity").expression = _getStrokeOpacityExpr(indexFind);
-  stroke.property("Stroke Width").expression =
-    _getStrokeWidthExpr(indexFind, defaultWidth);
+  stroke.property("Stroke Width").expression = _getStrokeWidthExpr(
+    indexFind,
+    defaultWidth,
+  );
   return stroke;
 }
 
@@ -415,7 +418,7 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
       hasBeginContour = true;
     }
   }
-  
+
   // 只有在使用了 beginContour 时才创建子路径组
   if (hasBeginContour) {
     // 在 After Effects 中，要创建复合路径（带洞），子轮廓路径必须在同一个 Vector Group 内
@@ -424,13 +427,13 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
     var contourPathGroup = shapeGroup
       .property("Contents")
       .addProperty("ADBE Vector Shape - Group");
-    
+
     // 设置子轮廓路径为反向（Reverse Path）
     // After Effects 中，Shape Group 的 "Reverse Path" 属性用于创建洞
     // 必须在脚本中设置，而不是在表达式中
     // 注意：Reverse Path 属性可能在创建 Path 属性后才可用，所以需要先创建 Path 属性
     var reversePropSet = false;
-    
+
     // 方法1：尝试通过属性名 "ADBE Vector Reversed" 设置
     try {
       var reverseProp = contourPathGroup.property("ADBE Vector Reversed");
@@ -441,9 +444,7 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
     } catch (e) {
       // 继续尝试其他方法
     }
-    
 
-    
     // 子轮廓路径：从 contours[1] 开始构建（第一个子轮廓）
     // 注意：不在表达式中反转顶点顺序，反转由脚本中的 Reverse Path 属性处理
     contourPathGroup.property("Path").expression = [
@@ -468,7 +469,7 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
       "  createPath(verts, ins, outs, true);",
       "}",
     ].join("\n");
-    
+
     // 在创建 Path 属性后，再次尝试设置 Reverse Path 属性
     // 因为 Reverse Path 属性可能在 Path 属性创建后才可用
     if (!reversePropSet) {
@@ -1514,7 +1515,10 @@ function createArcFromContext(index, shapeId, mainCompName) {
     "[sc[0], sc[1], sc[2], 1]",
   ].join("\n");
   stroke.property("Opacity").expression = _getStrokeOpacityExpr(indexFind);
-  stroke.property("Stroke Width").expression = _getStrokeWidthExpr(indexFind, 1);
+  stroke.property("Stroke Width").expression = _getStrokeWidthExpr(
+    indexFind,
+    1,
+  );
 
   // Fill 子 group（用于扇形填充）
   var fillGroup = shapeGroup

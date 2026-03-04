@@ -296,9 +296,15 @@ window.codeExecutor = (function () {
             ? JSON.stringify(separatedResult.drawRenderLayers)
             : "null";
 
-        // 是否在 draw 中使用了带 alpha 参数的 background（由运行时统计）
-        const drawBackgroundHasAlpha =
-          separatedResult && separatedResult.drawBackgroundHasAlpha === true;
+        // Echo 相关：draw 中每帧 background 调用次数（供 AE 表达式区分是否“每帧都清屏”）
+        const drawBackgroundCount =
+          separatedResult && typeof separatedResult.drawBackgroundCount === "number"
+            ? separatedResult.drawBackgroundCount
+            : 0;
+
+        // Echo 相关：是否需要为 draw 挂载 Echo 效果（由前端分析综合判断）
+        const drawNeedsEcho =
+          separatedResult && separatedResult.drawNeedsEcho === true;
 
         // 调试日志
         console.log(`[CodeExecutor] setupRenderLayersArg:`, setupRenderLayersArg);
@@ -344,7 +350,9 @@ window.codeExecutor = (function () {
           ", " + // drawRenderLayers
           hasSetupOrDraw +
           ", " +
-          drawBackgroundHasAlpha +
+          drawBackgroundCount +
+          ", " +
+          drawNeedsEcho +
           ")";
 
         const scriptToRun = `try { ${finalCode}; "SUCCESS"; } catch(e) { "ERROR: " + e.message + " at line " + e.line; }`;

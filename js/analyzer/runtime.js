@@ -97,6 +97,27 @@ function exposeVariables(variables, p) {
       window[varName] = Math[varName];
       return;
     }
+
+    // ----------------------------------------
+    // Fallback: registry-defined constants/variables that p5.js doesn't provide
+    // (e.g. Momentum extension adds WORD/CHAR for textWrap)
+    // ----------------------------------------
+    if (typeof functionRegistry !== "undefined" && functionRegistry) {
+      var cats = ["typography", "math", "environment", "colors", "transforms"];
+      for (var i = 0; i < cats.length; i++) {
+        var cat = cats[i];
+        var group = functionRegistry[cat];
+        if (!group || !group.hasOwnProperty || !group.hasOwnProperty(varName))
+          continue;
+        var item = group[varName];
+        if (item && (item.type === "constant" || item.type === "variable")) {
+          // For analysis/execution we just need an identifier value to exist.
+          // Use the internal name if provided, otherwise fall back to the symbol name.
+          window[varName] = item.internal !== undefined ? item.internal : varName;
+          return;
+        }
+      }
+    }
   });
 }
 

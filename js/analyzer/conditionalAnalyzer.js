@@ -43,13 +43,21 @@ class ConditionalAnalyzer {
     // 阶段2：收集所有渲染函数调用
     const renderCalls = this.collectRenderFunctions(ast);
 
+    // 阶段2.5：构建「函数定义 ↔ 调用点」的简单调用图
+    // 之后我们会从渲染所在函数一路沿着调用链向外追溯到 setup/draw
+    const callGraph = this.buildFunctionCallGraph(ast);
+
     // 阶段3：对每个渲染函数，找出影响它的条件
     // 这里用「条件表达式在源码中的起止位置」作为 key，避免仅依赖字符串表达式导致匹配失败
     // key 形式："start:end"
     const conditionMap = new Map(); // key: "start:end", value: condition info
 
     for (const renderCall of renderCalls) {
-      const affectingConditions = this.findAffectingBranches(renderCall, ast);
+      const affectingConditions = this.findAffectingBranches(
+        renderCall,
+        ast,
+        callGraph
+      );
       
       for (const cond of affectingConditions) {
         // 对于正常的 IfStatement，一定会有 cond.node.test
@@ -130,269 +138,16 @@ class ConditionalAnalyzer {
           (node.callee.property && node.callee.property.name);
         if (funcName && this.renderFunctions.includes(funcName)) {
           const functionScope = this.findFunctionScope(node);
-          // 找到调用链：如果渲染函数在对象方法中，找到这个方法是在哪里被调用的
-          const callChain = this.findCallChain(node, ast);
           renderCalls.push({
             node: node,
             funcName: funcName,
             functionScope: functionScope,
-            callChain: callChain, // 调用链信息
           });
         }
       }
     });
 
     return renderCalls;
-  }
-
-  /**
-   * 找到渲染函数调用的调用链
-   * 机制：
-   * 1. 找到渲染函数（如 line()）所在的函数（如 intersect()）
-   * 2. 识别这个函数是否是类的方法
-   * 3. 找到这个类的定义
-   * 4. 找到类的所有实例（在 setup/draw 中通过 new ClassName() 创建的）
-   * 5. 找到这些实例在 setup/draw 中的方法调用（如 c1.intersect(c2)）
-   * 
-   * @param {Object} renderNode - 渲染函数调用的 AST 节点
-   * @param {Object} ast - AST 根节点
-   * @returns {Object|null} 调用链信息 { methodName, className, classNode, instances, callerScope, callerNode, inSetupOrDraw }
-   */
-  findCallChain(renderNode, ast) {
-    const functionScope = this.findFunctionScope(renderNode);
-    if (!functionScope) {
-      return null; // 在全局作用域，没有调用链
-    }
-
-    // 步骤1：找到方法名
-    let methodName = null;
-    let methodNode = null;
-    let className = null;
-    let classNode = null;
-
-    if (functionScope.id && functionScope.id.name) {
-      methodName = functionScope.id.name;
-      methodNode = functionScope;
-    } else if (functionScope.parent) {
-      // 可能是对象方法，如 { intersect: function() { ... } }
-      if (functionScope.parent.type === "Property") {
-        methodName = functionScope.parent.key.name || functionScope.parent.key.value;
-        methodNode = functionScope.parent;
-      } else if (functionScope.parent.type === "MethodDefinition") {
-        // ES6 类方法，如 class Circle { intersect() { ... } }
-        methodName = functionScope.parent.key.name || functionScope.parent.key.value;
-        methodNode = functionScope.parent;
-        
-        // 步骤2：找到这个类
-        let current = functionScope.parent.parent;
-        while (current) {
-          if (current.type === "ClassDeclaration" || current.type === "ClassExpression") {
-            className = current.id ? current.id.name : null;
-            classNode = current;
-            break;
-          }
-          current = current.parent;
-        }
-      }
-    }
-
-    if (!methodName) {
-      return null; // 无法确定方法名
-    }
-
-    // 步骤3：如果找到了类，找到类的所有实例（在 setup/draw 中通过 new ClassName() 创建的）
-    const instances = []; // 存储实例变量名和创建位置
-    const arrayVariables = new Set(); // 存储数组变量名（如 circles）
-    if (className) {
-      this.walkAST(ast, (node) => {
-        // 查找 new ClassName() 表达式
-        if (
-          node.type === "NewExpression" &&
-          node.callee.type === "Identifier" &&
-          node.callee.name === className
-        ) {
-          const scope = this.findFunctionScope(node);
-          // 检查是否在 setup 或 draw 中
-          if (scope && scope.id) {
-            const callerName = scope.id.name;
-            if (callerName === "setup" || callerName === "draw") {
-              // 找到赋值语句，获取变量名
-              let parent = node.parent;
-              while (parent) {
-                if (parent.type === "VariableDeclarator" && parent.id) {
-                  const varName = parent.id.name;
-                  instances.push({
-                    varName: varName,
-                    newNode: node,
-                    scope: scope,
-                  });
-                  break;
-                } else if (
-                  parent.type === "AssignmentExpression" &&
-                  parent.left.type === "Identifier"
-                ) {
-                  const varName = parent.left.name;
-                  instances.push({
-                    varName: varName,
-                    newNode: node,
-                    scope: scope,
-                  });
-                  break;
-                } else if (
-                  // 检查是否是数组 push，如 circles.push(new Circle())
-                  parent.type === "CallExpression" &&
-                  parent.callee &&
-                  parent.callee.type === "MemberExpression" &&
-                  parent.callee.property &&
-                  parent.callee.property.name === "push" &&
-                  parent.arguments &&
-                  parent.arguments[0] === node
-                ) {
-                  // 提取数组变量名
-                  const arrayName = this.extractObjectName(parent.callee);
-                  if (arrayName) {
-                    arrayVariables.add(arrayName);
-                  }
-                  break;
-                }
-                parent = parent.parent;
-              }
-            }
-          }
-        }
-        return false;
-      });
-    }
-
-    // 步骤4：找到这些实例在 setup/draw 中的方法调用（如 c1.intersect(c2)）
-    let callerScope = null;
-    let callerNode = null;
-    let foundInSetupOrDraw = false;
-    let fallbackCallerScope = null; // 备用：不在 setup/draw 中的调用
-    let fallbackCallerNode = null;
-
-    this.walkAST(ast, (node) => {
-      if (node.type === "CallExpression") {
-        // 检查是否是方法调用，如 c1.intersect(c2) 或 circles[i].update()
-        if (
-          node.callee.type === "MemberExpression" &&
-          node.callee.property &&
-          node.callee.property.name === methodName
-        ) {
-          const scope = this.findFunctionScope(node);
-          
-          // 如果找到了类，检查调用对象是否是类的实例
-          if (className && (instances.length > 0 || arrayVariables.size > 0)) {
-            // 使用辅助函数提取对象名（支持数组访问）
-            const objectName = this.extractObjectName(node.callee);
-            
-            // 检查是否是直接实例调用（如 c1.update()）
-            const isDirectInstanceCall = objectName && instances.some(
-              (inst) => inst.varName === objectName
-            );
-            
-            // 检查是否是数组元素调用（如 circles[i].update()）
-            const isArrayElementCall = objectName && arrayVariables.has(objectName);
-            
-            if (isDirectInstanceCall || isArrayElementCall) {
-              // 检查是否在 setup 或 draw 中
-              if (scope && scope.id) {
-                const callerName = scope.id.name;
-                if (callerName === "setup" || callerName === "draw") {
-                  callerNode = node;
-                  callerScope = scope;
-                  foundInSetupOrDraw = true;
-                  return true; // 找到在 setup/draw 中的调用，停止搜索
-                }
-              }
-              
-              // 即使不在 setup/draw 中，也记录为备用调用
-              if (!fallbackCallerNode) {
-                fallbackCallerNode = node;
-                fallbackCallerScope = scope;
-              }
-            }
-          } else {
-            // 没有找到类，使用原来的逻辑（可能是普通对象方法）
-            if (scope && scope.id) {
-              const callerName = scope.id.name;
-              if (callerName === "setup" || callerName === "draw") {
-                callerNode = node;
-                callerScope = scope;
-                foundInSetupOrDraw = true;
-                return true;
-              }
-            }
-            
-            // 记录备用调用
-            if (!fallbackCallerNode) {
-              fallbackCallerNode = node;
-              fallbackCallerScope = scope;
-            }
-          }
-        }
-        // 检查是否是直接函数调用，如 intersect(c1, c2)
-        else if (
-          node.callee.type === "Identifier" &&
-          node.callee.name === methodName
-        ) {
-          const scope = this.findFunctionScope(node);
-          
-          if (scope && scope.id) {
-            const callerName = scope.id.name;
-            if (callerName === "setup" || callerName === "draw") {
-              callerNode = node;
-              callerScope = scope;
-              foundInSetupOrDraw = true;
-              return true;
-            }
-          }
-          
-          // 记录备用调用
-          if (!fallbackCallerNode) {
-            fallbackCallerNode = node;
-            fallbackCallerScope = scope;
-          }
-        }
-      }
-      return false;
-    });
-    
-    // 如果没有找到在 setup/draw 中的调用，使用备用调用
-    if (!callerScope && !callerNode && fallbackCallerScope && fallbackCallerNode) {
-      callerScope = fallbackCallerScope;
-      callerNode = fallbackCallerNode;
-    }
-
-    // 返回调用链信息
-    if (callerScope && callerNode) {
-      return {
-        methodName: methodName,
-        methodNode: methodNode,
-        className: className,
-        classNode: classNode,
-        instances: instances,
-        arrayVariables: Array.from(arrayVariables), // 数组变量列表
-        callerScope: callerScope,
-        callerNode: callerNode,
-        inSetupOrDraw: foundInSetupOrDraw,
-      };
-    } else if (className && (instances.length > 0 || arrayVariables.size > 0)) {
-      // 即使没找到直接调用，也返回类和方法信息，因为条件分析仍然需要在方法内部进行
-      return {
-        methodName: methodName,
-        methodNode: methodNode,
-        className: className,
-        classNode: classNode,
-        instances: instances,
-        arrayVariables: Array.from(arrayVariables), // 数组变量列表
-        callerScope: null,
-        callerNode: null,
-        inSetupOrDraw: false,
-      };
-    }
-
-    return null;
   }
 
   /**
@@ -415,52 +170,127 @@ class ConditionalAnalyzer {
   }
 
   /**
-   * 从 MemberExpression 中提取对象变量名
-   * 支持：
-   * - Identifier: obj.method() -> "obj"
-   * - 数组访问: arr[i].method() -> "arr"
-   * - 嵌套访问: obj.arr[i].method() -> 递归提取
-   * @param {Object} node - MemberExpression 节点
-   * @returns {string|null} 对象变量名，如果无法提取则返回 null
+   * 获取函数节点的“名字”
+   * - FunctionDeclaration: 直接使用 id.name
+   * - FunctionExpression / ArrowFunctionExpression:
+   *   - 如果被赋值给变量：const foo = () => {} -> "foo"
+   *   - 如果是对象属性：obj.foo = function() {} 或 { foo: function() {} } -> "foo"
+   *   - 其他匿名情况返回 null
+   * @param {Object|null} fnNode
+   * @returns {string|null}
    */
-  extractObjectName(node) {
-    if (!node || node.type !== "MemberExpression") {
-      return null;
+  getFunctionName(fnNode) {
+    if (!fnNode) return null;
+
+    if (fnNode.type === "FunctionDeclaration" && fnNode.id) {
+      return fnNode.id.name;
     }
 
-    // 如果是 Identifier，直接返回名称
-    if (node.object.type === "Identifier") {
-      return node.object.name;
+    if (
+      fnNode.type === "FunctionExpression" ||
+      fnNode.type === "ArrowFunctionExpression"
+    ) {
+      const parent = fnNode.parent;
+      if (!parent) return null;
+
+      // 变量赋值：const foo = () => {}
+      if (
+        parent.type === "VariableDeclarator" &&
+        parent.id &&
+        parent.id.type === "Identifier"
+      ) {
+        return parent.id.name;
+      }
+
+      // 直接赋值：foo = () => {}
+      if (
+        parent.type === "AssignmentExpression" &&
+        parent.left &&
+        parent.left.type === "Identifier"
+      ) {
+        return parent.left.name;
+      }
+
+      // 对象属性：{ foo: function() {} } 或 obj.foo = function() {}
+      if (parent.type === "Property" && parent.key) {
+        return parent.key.name || parent.key.value || null;
+      }
     }
 
-    // 如果是数组访问（MemberExpression with computed），递归提取
-    if (node.object.type === "MemberExpression") {
-      return this.extractObjectName(node.object);
-    }
-
-    // 其他情况（如 this.xxx），返回 null
     return null;
   }
 
   /**
-   * 找出影响渲染函数执行的条件分支
-   * @param {Object} renderCall - 渲染函数调用信息 { node, funcName, functionScope, callChain }
-   * @param {Object} ast - AST 根节点
-   * @returns {Array} 条件分支数组
-   * 
-   * 新逻辑：从渲染函数节点向上追溯，检查所有层级的 if return 机制
-   * 对于所有可能阻止渲染函数执行的 if return，强制条件为 false，让 return 不执行
+   * 构建一个非常简单的「函数调用图」
+   * - 只关心：某个名字的函数（包括方法名）在什么函数里、以什么调用表达式被调用
+   * - 不做类实例分析，也不区分 obj.foo() / foo()，统一按名字 foo 归类
+   *
+   * 返回：
+   * - callSitesByName: Map<calleeName, Array<{ callNode, callerFunction }>>
    */
-  findAffectingBranches(renderCall, ast) {
+  buildFunctionCallGraph(ast) {
+    const callSitesByName = new Map();
+
+    this.walkAST(ast, (node) => {
+      if (node.type === "CallExpression") {
+        let calleeName = null;
+
+        if (node.callee.type === "Identifier") {
+          calleeName = node.callee.name;
+        } else if (
+          node.callee.type === "MemberExpression" &&
+          node.callee.property &&
+          node.callee.property.type === "Identifier"
+        ) {
+          // 对于 obj.foo() / arr[i].foo()，统一把方法名视为 "foo"
+          calleeName = node.callee.property.name;
+        }
+
+        if (!calleeName) return false;
+
+        const callerFunction = this.findFunctionScope(node);
+        if (!callerFunction) {
+          // 顶层调用（直接在全局），目前不继续往上追，可以忽略
+          return false;
+        }
+
+        if (!callSitesByName.has(calleeName)) {
+          callSitesByName.set(calleeName, []);
+        }
+        callSitesByName.get(calleeName).push({
+          callNode: node,
+          callerFunction,
+        });
+      }
+
+      return false;
+    });
+
+    return { callSitesByName };
+  }
+
+  /**
+   * 判断一个节点代表的“执行点”（可以是渲染调用，也可以是普通函数调用）
+   * 在某个函数作用域内，会受到哪些 if/return 的影响。
+   *
+   * 这是一份「局部视角」：只在给定的 functionScope 里，从 node 向外看。
+   * 用于：
+   * - 渲染所在函数内部的条件分析
+   * - 调用链上一层层「调用点」所在函数内部的条件分析
+   *
+   * @param {Object} execNode - 执行点节点（CallExpression）
+   * @param {Object|null} functionScope - 函数作用域，null 表示全局
+   * @param {Object} ast - AST 根
+   * @returns {Array} 条件分支数组
+   */
+  collectConditionsForNode(execNode, functionScope, ast) {
     const conditions = [];
-    const renderNode = renderCall.node;
-    const functionScope = renderCall.functionScope;
+    const renderNode = execNode;
 
     // 确定搜索边界：在函数作用域内查找
     const searchBoundary = functionScope || ast;
 
-    // 从渲染函数节点向上遍历到函数作用域边界
-    // 对于路径上的每个 BlockStatement，检查其所有语句
+    // 从执行点节点向上遍历到函数作用域边界
     let currentNode = renderNode;
     const visitedIfs = new Set(); // 避免重复处理同一个 if
 
@@ -471,22 +301,23 @@ class ConditionalAnalyzer {
       // 如果到达了函数作用域边界，停止
       if (currentNode === functionScope) break;
 
-      // 关键修复：直接检查父节点是否是 IfStatement
-      // 这样即使渲染函数在 else 分支中，也能找到包含它的 if 语句
+      // 直接检查父节点是否是 IfStatement
+      // 这样即使执行点在 else 分支中，也能找到包含它的 if 语句
       if (parent.type === "IfStatement" && !visitedIfs.has(parent)) {
         const stmt = parent;
-        
-        // 确保 if 语句和渲染函数在同一函数作用域内
+
+        // 确保 if 语句和执行点在同一函数作用域内
         if (this.isInSameFunctionScope(stmt, renderNode, functionScope)) {
           visitedIfs.add(stmt);
 
-          // 判断渲染函数是否在 if 的某个分支中
+          // 判断执行点是否在 if 的某个分支中
           const inThen = this.isNodeDescendant(renderNode, stmt.consequent);
-          const inElse = stmt.alternate && this.isNodeDescendant(renderNode, stmt.alternate);
+          const inElse =
+            stmt.alternate && this.isNodeDescendant(renderNode, stmt.alternate);
 
           if (inThen) {
-            // 渲染函数在 then 分支中，需要强制执行 then 分支
-            // 但也要检查 then 分支中是否有嵌套的 if return 会阻止渲染函数执行
+            // 执行点在 then 分支中，需要强制执行 then 分支
+            // 但也要检查 then 分支中是否有嵌套的 if return 会阻止执行点之后的代码执行
             this.processNestedIfsWithReturnInBranch(
               renderNode,
               stmt.consequent,
@@ -495,7 +326,7 @@ class ConditionalAnalyzer {
               conditions
             );
 
-            // 强制执行外层 if 的 then 分支（让渲染函数能够执行）
+            // 强制执行外层 if 的 then 分支
             const conditionStr = this.extractConditionExpression(stmt.test);
             conditions.push({
               condition: conditionStr,
@@ -504,8 +335,7 @@ class ConditionalAnalyzer {
               node: stmt,
             });
           } else if (inElse) {
-            // 渲染函数在 else 分支中，需要强制执行 else 分支
-            // 但也要检查 else 分支中是否有嵌套的 if return 会阻止渲染函数执行
+            // 执行点在 else 分支中，需要强制执行 else 分支
             this.processNestedIfsWithReturnInBranch(
               renderNode,
               stmt.alternate,
@@ -514,7 +344,6 @@ class ConditionalAnalyzer {
               conditions
             );
 
-            // 强制执行外层 if 的 else 分支（让渲染函数能够执行）
             const conditionStr = this.extractConditionExpression(stmt.test);
             conditions.push({
               condition: conditionStr,
@@ -527,32 +356,33 @@ class ConditionalAnalyzer {
       }
 
       // 检查父节点是否是 BlockStatement 或 Program，查找其中的 if 语句
-      // 这些 if 语句可能在渲染函数之前，且可能包含 return 会阻止渲染函数执行
+      // 这些 if 语句可能在执行点之前，且可能包含 return 会阻止执行点执行
       if (parent.type === "BlockStatement" || parent.type === "Program") {
         const statements = parent.body || [];
-        
-        // 检查该 BlockStatement 中所有在渲染函数之前的语句
+
+        // 检查该 BlockStatement 中所有在执行点之前的语句
         for (const stmt of statements) {
-          // 只检查在渲染函数之前的语句
+          // 只检查在执行点之前的语句
           if (stmt.end > renderNode.start) break;
 
           // 检查是否是 IfStatement
           if (stmt.type === "IfStatement" && !visitedIfs.has(stmt)) {
-            // 确保 if 语句和渲染函数在同一函数作用域内
+            // 确保 if 语句和执行点在同一函数作用域内
             if (!this.isInSameFunctionScope(stmt, renderNode, functionScope)) {
               continue;
             }
 
-            // 如果渲染函数在这个 if 的分支中，已经在上面处理过了，跳过
+            // 如果执行点在这个 if 的分支中，已经在上面处理过了，跳过
             const inThen = this.isNodeDescendant(renderNode, stmt.consequent);
-            const inElse = stmt.alternate && this.isNodeDescendant(renderNode, stmt.alternate);
+            const inElse =
+              stmt.alternate && this.isNodeDescendant(renderNode, stmt.alternate);
             if (inThen || inElse) {
               continue; // 已经在上面处理过了
             }
 
             visitedIfs.add(stmt);
 
-            // 渲染函数不在 if 的分支中，检查 if 分支中是否有 return 会阻止渲染函数执行
+            // 执行点不在 if 的分支中，检查 if 分支中是否有 return 会阻止执行点执行
             // 这里需要递归检查所有嵌套层级的 if return
             const nestedIfsInThen = this.findNestedIfsWithReturn(
               renderNode,
@@ -561,7 +391,12 @@ class ConditionalAnalyzer {
               visitedIfs
             );
             const nestedIfsInElse = stmt.alternate
-              ? this.findNestedIfsWithReturn(renderNode, stmt.alternate, functionScope, visitedIfs)
+              ? this.findNestedIfsWithReturn(
+                  renderNode,
+                  stmt.alternate,
+                  functionScope,
+                  visitedIfs
+                )
               : [];
 
             // 添加所有嵌套的 if return
@@ -598,13 +433,20 @@ class ConditionalAnalyzer {
               ? this.hasDirectReturn(renderNode, stmt.alternate, functionScope)
               : false;
 
-            if (hasDirectReturnInThen || hasDirectReturnInElse || nestedIfsInThen.length > 0 || nestedIfsInElse.length > 0) {
+            if (
+              hasDirectReturnInThen ||
+              hasDirectReturnInElse ||
+              nestedIfsInThen.length > 0 ||
+              nestedIfsInElse.length > 0
+            ) {
               // 如果 then 分支有 return（直接或嵌套），需要强制条件为 false（让 return 不执行）
               // 如果 else 分支有 return（直接或嵌套），需要强制条件为 true（让 return 不执行）
               conditions.push({
                 condition: this.extractConditionExpression(stmt.test),
-                hasThen: !hasDirectReturnInThen && nestedIfsInThen.length === 0, // then 有 return 时，hasThen=false
-                hasElse: hasDirectReturnInThen || nestedIfsInThen.length > 0,  // then 有 return 时，hasElse=true
+                hasThen:
+                  !hasDirectReturnInThen && nestedIfsInThen.length === 0, // then 有 return 时，hasThen=false
+                hasElse:
+                  hasDirectReturnInThen || nestedIfsInThen.length > 0, // then 有 return 时，hasElse=true
                 node: stmt,
               });
             }
@@ -617,6 +459,73 @@ class ConditionalAnalyzer {
     }
 
     return conditions;
+  }
+
+  /**
+   * 找出影响渲染函数执行的条件分支（包含调用链向上的所有层级）
+   * @param {Object} renderCall - 渲染函数调用信息 { node, funcName, functionScope }
+   * @param {Object} ast - AST 根节点
+   * @param {Object} callGraph - 由 buildFunctionCallGraph 构建的调用图
+   * @returns {Array} 条件分支数组
+   *
+   * 新逻辑：
+   * 1. 先在渲染所在函数内部分析一次（局部）
+   * 2. 再通过调用图，沿调用链一路向外追到 setup/draw（或顶层），在每一层函数内部用同样的逻辑分析
+   */
+  findAffectingBranches(renderCall, ast, callGraph) {
+    const allConditions = [];
+    const visitedFunctions = new Set(); // 避免递归调用链时重复
+
+    const startFunction = renderCall.functionScope;
+    const renderNode = renderCall.node;
+
+    // 1. 当前函数内部的条件
+    const localConditions = this.collectConditionsForNode(
+      renderNode,
+      startFunction,
+      ast
+    );
+    allConditions.push(...localConditions);
+
+    // 2. 通过调用图，沿调用链向外一层层查找调用点，并在各层函数内部收集条件
+    const functionName = this.getFunctionName(startFunction);
+
+    if (!functionName) {
+      // 渲染在匿名函数或全局中，无法通过名字往上追调用链，只返回局部结果
+      return allConditions;
+    }
+
+    const { callSitesByName } = callGraph || {};
+    if (!callSitesByName) {
+      return allConditions;
+    }
+
+    const collectFromCallers = (calleeName) => {
+      if (!calleeName) return;
+      if (visitedFunctions.has(calleeName)) return;
+      visitedFunctions.add(calleeName);
+
+      const callSites = callSitesByName.get(calleeName) || [];
+      for (const { callNode, callerFunction } of callSites) {
+        // 2.1 在调用点所在函数内部收集条件
+        const callerConds = this.collectConditionsForNode(
+          callNode,
+          callerFunction,
+          ast
+        );
+        allConditions.push(...callerConds);
+
+        // 2.2 如果调用方本身也有名字，继续向它的上层调用者追溯
+        const callerName = this.getFunctionName(callerFunction);
+        if (callerName) {
+          collectFromCallers(callerName);
+        }
+      }
+    };
+
+    collectFromCallers(functionName);
+
+    return allConditions;
   }
 
   /**
