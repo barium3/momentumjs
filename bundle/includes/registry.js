@@ -253,11 +253,14 @@ functionRegistry.typography = {
   WORD: { internal: "WORD", type: "constant" },
   CHAR: { internal: "CHAR", type: "constant" },
 
-  // 文本对齐常量（与 p5.js textAlign 一致）
-  LEFT: { internal: "LEFT", type: "constant" },
+  // 文本对齐常量（数字）
+  // 水平对齐：CENTER=0, LEFT=1, RIGHT=2（与 rectMode CENTER=0 保持一致）
+  // 垂直对齐：TOP=0, VCENTER=1, BOTTOM=2, BASELINE=3（用 VCENTER 避免与 rectMode CENTER 冲突）
   CENTER: { internal: "CENTER", type: "constant" },
+  LEFT: { internal: "LEFT", type: "constant" },
   RIGHT: { internal: "RIGHT", type: "constant" },
   TOP: { internal: "TOP", type: "constant" },
+  VCENTER: { internal: "VCENTER", type: "constant" },
   BOTTOM: { internal: "BOTTOM", type: "constant" },
   BASELINE: { internal: "BASELINE", type: "constant" },
 
