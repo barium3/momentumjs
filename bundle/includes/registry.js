@@ -249,6 +249,13 @@ functionRegistry.typography = {
   // textAlign 对齐控制：textAlign([h], [v])，支持 LEFT / CENTER / RIGHT（水平）和 TOP / CENTER / BOTTOM / BASELINE（垂直）
   textAlign: { internal: "textAlign" },
 
+  // 文本宽度计算：textWidth(str)，返回字符串在当前字体/字号下的宽度
+  textWidth: { internal: "textWidth" },
+  // 文本上升量：textAscent()，返回当前字体的上升高度
+  textAscent: { internal: "textAscent" },
+  // 文本下降量：textDescent()，返回当前字体的下降高度
+  textDescent: { internal: "textDescent" },
+
   // textWrap 常量（与 p5.js 保持一致：WORD / CHAR）
   WORD: { internal: "WORD", type: "constant" },
   CHAR: { internal: "CHAR", type: "constant" },
@@ -288,12 +295,11 @@ functionRegistry.math = {
 
   // 文本对齐常量（与 textAlign 对齐）
   // 水平对齐：CENTER=0, LEFT=1, RIGHT=2
-  // 垂直对齐：TOP=0, VCENTER=1, BOTTOM=2, BASELINE=3（用 VCENTER 避免与 rectMode CENTER 冲突）
+  // 垂直对齐：CENTER=0, TOP=1, BOTTOM=2, BASELINE=3（水平/垂直共用 CENTER=0，通过 h/v 区分）
   LEFT: { internal: "LEFT", type: "constant" },
   RIGHT: { internal: "RIGHT", type: "constant" },
   TOP: { internal: "TOP", type: "constant" },
   BOTTOM: { internal: "BOTTOM", type: "constant" },
-  VCENTER: { internal: "VCENTER", type: "constant" },
   BASELINE: { internal: "BASELINE", type: "constant" },
 
   // 椭圆/矩形模式设置函数（非渲染函数）

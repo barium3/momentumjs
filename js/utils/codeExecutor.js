@@ -2,6 +2,71 @@
 window.codeExecutor = (function () {
   const ERROR_PREFIX = "ERROR:";
 
+  /**
+   * 从代码中收集字体的度量数据
+   * 内部调用 FontAnalyzer 的 AST 收集 + AE 度量获取
+   * @param {string} code - 用户代码
+   * @returns {Promise<Object>} 字体度量数据映射 { fontName: metrics }
+   */
+  async function collectFontMetrics(code) {
+    const analyzer = getFontAnalyzer();
+    if (!analyzer) {
+      return {};
+    }
+
+    // 使用 FontAnalyzer 的 AST 方法收集字体并获取度量
+    const metricsMap = await analyzer.collectFontMetricsFromCode(code);
+    return metricsMap;
+  }
+
+  /**
+   * 为 renderLayers 注入 fontFamily（不含 fontMetrics）
+   * fontMetrics 由 engine 统一导出，图层通过 fontFamily 名称引用
+   * @param {Array} renderLayers - 渲染图层数组
+   * @param {Object} fontMetricsMap - 字体度量映射（用于获取可用的字体列表）
+   * @param {string} code - 原始代码（用于提取当前字体状态）
+   * @returns {Array} 注入了 fontFamily 的 renderLayers
+   */
+  function injectFontFamilyToLayers(renderLayers, fontMetricsMap, code) {
+    if (!renderLayers || !Array.isArray(renderLayers)) {
+      return renderLayers;
+    }
+
+    // 从代码中提取默认字体设置
+    let defaultFont = null;
+    const fontMatch = code.match(/textFont\s*\(\s*(["'])([^"']+)\1/);
+    if (fontMatch) {
+      defaultFont = fontMatch[2];
+    }
+
+    // 获取可用字体列表
+    const availableFonts = Object.keys(fontMetricsMap);
+    const fallbackFont = availableFonts.length > 0 ? availableFonts[0] : null;
+
+    return renderLayers.map((layer) => {
+      // 处理字符串形式的 layer（如 "text"）
+      if (layer === "text") {
+        const fontName = defaultFont || fallbackFont;
+        // 只注入 fontFamily，不传 fontMetrics（由 engine 统一导出）
+        return {
+          type: "text",
+          fontFamily: fontName || "Arial",
+        };
+      }
+
+      // 处理对象形式的 layer
+      if (layer && layer.type === "text") {
+        const fontName = defaultFont || fallbackFont;
+        return {
+          ...layer,
+          fontFamily: fontName || "Arial",
+        };
+      }
+
+      return layer;
+    });
+  }
+
   function loadMomentumLibrary() {
     return new Promise((resolve, reject) => {
       const extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
@@ -97,6 +162,78 @@ window.codeExecutor = (function () {
   // P5Analyzer 实例（用于分析渲染函数调用）
   let p5Analyzer = null;
 
+  // FontAnalyzer 实例（用于字体名称翻译）
+  let fontAnalyzer = null;
+
+  function getFontAnalyzer() {
+    if (!fontAnalyzer && typeof window.FontAnalyzer !== "undefined") {
+      fontAnalyzer = new window.FontAnalyzer();
+      // 预加载字体列表
+      fontAnalyzer.init();
+    }
+    return fontAnalyzer;
+  }
+
+  /**
+   * 预处理代码：翻译 textFont() 调用中的字体名称
+   * @param {string} code - 用户代码
+   * @returns {Promise<string>} 翻译后的代码
+   */
+  async function translateFontNames(code) {
+    const analyzer = getFontAnalyzer();
+    if (!analyzer) {
+      return code; // FontAnalyzer 未加载，原样返回
+    }
+
+    // 正则匹配 textFont("字体名") 或 textFont('字体名')
+    const fontCallRegex =
+      /textFont\s*\(\s*(["'])([^"']+)\1\s*(?:,\s*[^)]+)?\)/g;
+
+    let translatedCode = code;
+    let match;
+
+    // 收集所有需要翻译的字体
+    const fontsToTranslate = new Set();
+    while ((match = fontCallRegex.exec(code)) !== null) {
+      fontsToTranslate.add(match[2]);
+    }
+
+    // 批量翻译
+    const fontTranslations = {};
+    for (const fontName of fontsToTranslate) {
+      const psName = await analyzer.getPostScriptName(fontName);
+      if (psName) {
+        fontTranslations[fontName] = psName;
+      }
+    }
+
+    // 替换代码中的字体名称
+    if (Object.keys(fontTranslations).length > 0) {
+      for (const [original, translated] of Object.entries(fontTranslations)) {
+        // 替换 textFont("Original") 或 textFont("Original", size)
+        const escapedOriginal = escapeRegex(original);
+        // 匹配带或不带第二个参数的情况
+        const replaceRegex = new RegExp(
+          `(textFont\\s*\\(\\s*["'])${escapedOriginal}(["']\\s*(?:,\\s*[^)]+)?\\))`,
+          "g",
+        );
+        translatedCode = translatedCode.replace(
+          replaceRegex,
+          `$1${translated}$2`,
+        );
+      }
+    }
+
+    return translatedCode;
+  }
+
+  /**
+   * 转义正则特殊字符
+   */
+  function escapeRegex(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
   function getP5Analyzer() {
     if (!p5Analyzer && typeof window.P5Analyzer !== "undefined") {
       p5Analyzer = new window.P5Analyzer({
@@ -138,7 +275,6 @@ window.codeExecutor = (function () {
     try {
       // 使用运行时分析（异步执行代码）
       const result = await analyzer.analyzeDependencies(code);
-      console.log("[CodeExecutor] 依赖分析结果:", result);
       return result;
     } catch (error) {
       console.warn("[CodeExecutor] 依赖分析失败:", error.message);
@@ -158,7 +294,6 @@ window.codeExecutor = (function () {
 
     try {
       const result = await analyzer.fullAnalyze(code);
-      console.log("[CodeExecutor] 完整分析结果:", result);
       return result;
     } catch (error) {
       console.warn("[CodeExecutor] 完整分析失败:", error.message);
@@ -177,8 +312,11 @@ window.codeExecutor = (function () {
     }
 
     try {
-      const result = await analyzer.analyzeSetupAndDraw(setupCode, drawCode, globalCode);
-      console.log("[CodeExecutor] 分别分析结果:", result);
+      const result = await analyzer.analyzeSetupAndDraw(
+        setupCode,
+        drawCode,
+        globalCode,
+      );
       return result;
     } catch (error) {
       console.warn("[CodeExecutor] 分别分析失败:", error.message);
@@ -229,6 +367,9 @@ window.codeExecutor = (function () {
           code = window.codePreprocessor.stripComments(code);
         }
 
+        // 翻译字体名称：displayName → PostScript Name
+        code = await translateFontNames(code);
+
         const parsed = parseProcessingCode(code);
 
         // 提取完整的函数定义，而不只是函数体
@@ -266,14 +407,33 @@ window.codeExecutor = (function () {
           separatedResult = await analyzeSeparatedAsync(
             parsed.setupCode || "",
             parsed.drawCode || "",
-            parsed.globalCode || ""
+            parsed.globalCode || "",
           );
         } catch (e) {
           console.warn("[CodeExecutor] 分别分析失败，使用默认结果");
           separatedResult = null;
         }
 
-        // 不再注入任何 font metrics：setup/draw 的 renderLayers 直接透传
+        // 收集代码中使用的字体度量数据
+        const fontMetricsMap = await collectFontMetrics(code);
+
+        // 为 renderLayers 注入 fontFamily（fontMetrics 由 engine 统一导出）
+        if (separatedResult) {
+          if (separatedResult.setupRenderLayers) {
+            separatedResult.setupRenderLayers = injectFontFamilyToLayers(
+              separatedResult.setupRenderLayers,
+              fontMetricsMap,
+              parsed.setupCode || "",
+            );
+          }
+          if (separatedResult.drawRenderLayers) {
+            separatedResult.drawRenderLayers = injectFontFamilyToLayers(
+              separatedResult.drawRenderLayers,
+              fontMetricsMap,
+              parsed.drawCode || "",
+            );
+          }
+        }
 
         // 构建调用参数
         const drawArg = JSON.stringify(parsed.drawCode || "");
@@ -298,17 +458,14 @@ window.codeExecutor = (function () {
 
         // Echo 相关：draw 中每帧 background 调用次数（供 AE 表达式区分是否“每帧都清屏”）
         const drawBackgroundCount =
-          separatedResult && typeof separatedResult.drawBackgroundCount === "number"
+          separatedResult &&
+          typeof separatedResult.drawBackgroundCount === "number"
             ? separatedResult.drawBackgroundCount
             : 0;
 
         // Echo 相关：是否需要为 draw 挂载 Echo 效果（由前端分析综合判断）
         const drawNeedsEcho =
           separatedResult && separatedResult.drawNeedsEcho === true;
-
-        // 调试日志
-        console.log(`[CodeExecutor] setupRenderLayersArg:`, setupRenderLayersArg);
-        console.log(`[CodeExecutor] drawRenderLayersArg:`, drawRenderLayersArg);
 
         // 检测是否有 setup 或 draw 函数（前端 AST 判断）
         const hasSetup = !!(parsed.setupCode && parsed.setupCode.length > 0);
@@ -353,6 +510,8 @@ window.codeExecutor = (function () {
           drawBackgroundCount +
           ", " +
           drawNeedsEcho +
+          ", " +
+          JSON.stringify(fontMetricsMap) +
           ")";
 
         const scriptToRun = `try { ${finalCode}; "SUCCESS"; } catch(e) { "ERROR: " + e.message + " at line " + e.line; }`;

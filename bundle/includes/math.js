@@ -611,44 +611,24 @@ function getMathLib(deps) {
   if (deps.QUARTER_PI) lines.push("const QUARTER_PI = Math.PI / 4;");
 
   // 椭圆/矩形模式常量与状态（与 p5.ellipseMode / rectMode 对齐）
-  if (
-    deps.ellipseMode ||
-    deps.rectMode ||
-    deps.CENTER ||
-    deps.RADIUS ||
-    deps.CORNER ||
-    deps.CORNERS
-  ) {
-    lines.push("const CENTER = 0;");
-    lines.push("const RADIUS = 1;");
-    lines.push("const CORNER = 2;");
-    lines.push("const CORNERS = 3;");
-    lines.push("var _ellipseMode = CENTER;");
-    lines.push("var _rectMode = CORNER;");
-    lines.push("var ellipseMode = function(m) { _ellipseMode = m; };");
-    lines.push("var rectMode = function(m) { _rectMode = m; };");
-  }
 
-  // textAlign 对齐常量（数字）
+  lines.push("const CENTER = 0;");
+  lines.push("const RADIUS = 1;");
+  lines.push("const CORNER = 2;");
+  lines.push("const CORNERS = 3;");
+  lines.push("var _ellipseMode = CENTER;");
+  lines.push("var _rectMode = CORNER;");
+  lines.push("var ellipseMode = function(m) { _ellipseMode = m; };");
+  lines.push("var rectMode = function(m) { _rectMode = m; };");
+
+  // textAlign 对齐常量（数字）- 始终输出，作为基础常量
   // 水平对齐：CENTER=0, LEFT=1, RIGHT=2（与 rectMode CENTER=0 保持一致）
-  // 垂直对齐：TOP=0, VCENTER=1, BOTTOM=2, BASELINE=3（用 VCENTER 避免与 rectMode CENTER 冲突）
-  if (
-    deps.textAlign ||
-    deps.LEFT ||
-    deps.CENTER ||
-    deps.RIGHT ||
-    deps.TOP ||
-    deps.BOTTOM ||
-    deps.BASELINE ||
-    deps.VCENTER
-  ) {
-    lines.push("const LEFT = 1;");
-    lines.push("const RIGHT = 2;");
-    lines.push("const TOP = 0;");
-    lines.push("const VCENTER = 1;");
-    lines.push("const BOTTOM = 2;");
-    lines.push("const BASELINE = 3;");
-  }
+  // 垂直对齐：CENTER=0, TOP=1, BOTTOM=2, BASELINE=3（水平/垂直共用 CENTER=0，通过 h/v 区分）
+  lines.push("const LEFT = 1;");
+  lines.push("const RIGHT = 2;");
+  lines.push("const TOP = 1;");
+  lines.push("const BOTTOM = 2;");
+  lines.push("const BASELINE = 3;");
 
   // --- 三角函数与角度 ---
   if (deps.sin) lines.push("var sin = Math.sin;");

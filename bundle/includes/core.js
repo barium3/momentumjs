@@ -200,6 +200,7 @@ pub.runParsed = function (
   hasSetupOrDrawArg,
   drawBackgroundCountArg,
   drawNeedsEchoArg,
+  fontMetricsArg,
 ) {
   try {
     // 1. 初始化变量
@@ -260,6 +261,21 @@ pub.runParsed = function (
       }
       // 合并到shapeQueue，供后续统计使用
       shapeQueue = setupShapeQueue.concat(drawShapeQueue);
+    }
+
+    // 4. 解析 fontMetrics 参数（前端传递的字体度量数据）
+    var parsedFontMetrics = null;
+    try {
+      if (typeof fontMetricsArg === "string" && fontMetricsArg !== "null") {
+        parsedFontMetrics = JSON.parse(fontMetricsArg);
+      } else if (
+        typeof fontMetricsArg === "object" &&
+        fontMetricsArg !== null
+      ) {
+        parsedFontMetrics = fontMetricsArg;
+      }
+    } catch (e) {
+      parsedFontMetrics = null;
     }
 
     // 提取环境配置并创建合成
@@ -406,6 +422,7 @@ pub.runParsed = function (
         null,
         mergedShapeCounts,
         allShapesQueue,
+        parsedFontMetrics,
       );
       shapeQueue = originalShapeQueue;
 
@@ -511,6 +528,7 @@ pub.runParsed = function (
         null,
         mergedShapeCounts,
         shapeQueue,
+        parsedFontMetrics,
       );
 
       // 在主合成中创建shape图层
@@ -608,6 +626,7 @@ function createEngineLayer(
   mainCompNameParam,
   shapeCountsParam,
   shapeQueueParam,
+  fontMetricsParam,
 ) {
   // 1. 清理已存在的 __engine__ 图层
   cleanupEngineLayer();
@@ -664,6 +683,7 @@ function createEngineLayer(
     deps,
     mainCompNameParam,
     shapeQueueParam,
+    fontMetricsParam,
   );
 
   // 6. 应用表达式并设置图层属性（Source Text 表达式返回 JSON 字符串）
@@ -870,6 +890,7 @@ function buildExpression(
   deps,
   mainCompNameParam,
   shapeQueueParam,
+  fontMetricsParam,
 ) {
   // 解析依赖对象
   var mathDeps = deps && deps.math ? deps.math : {};
@@ -964,25 +985,16 @@ function buildExpression(
     expr.push(getEnvironmentLib(envDeps));
   }
 
-  // 收集 text 图层的 fontMetrics，构建映射表供表达式使用
-  // key 格式：fontFamily_fontSize（例如 "Arial_12"）
-  // 优先使用传入的 shapeQueueParam，否则使用全局 shapeQueue（向后兼容）
-  var queueForMetrics = shapeQueueParam || shapeQueue;
+  // 构建 fontMetrics 映射表供表达式使用
+  // 优先使用传入的 fontMetricsParam（由前端传递的精确数据）
+  // 回退：从 shapeQueue 中的 fontFamily 查找（但没有精确数据）
   var fontMetricsMap = {};
-  if (queueForMetrics && queueForMetrics.length > 0) {
-    for (var i = 0; i < queueForMetrics.length; i++) {
-      var item = queueForMetrics[i];
-      if (item && item.type === "text" && item.fontMetrics) {
-        var fontFamily = item.fontFamily || "Arial";
-        var fontSize = item.fontSize || 12;
-        var key = fontFamily + "_" + fontSize;
-        // 如果该 key 已存在，跳过（避免重复）
-        if (!fontMetricsMap[key]) {
-          fontMetricsMap[key] = item.fontMetrics;
-        }
-      }
-    }
+  if (fontMetricsParam && typeof fontMetricsParam === "object") {
+    // 使用前端传递的精确 fontMetrics
+    fontMetricsMap = fontMetricsParam;
   }
+  // 如果没有传入 fontMetricsParam，回退到从 shapeQueue 收集（但这只能得到 fontFamily，没有精确宽度）
+  // 这种情况 textWidth 等函数会使用估算值
 
   // 上下文对象：统一承载环境信息与渲染结果（语义化 JSON）
   // - version: 协议版本，便于未来演进
@@ -1065,6 +1077,7 @@ function buildExpression(
   // 按需加载排版/文本库（不直接产生形状 path，只负责 text 相关表达式）
   var needsTextShape = shapeCounts && shapeCounts.text > 0;
   var hasTypographyFuncs = hasKeys(typographyDeps);
+
   if (needsTextShape || hasTypographyFuncs) {
     var typoDepsForLib = {
       text: needsTextShape,
@@ -1074,6 +1087,9 @@ function buildExpression(
       textFont: !!typographyDeps.textFont,
       textStyle: !!typographyDeps.textStyle,
       textAlign: !!typographyDeps.textAlign,
+      textWidth: !!typographyDeps.textWidth,
+      textAscent: !!typographyDeps.textAscent,
+      textDescent: !!typographyDeps.textDescent,
       WORD: !!typographyDeps.WORD,
       CHAR: !!typographyDeps.CHAR,
       LEFT: !!typographyDeps.LEFT,
