@@ -639,7 +639,8 @@ function getMathLib(deps) {
     deps.RIGHT ||
     deps.TOP ||
     deps.BOTTOM ||
-    deps.BASELINE
+    deps.BASELINE ||
+    deps.VCENTER
   ) {
     lines.push("const LEFT = 1;");
     lines.push("const RIGHT = 2;");

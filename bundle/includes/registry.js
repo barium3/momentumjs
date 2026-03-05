@@ -253,17 +253,6 @@ functionRegistry.typography = {
   WORD: { internal: "WORD", type: "constant" },
   CHAR: { internal: "CHAR", type: "constant" },
 
-  // 文本对齐常量（数字）
-  // 水平对齐：CENTER=0, LEFT=1, RIGHT=2（与 rectMode CENTER=0 保持一致）
-  // 垂直对齐：TOP=0, VCENTER=1, BOTTOM=2, BASELINE=3（用 VCENTER 避免与 rectMode CENTER 冲突）
-  CENTER: { internal: "CENTER", type: "constant" },
-  LEFT: { internal: "LEFT", type: "constant" },
-  RIGHT: { internal: "RIGHT", type: "constant" },
-  TOP: { internal: "TOP", type: "constant" },
-  VCENTER: { internal: "VCENTER", type: "constant" },
-  BOTTOM: { internal: "BOTTOM", type: "constant" },
-  BASELINE: { internal: "BASELINE", type: "constant" },
-
   // 文本样式常量（与 p5.js textStyle 一致）",
   NORMAL: { internal: "NORMAL", type: "constant" },
   BOLD: { internal: "BOLD", type: "constant" },
@@ -296,6 +285,16 @@ functionRegistry.math = {
   RADIUS: { internal: "RADIUS", type: "constant" },
   CORNER: { internal: "CORNER", type: "constant" },
   CORNERS: { internal: "CORNERS", type: "constant" },
+
+  // 文本对齐常量（与 textAlign 对齐）
+  // 水平对齐：CENTER=0, LEFT=1, RIGHT=2
+  // 垂直对齐：TOP=0, VCENTER=1, BOTTOM=2, BASELINE=3（用 VCENTER 避免与 rectMode CENTER 冲突）
+  LEFT: { internal: "LEFT", type: "constant" },
+  RIGHT: { internal: "RIGHT", type: "constant" },
+  TOP: { internal: "TOP", type: "constant" },
+  BOTTOM: { internal: "BOTTOM", type: "constant" },
+  VCENTER: { internal: "VCENTER", type: "constant" },
+  BASELINE: { internal: "BASELINE", type: "constant" },
 
   // 椭圆/矩形模式设置函数（非渲染函数）
   ellipseMode: { internal: "ellipseMode" },
