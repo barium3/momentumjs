@@ -53,6 +53,7 @@ function getImageLib(deps) {
   lines.push("    src: path,");
   lines.push("    imageMode: _imageMode,");
   lines.push("    fillOpacity: _fillColor ? _fillColor[3] * 100 : 100,");
+  lines.push("    tintColor: _tintColor,");
   lines.push("  });");
   lines.push("}");
 
@@ -210,12 +211,30 @@ function createImageFromContext(
     "r !== undefined ? r : 0",
   ].join("\n");
 
-  // Opacity
+  // Opacity - tintColor[3] 和 fillOpacity 相乘（与 p5.js 行为一致）
   imgLayer.property("Transform").property("Opacity").expression = [
     indexFind,
+    "var t = shape && shape.tintColor;",
     "var o = shape && shape.fillOpacity;",
-    "o !== undefined ? o : 100",
+    "var tintAlpha = t && t[3] !== undefined ? t[3] : 1;",
+    "var fillAlpha = o !== undefined ? o / 100 : 1;",
+    "tintAlpha * fillAlpha * 100",
   ].join("\n");
+
+  // Tint - 使用「色调」效果（ADBE Tint，界面里的"色调"）
+  var tintEffect = imgLayer.Effects.addProperty("ADBE Tint");
+  // 用索引 2 访问"映射白色到"（AE 效果属性通常索引从 1 开始）
+  // tintColor 格式: [r, g, b, a]，值范围 0-1
+  tintEffect.property(2).expression = [
+    indexFind,
+    "var t = shape && shape.tintColor;",
+    "if (!t) [255, 255, 255, 255];",
+    "else if (t.length === 1) [t[0] * 255, t[0] * 255, t[0] * 255, 255];",
+    "else if (t.length === 2) [t[0] * 255, t[0] * 255, t[0] * 255, t[1] * 255];",
+    "else [t[0] * 255, t[1] * 255, t[2] * 255, (t[3] !== undefined ? t[3] * 255 : 255)]",
+  ].join("\n");
+  // Amount: 着色强度，100% 确保颜色完全应用
+  tintEffect.property(3).setValue(100);
 }
 
 /**

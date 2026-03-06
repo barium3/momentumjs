@@ -1048,7 +1048,10 @@ function buildExpression(
   }
 
   // 按需加载图像库
+  // tint() 依赖 color()，确保 color 库也被加载
   if (shapeCounts && shapeCounts.image > 0) {
+    if (!colorDeps.color) colorDeps = colorDeps || {};
+    colorDeps.color = true;
     expr.push("// 图像库（按需加载）");
     expr.push(getImageLib({ image: true }));
   }

@@ -1545,4 +1545,3 @@ function createArcFromContext(index, shapeId, mainCompName) {
   fill.property("Color").expression = _getFillColorExpr(indexFind);
   fill.property("Opacity").expression = _getFillOpacityExpr(indexFind);
 }
-
