@@ -2,6 +2,62 @@
 window.codeExecutor = (function () {
   const ERROR_PREFIX = "ERROR:";
 
+  // ========================================
+  // ImageAnalyzer 实例
+  // ========================================
+  let imageAnalyzer = null;
+
+  function getImageAnalyzer() {
+    if (!imageAnalyzer && typeof window.ImageAnalyzer !== "undefined") {
+      imageAnalyzer = new window.ImageAnalyzer();
+    }
+    return imageAnalyzer;
+  }
+
+  /**
+   * 从代码中收集图片并通过 AE 加载
+   * 内部调用 ImageAnalyzer 的 AST 收集 + AE 加载
+   * @param {string} code - 用户代码
+   * @returns {Promise<Object>} 图片信息映射 { imagePath: { width, height, path, success } }
+   */
+  async function collectAndLoadImages(code) {
+    const analyzer = getImageAnalyzer();
+    if (!analyzer) {
+      console.warn("[CodeExecutor] ImageAnalyzer not available");
+      return {};
+    }
+
+    // 1. 从代码中收集图片路径
+    const imagePaths = analyzer.collectImagesFromCode(code);
+    if (imagePaths.size === 0) {
+      return {};
+    }
+
+    console.log("[CodeExecutor] Found images in code:", Array.from(imagePaths));
+
+    // 2. 通过 AE 加载图片
+    const loadedImages = await analyzer.loadImagesFromAE(imagePaths);
+
+    // 存储到全局缓存，供 loadImage stub 使用
+    if (!window.__momentumLoadedImages) {
+      window.__momentumLoadedImages = {};
+    }
+    for (const [path, info] of Object.entries(loadedImages)) {
+      if (info.success) {
+        window.__momentumLoadedImages[path] = {
+          width: info.width,
+          height: info.height,
+          _momentumPath: path,
+          _momentumFullPath: info.path,
+        };
+      }
+    }
+
+    console.log("[CodeExecutor] Images registered to runtime:", Object.keys(window.__momentumLoadedImages));
+
+    return loadedImages;
+  }
+
   /**
    * 从代码中收集字体的度量数据
    * 内部调用 FontAnalyzer 的 AST 收集 + AE 度量获取
@@ -392,6 +448,12 @@ window.codeExecutor = (function () {
           "\n" +
           (drawFullCode || "");
 
+        // 【提前】收集并加载代码中使用的图片
+        // 必须在 runtime 分析（fullAnalyzeAsync）之前完成，
+        // 因为 runtime 会执行 preload()，preload 里的 loadImage() 需要从缓存中读取数据
+        const loadedImagesMap = await collectAndLoadImages(code);
+        console.log("[CodeExecutor] Loaded images:", loadedImagesMap);
+
         // 使用 P5Analyzer 进行完整分析（包含 dependencies 等信息）
         let fullResult = null;
         try {
@@ -416,6 +478,8 @@ window.codeExecutor = (function () {
 
         // 收集代码中使用的字体度量数据
         const fontMetricsMap = await collectFontMetrics(code);
+
+        // 图片已在 fullAnalyzeAsync 之前加载完毕（见上方），这里无需重复加载
 
         // 为 renderLayers 注入 fontFamily（fontMetrics 由 engine 统一导出）
         if (separatedResult) {
@@ -448,6 +512,8 @@ window.codeExecutor = (function () {
           separatedResult.setupRenderLayers.length > 0
             ? JSON.stringify(separatedResult.setupRenderLayers)
             : "null";
+
+        console.log("[CodeExecutor] setupRenderLayersArg:", setupRenderLayersArg);
 
         const drawRenderLayersArg =
           separatedResult &&
@@ -514,12 +580,15 @@ window.codeExecutor = (function () {
           JSON.stringify(fontMetricsMap) +
           ")";
 
-        const scriptToRun = `try { ${finalCode}; "SUCCESS"; } catch(e) { "ERROR: " + e.message + " at line " + e.line; }`;
+        const scriptToRun = `try { ${finalCode}; "SUCCESS"; } catch(e) { "ERROR: " + e.message + " at line " + e.line + " stack: " + e.stack; }`;
 
         // 重新加载 momentum.js 并执行
         loadMomentumLibrary()
           .then(() => {
             csInterface.evalScript(scriptToRun, (result) => {
+              if (result && result.startsWith && result.startsWith("ERROR:")) {
+                console.error("[CodeExecutor] AE script error:", result);
+              }
               if (
                 result &&
                 result.startsWith &&

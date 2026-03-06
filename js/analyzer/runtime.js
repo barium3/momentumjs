@@ -113,7 +113,8 @@ function exposeVariables(variables, p) {
         if (item && (item.type === "constant" || item.type === "variable")) {
           // For analysis/execution we just need an identifier value to exist.
           // Use the internal name if provided, otherwise fall back to the symbol name.
-          window[varName] = item.internal !== undefined ? item.internal : varName;
+          window[varName] =
+            item.internal !== undefined ? item.internal : varName;
           return;
         }
       }
@@ -150,7 +151,10 @@ function cleanupGlobals(allFunctions, allVariables) {
   // 清理我们安装的 Momentum stub，避免污染下一次分析/执行
   if (window.__momentumStubs) {
     for (var k in window.__momentumStubs) {
-      if (window.__momentumStubs.hasOwnProperty(k) && window.__momentumStubs[k]) {
+      if (
+        window.__momentumStubs.hasOwnProperty(k) &&
+        window.__momentumStubs[k]
+      ) {
         try {
           delete window[k];
         } catch (e) {
@@ -192,22 +196,22 @@ function getP5Function(p, funcName) {
  */
 function createShapeStateManager() {
   var states = {}; // key: shapeName, value: { hasVertexInCurrentShape: boolean }
-  
+
   return {
-    getState: function(shapeName) {
+    getState: function (shapeName) {
       if (!states[shapeName]) {
         states[shapeName] = { hasVertexInCurrentShape: false };
       }
       return states[shapeName];
     },
-    reset: function(shapeName) {
+    reset: function (shapeName) {
       if (states[shapeName]) {
         states[shapeName].hasVertexInCurrentShape = false;
       }
     },
-    clear: function() {
+    clear: function () {
       states = {};
-    }
+    },
   };
 }
 
@@ -225,7 +229,7 @@ function recordShapeExecution(context, baseType, funcName) {
   if (typeof context.collectDeps === "function") {
     context.collectDeps("shapes", funcName || baseType);
   }
-  
+
   // 执行统计模式
   if (context.loopExecutions) {
     context.loopExecutions.value++;
@@ -260,18 +264,18 @@ function createShapeBuilderWrapper(options) {
   var role = options.role;
   var stateManager = options.stateManager;
   var context = options.context || {};
-  
+
   var state = stateManager.getState(shapeName);
-  
+
   if (role === "begin") {
     // begin 角色：重置状态
-    return function() {
+    return function () {
       state.hasVertexInCurrentShape = false;
       return original.apply(p, arguments);
     };
   } else if (role === "add") {
     // add 角色：标记有顶点，并收集函数依赖（如 beginContour, endContour）
-    return function() {
+    return function () {
       state.hasVertexInCurrentShape = true;
       // 收集构建器函数的依赖（如 beginContour, endContour）
       if (typeof context.collectDeps === "function") {
@@ -281,7 +285,7 @@ function createShapeBuilderWrapper(options) {
     };
   } else if (role === "end") {
     // end 角色：如果有效则统计
-    return function() {
+    return function () {
       if (state.hasVertexInCurrentShape) {
         recordShapeExecution(context, baseType, baseType);
         state.hasVertexInCurrentShape = false;
@@ -289,9 +293,9 @@ function createShapeBuilderWrapper(options) {
       return original.apply(p, arguments);
     };
   }
-  
+
   // 未知角色，直接返回原始函数
-  return function() {
+  return function () {
     return original.apply(p, arguments);
   };
 }
@@ -314,7 +318,7 @@ function createShapeWrapper(options) {
   var context = options.context || {};
   var backgroundInfo = options.backgroundInfo;
 
-  return function() {
+  return function () {
     // 专门处理 background：记录是否显式传入了 alpha 参数
     if (baseType === "background" && backgroundInfo) {
       var hasAlpha = false;
@@ -352,8 +356,28 @@ function createShapeWrapper(options) {
     }
 
     if (context.renderOrder) {
-      // 统一：所有形状（包括文本）都只记录基础类型，文本一律按点文本处理
-      context.renderOrder.push(baseType);
+      if (funcName === "image") {
+        // 图像：捕获 src（_momentumPath）以便 AE 脚本端创建 footage 图层
+        var imgArg = arguments[0];
+        var srcPath = imgArg && imgArg._momentumPath ? imgArg._momentumPath : null;
+        context.renderOrder.push(srcPath ? { type: "image", src: srcPath } : baseType);
+      } else {
+        // 统一：所有形状（包括文本）都只记录基础类型，文本一律按点文本处理
+        context.renderOrder.push(baseType);
+      }
+    }
+
+    // image() 使用非 p5 的 stub 图像对象，直接调用 p5 原生 image 可能崩溃；
+    // 对 image 单独保护：img 无效时跳过，有效时也包在 try-catch 内。
+    if (funcName === "image") {
+      var imgObj = arguments[0];
+      if (!imgObj) return;
+      try {
+        return original.apply(p, arguments);
+      } catch (e) {
+        // stub 图像对象无法被 p5 渲染，静默忽略
+      }
+      return;
     }
 
     return original.apply(p, arguments);
@@ -370,12 +394,12 @@ function exposeFunctions(context, mode) {
   var allFunctions = context.allFunctions;
   var renderFunctions = context.renderFunctions;
   var getShapeTypeMap = context.getShapeTypeMap;
-  
+
   // 执行模式特有的参数
   var renderOrder = context.renderOrder;
   var loopExecutions = context.loopExecutions;
   var maxLoopCount = context.maxLoopCount;
-  
+
   // 分析模式特有的参数
   var getTransformFunctionNames = context.getTransformFunctionNames;
   var getColorFunctionNames = context.getColorFunctionNames;
@@ -387,30 +411,40 @@ function exposeFunctions(context, mode) {
   var backgroundInfo = context.backgroundInfo;
 
   var shapeTypeMap = getShapeTypeMap ? getShapeTypeMap(context.cache) : {};
-  var transformFuncs = mode === "analysis" && getTransformFunctionNames ? getTransformFunctionNames() : [];
-  var colorFuncs = mode === "analysis" && getColorFunctionNames ? getColorFunctionNames() : [];
-  var envFuncs = mode === "analysis" && getEnvironmentFunctionNames ? getEnvironmentFunctionNames() : [];
+  var transformFuncs =
+    mode === "analysis" && getTransformFunctionNames
+      ? getTransformFunctionNames()
+      : [];
+  var colorFuncs =
+    mode === "analysis" && getColorFunctionNames ? getColorFunctionNames() : [];
+  var envFuncs =
+    mode === "analysis" && getEnvironmentFunctionNames
+      ? getEnvironmentFunctionNames()
+      : [];
 
   var stateManager = createShapeStateManager();
 
   allFunctions.forEach(function (funcName) {
     var original = getP5Function(p, funcName);
-    
+
     // 检查是否为某个 shape 的构建器函数
     var builderInfo = getBuilderInfo(funcName);
 
     if (original) {
       // 处理 shape 构建器函数（需要状态管理）
       if (builderInfo) {
-        var builderContext = mode === "execution" ? {
-          renderOrder: renderOrder,
-          loopExecutions: loopExecutions,
-          maxLoopCount: maxLoopCount,
-        } : {
-          collectShape: collectShape,
-          collectDeps: collectDeps,
-        };
-        
+        var builderContext =
+          mode === "execution"
+            ? {
+                renderOrder: renderOrder,
+                loopExecutions: loopExecutions,
+                maxLoopCount: maxLoopCount,
+              }
+            : {
+                collectShape: collectShape,
+                collectDeps: collectDeps,
+              };
+
         window[funcName] = createShapeBuilderWrapper({
           original: original,
           p: p,
@@ -617,19 +651,23 @@ class P5Runtime {
    * @returns {Promise<Object>} 执行结果
    */
   async executeWithBranches(code, globalCode, entryPoint) {
-    const fullCode = globalCode ? (globalCode + "\n" + code) : code;
-    const conditions = this.conditionalAnalyzer.findBranchesWithRender(fullCode);
+    const fullCode = globalCode ? globalCode + "\n" + code : code;
+    const conditions =
+      this.conditionalAnalyzer.findBranchesWithRender(fullCode);
 
     if (conditions.length === 0) {
       return await this.executeCodeBlock(fullCode, entryPoint);
     }
-    
+
     // 有条件分支，使用单次执行方案：
     // 1. 强制所有条件为 true
     // 2. 将 else/else if 转换为独立 if
     // 3. 只执行一次，不需要合并结果
     try {
-      const modifiedCode = this.conditionalAnalyzer.convertElseToIndependentIf(fullCode, conditions);
+      const modifiedCode = this.conditionalAnalyzer.convertElseToIndependentIf(
+        fullCode,
+        conditions,
+      );
       return await this.executeCodeBlock(modifiedCode, entryPoint);
     } catch (e) {
       console.error(`[Runtime] 条件分支处理失败:`, e);
@@ -637,7 +675,7 @@ class P5Runtime {
       return await this.executeCodeBlock(fullCode, entryPoint);
     }
   }
-  
+
   /**
    * 执行代码块
    * @param {string} fullCode - 完整代码
@@ -646,7 +684,7 @@ class P5Runtime {
    */
   async executeCodeBlock(fullCode, entryPoint) {
     var self = this;
-    
+
     return new Promise(function (resolve, reject) {
       var timeoutId = setTimeout(function () {
         var errorMsg = entryPoint ? `${entryPoint}执行超时` : "执行超时";
@@ -661,23 +699,26 @@ class P5Runtime {
 
         exposeVariables(self.allVariables, p);
 
-        exposeP5Functions({
-          p: p,
-          allFunctions: self.allFunctions,
-          renderFunctions: self.renderFunctions,
-          renderOrder: renderOrder,
-          backgroundInfo: backgroundInfo,
-          getShapeTypeMap: getShapeTypeMap,
-          cache: self,
-          loopExecutions: loopExecutions,
-          maxLoopCount: self.options.maxLoopCount,
-        }, "execution");
+        exposeP5Functions(
+          {
+            p: p,
+            allFunctions: self.allFunctions,
+            renderFunctions: self.renderFunctions,
+            renderOrder: renderOrder,
+            backgroundInfo: backgroundInfo,
+            getShapeTypeMap: getShapeTypeMap,
+            cache: self,
+            loopExecutions: loopExecutions,
+            maxLoopCount: self.options.maxLoopCount,
+          },
+          "execution",
+        );
 
         // 安装 Momentum 运行时 stub（如 createPoint），避免分析阶段缺少函数导致报错
         installMomentumStubs();
 
         clearUserEntryPoints();
-        
+
         if (fullCode.trim()) {
           try {
             window.eval(fullCode);
@@ -690,7 +731,17 @@ class P5Runtime {
         // 根据 entryPoint 决定执行哪些函数
         const shouldRunSetup = entryPoint === "setup" || entryPoint === null;
         const shouldRunDraw = entryPoint === "draw" || entryPoint === null;
-        
+
+        // p5 生命周期：preload → setup → draw
+        // preload 中通常调用 loadImage/loadFont 等，必须先执行使全局变量赋值。
+        if (typeof window.preload === "function") {
+          try {
+            window.preload();
+          } catch (preloadErr) {
+            console.warn(`[Runtime] preload() 调用失败`, preloadErr);
+          }
+        }
+
         if (shouldRunSetup && typeof window.setup === "function") {
           try {
             window.setup();
@@ -699,7 +750,7 @@ class P5Runtime {
             throw setupErr;
           }
         }
-        
+
         if (shouldRunDraw && typeof window.draw === "function") {
           try {
             window.draw();
@@ -718,7 +769,7 @@ class P5Runtime {
             hasAlpha: backgroundInfo.hasAlpha,
           },
         };
-        
+
         clearTimeout(timeoutId);
         resolve(result);
       } catch (err) {
@@ -747,33 +798,40 @@ class P5Runtime {
     if (drawCode && drawCode.trim()) {
       functionDefs.push(`function draw() { ${drawCode} }`);
     }
-    
+
     // 组合完整代码：globalCode + 函数定义
-    const fullCode = globalCode 
-      ? (globalCode + "\n" + functionDefs.join("\n"))
+    const fullCode = globalCode
+      ? globalCode + "\n" + functionDefs.join("\n")
       : functionDefs.join("\n");
-    
+
     // 找到所有条件分支（包括setup和draw中的）
-    const allConditions = this.conditionalAnalyzer.findBranchesWithRender(fullCode);
-    
+    const allConditions =
+      this.conditionalAnalyzer.findBranchesWithRender(fullCode);
+
     // 如果没有条件分支，直接执行
     if (allConditions.length === 0) {
-      const { setupResult, drawResult } = await this.executeSetupThenDraw(fullCode);
+      const { setupResult, drawResult } =
+        await this.executeSetupThenDraw(fullCode);
       return { setupResult, drawResult };
     }
-    
+
     // 有条件分支，使用单次执行方案：
     // 1. 强制所有条件为 true
     // 2. 将 else/else if 转换为独立 if
     // 3. 只执行一次，不需要合并结果
     try {
-      const modifiedCode = this.conditionalAnalyzer.convertElseToIndependentIf(fullCode, allConditions);
-      const { setupResult, drawResult } = await this.executeSetupThenDraw(modifiedCode);
+      const modifiedCode = this.conditionalAnalyzer.convertElseToIndependentIf(
+        fullCode,
+        allConditions,
+      );
+      const { setupResult, drawResult } =
+        await this.executeSetupThenDraw(modifiedCode);
       return { setupResult, drawResult };
     } catch (e) {
       console.error(`[Runtime] 条件分支处理失败:`, e);
       // 如果转换失败，回退到原始代码执行
-      const { setupResult, drawResult } = await this.executeSetupThenDraw(fullCode);
+      const { setupResult, drawResult } =
+        await this.executeSetupThenDraw(fullCode);
       return { setupResult, drawResult };
     }
   }
@@ -785,7 +843,7 @@ class P5Runtime {
    */
   async executeSetupThenDraw(fullCode) {
     var self = this;
-    
+
     return new Promise(function (resolve, reject) {
       var timeoutId = setTimeout(function () {
         var errorMsg = "执行超时";
@@ -794,12 +852,12 @@ class P5Runtime {
 
       try {
         var p = self.p5Instance;
-        
+
         // setup 的统计
         var setupRenderOrder = [];
         var setupLoopExecutions = { value: 0 };
         var setupBackgroundInfo = { hasAlpha: false };
-        
+
         // draw 的统计
         var drawRenderOrder = [];
         var drawLoopExecutions = { value: 0 };
@@ -808,29 +866,41 @@ class P5Runtime {
         exposeVariables(self.allVariables, p);
 
         // 先执行 setup
-        exposeP5Functions({
-          p: p,
-          allFunctions: self.allFunctions,
-          renderFunctions: self.renderFunctions,
-          renderOrder: setupRenderOrder,
-          backgroundInfo: setupBackgroundInfo,
-          getShapeTypeMap: getShapeTypeMap,
-          cache: self,
-          loopExecutions: setupLoopExecutions,
-          maxLoopCount: self.options.maxLoopCount,
-        }, "execution");
+        exposeP5Functions(
+          {
+            p: p,
+            allFunctions: self.allFunctions,
+            renderFunctions: self.renderFunctions,
+            renderOrder: setupRenderOrder,
+            backgroundInfo: setupBackgroundInfo,
+            getShapeTypeMap: getShapeTypeMap,
+            cache: self,
+            loopExecutions: setupLoopExecutions,
+            maxLoopCount: self.options.maxLoopCount,
+          },
+          "execution",
+        );
 
         // 安装 Momentum 运行时 stub（如 createPoint），避免分析阶段缺少函数导致报错
         installMomentumStubs();
 
         clearUserEntryPoints();
-        
+
         if (fullCode.trim()) {
           try {
             window.eval(fullCode);
           } catch (evalErr) {
             console.error(`[Runtime] eval 执行失败`, evalErr);
             throw evalErr;
+          }
+        }
+
+        // p5 生命周期：preload → setup → draw
+        if (typeof window.preload === "function") {
+          try {
+            window.preload();
+          } catch (preloadErr) {
+            console.warn(`[Runtime] preload() 调用失败`, preloadErr);
           }
         }
 
@@ -845,17 +915,20 @@ class P5Runtime {
         }
 
         // 现在执行 draw（在同一个环境中，可以访问setup中创建的变量）
-        exposeP5Functions({
-          p: p,
-          allFunctions: self.allFunctions,
-          renderFunctions: self.renderFunctions,
-          renderOrder: drawRenderOrder,
-          backgroundInfo: drawBackgroundInfo,
-          getShapeTypeMap: getShapeTypeMap,
-          cache: self,
-          loopExecutions: drawLoopExecutions,
-          maxLoopCount: self.options.maxLoopCount,
-        }, "execution");
+        exposeP5Functions(
+          {
+            p: p,
+            allFunctions: self.allFunctions,
+            renderFunctions: self.renderFunctions,
+            renderOrder: drawRenderOrder,
+            backgroundInfo: drawBackgroundInfo,
+            getShapeTypeMap: getShapeTypeMap,
+            cache: self,
+            loopExecutions: drawLoopExecutions,
+            maxLoopCount: self.options.maxLoopCount,
+          },
+          "execution",
+        );
 
         // 执行 draw
         if (typeof window.draw === "function") {
@@ -876,7 +949,7 @@ class P5Runtime {
             hasAlpha: setupBackgroundInfo.hasAlpha,
           },
         };
-        
+
         const drawResult = {
           renderOrder: drawRenderOrder,
           loopExecutions: drawLoopExecutions.value,
@@ -884,7 +957,7 @@ class P5Runtime {
             hasAlpha: drawBackgroundInfo.hasAlpha,
           },
         };
-        
+
         clearTimeout(timeoutId);
         resolve({
           setupResult: setupResult,
@@ -899,7 +972,6 @@ class P5Runtime {
       }
     });
   }
-
 
   // ========================================
   // 公共方法：依赖分析
@@ -923,7 +995,6 @@ class P5Runtime {
     // analyzeDependenciesAST 是同步函数，这里保持 async 接口向后兼容
     return analyzeDependenciesAST(code);
   }
-
 }
 
 // ========================================

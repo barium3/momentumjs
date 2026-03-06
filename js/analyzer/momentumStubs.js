@@ -73,15 +73,107 @@
             return deg;
           },
           radians: function () {
-            return deg * Math.PI / 180;
+            return (deg * Math.PI) / 180;
           },
         };
       };
       window.__momentumStubs.createAngle = true;
+    }
+
+    /**
+     * image(img, x, y, [w, h])
+     *
+     * 浏览器侧 stub：仅在分析阶段使用，不做实际渲染。
+     * 实际的渲染记录由 runtime.js 中的 image 包装器完成。
+     */
+    if (typeof window.image === "undefined") {
+      window.image = function () {};
+      window.__momentumStubs.image = true;
+    }
+
+    /**
+     * imageMode(mode)
+     */
+    if (typeof window.imageMode === "undefined") {
+      window.imageMode = function () {};
+      window.__momentumStubs.imageMode = true;
+    }
+
+    /**
+     * tint / noTint
+     */
+    if (typeof window.tint === "undefined") {
+      window.tint = function () {};
+      window.__momentumStubs.tint = true;
+    }
+    if (typeof window.noTint === "undefined") {
+      window.noTint = function () {};
+      window.__momentumStubs.noTint = true;
+    }
+
+    /**
+     * preload()
+     *
+     * p5.js 的 preload 钩子：用户在其中调用 loadImage 等异步加载函数。
+     * 在浏览器侧 stub 中，preload 只是一个空函数占位，
+     * 实际的图片数据已由 codeExecutor 通过 AE 提前加载完毕。
+     */
+    if (typeof window.preload === "undefined") {
+      window.preload = function () {};
+      window.__momentumStubs.preload = true;
+    }
+
+    /**
+     * loadImage(path)
+     *
+     * 浏览器侧 stub 实现：
+     * - 在代码分析阶段，返回一个占位对象
+     * - 实际的图片加载由 ImageAnalyzer 通过 AE 完成
+     * - 加载后的图片会注入到 runtime 环境中
+     *
+     * 返回的对象需要有以下属性：
+     *   - width: 图片宽度
+     *   - height: 图片高度
+     */
+    // loadImage 必须始终使用 Momentum stub（不能用 p5 原生版本）
+    // p5 的 loadImage 是异步的，不返回 _momentumPath，会导致 image() 无法获取路径
+    // 即使 exposeP5Functions 已经设置了 window.loadImage，这里也要覆盖它
+    {
+      window.loadImage = function (path) {
+        // 返回一个占位对象
+        // 实际的图片数据会由 ImageAnalyzer 加载后注入到全局变量
+        // 变量名基于图片路径生成，例如：
+        //   loadImage("apple.png") -> window.apple_png
+        //   loadImage("images/photo.jpg") -> window.images_photo_jpg
+        var varName = path
+          .replace(/[^a-zA-Z0-9_]/g, "_")
+          .replace(/^(\d)/, "_$1");
+
+        // 尝试从已加载的图片缓存中获取
+        if (
+          window.__momentumLoadedImages &&
+          window.__momentumLoadedImages[path]
+        ) {
+          return window.__momentumLoadedImages[path];
+        }
+
+        // 如果已有全局变量（由 ImageAnalyzer 注入），返回它
+        if (window[varName]) {
+          return window[varName];
+        }
+
+        // 否则返回占位对象（尺寸为 0）
+        return {
+          width: 0,
+          height: 0,
+          _momentumPath: path,
+          _placeholder: true,
+        };
+      };
+      window.__momentumStubs.loadImage = true;
     }
   }
 
   // 挂到全局，供 runtime.js 调用
   window.installMomentumStubs = installMomentumStubs;
 })(window);
-

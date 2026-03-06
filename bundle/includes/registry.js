@@ -138,6 +138,22 @@ functionRegistry.shapes = {
     internal: "_curve",
     baseType: "curve",
   },
+
+  // 图片：image() 绘制图层
+  // 数据结构（语义化 JSON）:
+  // {
+  //   id,
+  //   type: "image",
+  //   pos: [cx, cy],         // 中心点（已应用当前变换）
+  //   size: [w, h],          // 绘制尺寸（已乘 scale）
+  //   rot: number,           // 旋转角度（度）
+  //   src: "apple.png",      // 图片相对路径
+  //   fillOpacity: 100,      // 不透明度 0-100
+  // }
+  image: {
+    internal: "_image",
+    baseType: "image",
+  },
 };
 
 /**
@@ -175,6 +191,7 @@ functionRegistry.shapeTypeCode = {
   curve: 10,
   background: 11,
   text: 12,
+  image: 13,
 };
 
 /**
@@ -388,6 +405,22 @@ functionRegistry.controllers = {
 };
 
 /**
+ * 图像函数定义
+ * loadImage / image / imageMode / tint / noTint
+ * image() 是渲染函数（归在 shapes 里），其余是非渲染辅助函数
+ */
+functionRegistry.images = {
+  loadImage: { internal: "loadImage" },
+  imageMode: { internal: "imageMode" },
+  tint: { internal: "tint" },
+  noTint: { internal: "noTint" },
+  // 图像模式常量
+  CORNER: { internal: "CORNER", type: "constant" },
+  CORNERS: { internal: "CORNERS", type: "constant" },
+  CENTER: { internal: "CENTER", type: "constant" },
+};
+
+/**
  * 环境配置函数和变量定义
  * 包含：配置函数（createCanvas, frameRate）和环境变量（frameCount, width, height）
  * 环境变量按需注入，内部使用 currentFrame/fps 等语义化命名
@@ -446,6 +479,10 @@ functionRegistry.getP5Functions = function () {
   // 控制器/交互函数（如 createSlider）
   if (this.controllers) {
     result.push.apply(result, Object.keys(this.controllers));
+  }
+  // 图像辅助函数（loadImage / imageMode / tint / noTint）
+  if (this.images) {
+    result.push.apply(result, Object.keys(this.images));
   }
   // 收集所有 shape 的构建器函数
   if (this.shapes) {

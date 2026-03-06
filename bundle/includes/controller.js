@@ -5,6 +5,7 @@
 
 /**
  * 确保在给定合成中存在名为 "__controller__" 的置顶调整图层
+ * 使用形状图层（而非纯色），这样不会在资源管理器中产生独立的纯色 footage
  * @param {CompItem} comp - 目标合成
  * @returns {AVLayer|null} 控制图层
  */
@@ -28,19 +29,53 @@ function ensureControllerLayer(comp) {
     }
   }
 
-  // 未找到则创建新的纯色调整图层
-  var ctrlLayer = comp.layers.addSolid(
-    [0, 0, 0], // 颜色无关紧要，作为控制图层通常不会直接渲染
-    "__controller__",
-    comp.width,
-    comp.height,
-    1,
-    comp.duration
-  );
+  // 使用形状图层（而非纯色 footage），这样不会产生独立的纯色项
+  var ctrlLayer = comp.layers.addShape();
+  ctrlLayer.name = "__controller__";
 
   try {
     ctrlLayer.adjustmentLayer = true;
   } catch (e3) {}
+
+  // 锁定变换参数，使用表达式设置为默认值
+  try {
+    // 锚点：设置为合成中心 [width/2, height/2]
+    var anchorPoint = ctrlLayer.property("Anchor Point");
+    if (anchorPoint) {
+      anchorPoint.expression = "[" + (comp.width / 2) + ", " + (comp.height / 2) + "]";
+      anchorPoint.expressionEnabled = true;
+    }
+
+    // 位置：设置为 [width/2, height/2]
+    var position = ctrlLayer.property("Position");
+    if (position) {
+      position.expression = "[" + (comp.width / 2) + ", " + (comp.height / 2) + "]";
+      position.expressionEnabled = true;
+    }
+
+    // 缩放：设置为 [100, 100]
+    var scale = ctrlLayer.property("Scale");
+    if (scale) {
+      scale.expression = "[100, 100]";
+      scale.expressionEnabled = true;
+    }
+
+    // 旋转：设置为 0
+    var rotation = ctrlLayer.property("Rotation");
+    if (rotation) {
+      rotation.expression = "0";
+      rotation.expressionEnabled = true;
+    }
+
+    // 不透明度：设置为 0（完全透明，不影响视觉）
+    var opacity = ctrlLayer.property("Opacity");
+    if (opacity) {
+      opacity.expression = "0";
+      opacity.expressionEnabled = true;
+    }
+  } catch (eTransform) {
+    // 忽略变换设置错误
+  }
 
   // 放到图层堆栈顶部（置顶）
   try {

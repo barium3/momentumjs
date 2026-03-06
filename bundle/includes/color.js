@@ -711,14 +711,15 @@ function createBackgroundFromContext(index, renderIndex, mainCompName) {
     // 从主合成读取，通过合成名称直接调用
     // 转义合成名称中的引号（如果存在）
     var escapedName = mainCompName.replace(/"/g, '\\"');
-    engineLayerExpr = 'comp("' + escapedName + '").layer("__engine__").text.sourceText';
+    engineLayerExpr =
+      'comp("' + escapedName + '").layer("__engine__").text.sourceText';
   } else {
     // 从当前合成读取
     engineLayerExpr = 'thisComp.layer("__engine__").text.sourceText';
   }
 
   var indexFind = [
-    'var raw = ' + engineLayerExpr + ';',
+    "var raw = " + engineLayerExpr + ";",
     "var json = raw && raw.toString ? raw.toString() : raw;",
     "var data = JSON.parse(json);",
     "var backgrounds = data.backgrounds || [];",

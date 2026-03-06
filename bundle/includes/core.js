@@ -126,40 +126,15 @@ function getUniqueFolderName(baseName) {
 }
 
 /**
- * 将合成组织到与主合成同名的文件夹中
- * @param {CompItem} mainComp - 主合成
- * @param {CompItem} setupComp - Setup预合成（可选）
- * @param {CompItem} drawComp - Draw预合成（可选）
+ * 创建以合成名称命名的唯一项目文件夹。
+ * 后续所有属于该合成的资源（预合成、footage、控件）在创建时直接设置 parentFolder，
+ * 无需在最后统一移动。
  * @param {string} folderName - 文件夹名称（通常与主合成名称相同）
+ * @returns {FolderItem} 新创建的文件夹
  */
-function organizeCompsIntoFolder(mainComp, setupComp, drawComp, folderName) {
-  if (!mainComp) {
-    return; // 如果没有主合成，不执行
-  }
-
-  try {
-    // 获取唯一的文件夹名称
-    var uniqueFolderName = getUniqueFolderName(folderName);
-
-    // 创建文件夹
-    var folder = app.project.items.addFolder(uniqueFolderName);
-
-    // 将主合成移动到文件夹中
-    mainComp.parentFolder = folder;
-
-    // 将setup合成移动到文件夹中（如果存在）
-    if (setupComp) {
-      setupComp.parentFolder = folder;
-    }
-
-    // 将draw合成移动到文件夹中（如果存在）
-    if (drawComp) {
-      drawComp.parentFolder = folder;
-    }
-  } catch (e) {
-    // 如果组织文件夹失败，不影响主流程，静默处理
-    // 可以在这里添加日志记录，但不抛出错误
-  }
+function createCompFolder(folderName) {
+  var uniqueFolderName = getUniqueFolderName(folderName);
+  return app.project.items.addFolder(uniqueFolderName);
 }
 
 /**
@@ -304,6 +279,11 @@ pub.runParsed = function (
         : false;
     setCompBackgroundColor(engineComp, hasSetupOrDraw);
 
+    // 提前创建合成文件夹，后续所有相关资源（预合成、footage）创建时直接归入，
+    // 无需事后统一移动。
+    var compFolder = createCompFolder(uniqueMainCompName);
+    engineComp.parentFolder = compFolder;
+
     // 5. 检查代码块存在性
     var hasDraw = drawCode && drawCode.length > 0;
     var hasSetup = setupCode && setupCode.length > 0;
@@ -361,12 +341,14 @@ pub.runParsed = function (
         // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
         setCompBackgroundColor(setupComp, hasSetupOrDraw);
 
+        setupComp.parentFolder = compFolder;
+
         // 临时设置engineComp为setupComp，创建setup中的图层
         var originalEngineComp = engineComp;
         engineComp = setupComp;
         shapeQueue = setupShapeQueue;
         // 子合成中不创建engine图层，渲染图层通过表达式引用父合成的engine
-        createShapeLayers(mainCompName);
+        createShapeLayers(mainCompName, compFolder);
         engineComp = originalEngineComp;
         shapeQueue = [];
       }
@@ -385,12 +367,14 @@ pub.runParsed = function (
         // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
         setCompBackgroundColor(drawComp, hasSetupOrDraw);
 
+        drawComp.parentFolder = compFolder;
+
         // 临时设置engineComp为drawComp，创建draw中的图层
         var originalEngineComp2 = engineComp;
         engineComp = drawComp;
         shapeQueue = drawShapeQueue;
         // 子合成中不创建engine图层，渲染图层通过表达式引用父合成的engine
-        createShapeLayers(mainCompName);
+        createShapeLayers(mainCompName, compFolder);
 
         engineComp = originalEngineComp2;
         shapeQueue = [];
@@ -489,14 +473,6 @@ pub.runParsed = function (
         }
       }
 
-      // 组织合成到文件夹中
-      organizeCompsIntoFolder(
-        engineComp,
-        setupComp,
-        drawComp,
-        uniqueMainCompName,
-      );
-
       // 在主合成中为 createSlider() 创建控制图层与 Slider 控件（放在所有图层创建之后，保证控制图层置顶）
       // 仅从 __engine__ JSON 上下文中自动提取 controllers（已移除旧版 sliderConfigArg 兼容逻辑）
       controllerSliderCount = setupControllersFromConfigs(engineComp, null);
@@ -532,10 +508,7 @@ pub.runParsed = function (
       );
 
       // 在主合成中创建shape图层
-      createShapeLayers(mainCompName);
-
-      // 组织合成到文件夹中
-      organizeCompsIntoFolder(engineComp, null, null, uniqueMainCompName);
+      createShapeLayers(mainCompName, compFolder);
 
       // 在主合成中为 createSlider() 创建控制图层与 Slider 控件（放在所有图层创建之后，保证控制图层置顶）
       // 仅从 __engine__ JSON 上下文中自动提取 controllers（已移除旧版 sliderConfigArg 兼容逻辑）
@@ -1072,6 +1045,12 @@ function buildExpression(
     expr.push("// 形状函数库（按需加载）");
     // 从 registry 自动构建形状依赖对象，不需要手动维护函数列表
     expr.push(getShapeLib(buildShapeDepsFromRegistry(shapeCounts)));
+  }
+
+  // 按需加载图像库
+  if (shapeCounts && shapeCounts.image > 0) {
+    expr.push("// 图像库（按需加载）");
+    expr.push(getImageLib({ image: true }));
   }
 
   // 按需加载排版/文本库（不直接产生形状 path，只负责 text 相关表达式）

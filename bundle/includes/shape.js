@@ -9,7 +9,7 @@
  * 创建形状图层
  * 根据 shapeQueue 中的数据创建对应的 AE 图层
  */
-function createShapeLayers(mainCompName) {
+function createShapeLayers(mainCompName, compFolder) {
   if (shapeQueue.length === 0) return;
 
   // 形状类型到创建函数的映射表
@@ -26,6 +26,7 @@ function createShapeLayers(mainCompName) {
     background: createBackgroundFromContext,
     bezier: createBezierFromContext,
     curve: createCurveFromContext,
+    image: createImageFromContext,
   };
 
   for (var i = 0; i < shapeQueue.length; i++) {
@@ -36,7 +37,12 @@ function createShapeLayers(mainCompName) {
     if (creator) {
       // 对于 text，额外把前端已经构建好的 shape 对象（含 wh 信息）传给后端，
       // 后端只基于 shape.wh 做“伪 box”布局（不再创建 AE Box Text）。
-      if (shape.type === "text") {
+      // text 和 image 需要传递完整的 shape 对象
+      if (shape.type === "image") {
+        // image 需要 shapeData 和 compFolder（导入的 footage 直接放入合成文件夹）
+        creator(i, id, mainCompName, shape, compFolder);
+      } else if (shape.type === "text") {
+        // text 需要完整的 shape 对象（含 wh 信息）
         creator(i, id, mainCompName, shape);
       } else {
         creator(i, id, mainCompName);
@@ -1539,3 +1545,4 @@ function createArcFromContext(index, shapeId, mainCompName) {
   fill.property("Color").expression = _getFillColorExpr(indexFind);
   fill.property("Opacity").expression = _getFillOpacityExpr(indexFind);
 }
+

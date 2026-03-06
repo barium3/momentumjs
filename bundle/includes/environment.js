@@ -170,15 +170,20 @@ function getEnvironmentLib(deps) {
  * @param {string} uniqueMainCompName - 主合成名称（用于表达式引用）
  * @param {number} drawBackgroundCount - draw中background的数量
  */
-function addEchoEffect(drawLayer, engineComp, uniqueMainCompName, drawBackgroundCount) {
+function addEchoEffect(
+  drawLayer,
+  engineComp,
+  uniqueMainCompName,
+  drawBackgroundCount,
+) {
   try {
     // 获取效果容器
     var effectParade = drawLayer.property("ADBE Effect Parade");
-    
+
     if (effectParade) {
       // 添加 Echo 效果
       var echoEffect = effectParade.addProperty("ADBE Echo");
-      
+
       if (echoEffect) {
         // 根据属性索引直接访问（属性顺序已确认）：
         // 1: 残影时间（秒）
@@ -193,72 +198,77 @@ function addEchoEffect(drawLayer, engineComp, uniqueMainCompName, drawBackground
         var startingIntensityProp = null;
         var decayProp = null;
         var compositeOperatorProp = null;
-        
+
         // 通过索引直接访问属性
         if (propCount >= 1) {
           try {
             echoTimeProp = echoEffect.property(1); // 残影时间（秒）
           } catch (e) {}
         }
-        
+
         if (propCount >= 2) {
           try {
             numEchoesProp = echoEffect.property(2); // 残影数量
           } catch (e) {}
         }
-        
+
         if (propCount >= 3) {
           try {
             startingIntensityProp = echoEffect.property(3); // 起始强度
           } catch (e) {}
         }
-        
+
         if (propCount >= 4) {
           try {
             decayProp = echoEffect.property(4); // 衰减
           } catch (e) {}
         }
-        
+
         if (propCount >= 5) {
           try {
             compositeOperatorProp = echoEffect.property(5); // 残影运算符
           } catch (e) {}
         }
-        
+
         // 设置 Number of Echoes 表达式：
         //  - 默认等于 timeToFrames(time)，产生标准残影长度
         //  - 如果 draw 中存在最后一个 background 且 explicitAlpha === false（没有透明度参数的实心背景），
         //    则返回 0，彻底关闭残影，从而避免在这种场景下白白计算 Echo
         if (numEchoesProp) {
-          var escapedMainCompNameForEcho = uniqueMainCompName.replace(/"/g, '\\"');
+          var escapedMainCompNameForEcho = uniqueMainCompName.replace(
+            /"/g,
+            '\\"',
+          );
           var drawBgCountForEcho = drawBackgroundCount || 0;
           var numEchoesExprLines = [
-            'var raw = comp("' + escapedMainCompNameForEcho + '").layer("__engine__").text.sourceText;',
-            'var json = raw && raw.toString ? raw.toString() : raw;',
-            'var data = JSON.parse(json);',
-            'var backgrounds = data.backgrounds || [];',
-            'var drawBgCount = ' + drawBgCountForEcho + ';',
-            'var lastDrawBg = null;',
-            'if (drawBgCount > 0 && backgrounds.length > 0) {',
-            '  var startIndex = Math.max(0, backgrounds.length - drawBgCount);',
-            '  for (var i = backgrounds.length - 1; i >= startIndex; i--) {',
-            '    if (backgrounds[i] && backgrounds[i].color && backgrounds[i].color.length >= 4) {',
-            '      lastDrawBg = backgrounds[i];',
-            '      break;',
-            '    }',
-            '  }',
-            '}',
-            '// 如果最后一个 draw 中的 background 没有显式透明度参数（explicitAlpha === false），',
-            '// 说明用户每帧用实心背景清屏，此时完全不需要 Echo 残影，返回 0 减少计算负担。',
-            'if (lastDrawBg && lastDrawBg.explicitAlpha === false) {',
-            '  0;',
-            '} else {',
-            '  timeToFrames(time);',
-            '}'
+            'var raw = comp("' +
+              escapedMainCompNameForEcho +
+              '").layer("__engine__").text.sourceText;',
+            "var json = raw && raw.toString ? raw.toString() : raw;",
+            "var data = JSON.parse(json);",
+            "var backgrounds = data.backgrounds || [];",
+            "var drawBgCount = " + drawBgCountForEcho + ";",
+            "var lastDrawBg = null;",
+            "if (drawBgCount > 0 && backgrounds.length > 0) {",
+            "  var startIndex = Math.max(0, backgrounds.length - drawBgCount);",
+            "  for (var i = backgrounds.length - 1; i >= startIndex; i--) {",
+            "    if (backgrounds[i] && backgrounds[i].color && backgrounds[i].color.length >= 4) {",
+            "      lastDrawBg = backgrounds[i];",
+            "      break;",
+            "    }",
+            "  }",
+            "}",
+            "// 如果最后一个 draw 中的 background 没有显式透明度参数（explicitAlpha === false），",
+            "// 说明用户每帧用实心背景清屏，此时完全不需要 Echo 残影，返回 0 减少计算负担。",
+            "if (lastDrawBg && lastDrawBg.explicitAlpha === false) {",
+            "  0;",
+            "} else {",
+            "  timeToFrames(time);",
+            "}",
           ];
-          numEchoesProp.expression = numEchoesExprLines.join('\n');
+          numEchoesProp.expression = numEchoesExprLines.join("\n");
         }
-        
+
         if (startingIntensityProp) {
           try {
             startingIntensityProp.setValue(1); // Starting Intensity 范围是 0-1，1 表示 100%
@@ -266,7 +276,7 @@ function addEchoEffect(drawLayer, engineComp, uniqueMainCompName, drawBackground
             // 静默处理：忽略错误
           }
         }
-        
+
         if (decayProp) {
           // 使用表达式从engine读取最新的background的alpha值
           // Decay = 1 - alpha（alpha是归一化的0-1值）
@@ -275,66 +285,73 @@ function addEchoEffect(drawLayer, engineComp, uniqueMainCompName, drawBackground
           // 如果存在draw中的background且显式指定 alpha=1，则Decay=0，不产生拖尾
           // 额外规则：如果 draw 中的 background 没有显式透明度参数（explicitAlpha === false），也视为 alpha=1，不产生拖尾
           // 衰减只会受draw中的background影响，不会受setup中的影响
-          var escapedMainCompNameForDecay = uniqueMainCompName.replace(/"/g, '\\"');
+          var escapedMainCompNameForDecay = uniqueMainCompName.replace(
+            /"/g,
+            '\\"',
+          );
           var drawBgCount = drawBackgroundCount || 0;
           var decayExpr = [
-            'var raw = comp("' + escapedMainCompNameForDecay + '").layer("__engine__").text.sourceText;',
-            'var json = raw && raw.toString ? raw.toString() : raw;',
-            'var data = JSON.parse(json);',
-            'var backgrounds = data.backgrounds || [];',
-            'var alpha = 0; // 默认值：如果没有background，alpha=0，Decay=1（完全保留）',
-            '// 只考虑draw中的background，忽略setup中的background',
-            'var drawBgCount = ' + drawBgCount + '; // draw中background的数量（每帧调用次数）',
-            'if (drawBgCount > 0 && backgrounds.length > 0) {',
-            '  // backgrounds数组顺序：setup在前（如果有，只添加一次），draw在后（每帧都添加）',
-            '  // 由于draw每帧都会添加background，所以draw中的background在数组末尾',
-            '  // 关键：需要找到draw中的最后一个background（当前帧draw中的最后一个background）',
-            '  // 如果draw中有多个background调用，需要取当前帧draw中的最后一个',
-            '  // 解决方案：从后往前查找，取最后drawBgCount个background中的最后一个',
-            '  // 这样可以确保取到的是当前帧draw中的最后一个background，而不是setup中的',
-            '  // 由于draw每帧都执行，最后一个background就是当前帧draw中的最后一个',
-            '  // 但如果draw中有多个background调用，需要取当前帧draw中的最后一个',
-            '  // 从后往前查找，跳过setup中的background（如果有），找到draw中的最后一个',
-            '  var lastDrawBg = null;',
-            '  // 从后往前查找，取最后drawBgCount个background中的最后一个',
-            '  // 这样可以确保取到的是当前帧draw中的最后一个background',
-            '  var startIndex = Math.max(0, backgrounds.length - drawBgCount);',
-            '  for (var i = backgrounds.length - 1; i >= startIndex; i--) {',
-            '    if (backgrounds[i] && backgrounds[i].color && backgrounds[i].color.length >= 4) {',
-            '      lastDrawBg = backgrounds[i];',
-            '      break; // 找到最后一个draw中的background',
-            '    }',
-            '  }',
-            '  if (lastDrawBg) {',
-            '    alpha = lastDrawBg.color[3] !== undefined ? lastDrawBg.color[3] : 1;',
-            '    // 如果 draw 中的 background 没有显式透明度参数（explicitAlpha === false），视为 alpha=1，不产生拖尾',
-            '    if (lastDrawBg.explicitAlpha === false) {',
-            '      alpha = 1;',
-            '    }',
-            '  }',
-            '}',
-            '// Decay = 1 - alpha',
-            '// 如果没有draw中的background（alpha=0），则Decay=1，完全保留之前画面',
-            '// 如果alpha=0.392（透明），则Decay=0.608，产生拖尾效果',
-            '// 如果alpha=1（不透明），则Decay=0，不产生拖尾',
-            '1 - alpha'
-          ].join('\n');
-          
+            'var raw = comp("' +
+              escapedMainCompNameForDecay +
+              '").layer("__engine__").text.sourceText;',
+            "var json = raw && raw.toString ? raw.toString() : raw;",
+            "var data = JSON.parse(json);",
+            "var backgrounds = data.backgrounds || [];",
+            "var alpha = 0; // 默认值：如果没有background，alpha=0，Decay=1（完全保留）",
+            "// 只考虑draw中的background，忽略setup中的background",
+            "var drawBgCount = " +
+              drawBgCount +
+              "; // draw中background的数量（每帧调用次数）",
+            "if (drawBgCount > 0 && backgrounds.length > 0) {",
+            "  // backgrounds数组顺序：setup在前（如果有，只添加一次），draw在后（每帧都添加）",
+            "  // 由于draw每帧都会添加background，所以draw中的background在数组末尾",
+            "  // 关键：需要找到draw中的最后一个background（当前帧draw中的最后一个background）",
+            "  // 如果draw中有多个background调用，需要取当前帧draw中的最后一个",
+            "  // 解决方案：从后往前查找，取最后drawBgCount个background中的最后一个",
+            "  // 这样可以确保取到的是当前帧draw中的最后一个background，而不是setup中的",
+            "  // 由于draw每帧都执行，最后一个background就是当前帧draw中的最后一个",
+            "  // 但如果draw中有多个background调用，需要取当前帧draw中的最后一个",
+            "  // 从后往前查找，跳过setup中的background（如果有），找到draw中的最后一个",
+            "  var lastDrawBg = null;",
+            "  // 从后往前查找，取最后drawBgCount个background中的最后一个",
+            "  // 这样可以确保取到的是当前帧draw中的最后一个background",
+            "  var startIndex = Math.max(0, backgrounds.length - drawBgCount);",
+            "  for (var i = backgrounds.length - 1; i >= startIndex; i--) {",
+            "    if (backgrounds[i] && backgrounds[i].color && backgrounds[i].color.length >= 4) {",
+            "      lastDrawBg = backgrounds[i];",
+            "      break; // 找到最后一个draw中的background",
+            "    }",
+            "  }",
+            "  if (lastDrawBg) {",
+            "    alpha = lastDrawBg.color[3] !== undefined ? lastDrawBg.color[3] : 1;",
+            "    // 如果 draw 中的 background 没有显式透明度参数（explicitAlpha === false），视为 alpha=1，不产生拖尾",
+            "    if (lastDrawBg.explicitAlpha === false) {",
+            "      alpha = 1;",
+            "    }",
+            "  }",
+            "}",
+            "// Decay = 1 - alpha",
+            "// 如果没有draw中的background（alpha=0），则Decay=1，完全保留之前画面",
+            "// 如果alpha=0.392（透明），则Decay=0.608，产生拖尾效果",
+            "// 如果alpha=1（不透明），则Decay=0，不产生拖尾",
+            "1 - alpha",
+          ].join("\n");
+
           decayProp.expression = decayExpr;
         }
-        
+
         // 通过表达式绑定到主合成的一帧时间，主合成参数修改后会自动更新
         // 转义合成名称中的引号
         // 注意：Echo Time 使用负值，这样每个残影会显示更早一帧的内容
         // 这样残影就会"留在经过的地方"，而不是"被拖着走"
         var escapedMainCompName = uniqueMainCompName.replace(/"/g, '\\"');
-        var echoTimeExpr = "-comp(\"" + escapedMainCompName + "\").frameDuration";
-        
+        var echoTimeExpr = '-comp("' + escapedMainCompName + '").frameDuration';
+
         // 设置 Echo Time 表达式
         if (echoTimeProp) {
           echoTimeProp.expression = echoTimeExpr;
         }
-        
+
         // 设置 Composite Operator 为从后向前组合 (Back to Front)
         if (compositeOperatorProp) {
           compositeOperatorProp.setValue(6);

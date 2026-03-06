@@ -22,14 +22,20 @@ function buildFunctionDefinitions(
   // 定义 setup 函数（真正的函数调用，确保变量作用域隔离）
   if (hasSetup) {
     expr.push("// Setup 函数定义");
-    
+
     // 在 setup 函数体开头自动添加 randomSeed() 和 noiseSeed() 调用
     // 使用构建时生成的随机 seed，确保每次脚本运行时 setup 中的 random 和 noise 结果可复现
     // 但不同脚本运行之间 seed 不同，结果也不同
     var randomSeedValue = Math.floor(Math.random() * 1000000);
     var noiseSeedValue = Math.floor(Math.random() * 1000000);
-    var setupBody = "randomSeed(" + randomSeedValue + "); noiseSeed(" + noiseSeedValue + "); " + processedSetup;
-    
+    var setupBody =
+      "randomSeed(" +
+      randomSeedValue +
+      "); noiseSeed(" +
+      noiseSeedValue +
+      "); " +
+      processedSetup;
+
     expr.push("function setup() { " + setupBody + " }");
   }
 
@@ -83,9 +89,13 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
     expr.push("// ========================================");
     expr.push("// 执行 Draw (增量执行：只执行新增的帧)");
     expr.push("// ========================================");
-    expr.push("if (_needsFullRecompute || currentFrame > _lastComputedFrame) {");
+    expr.push(
+      "if (_needsFullRecompute || currentFrame > _lastComputedFrame) {",
+    );
     expr.push("  // 时间线回退或需要增量执行：从上次计算到当前帧");
-    expr.push("  var startFrame = _needsFullRecompute ? 0 : (_lastComputedFrame + 1);");
+    expr.push(
+      "  var startFrame = _needsFullRecompute ? 0 : (_lastComputedFrame + 1);",
+    );
     expr.push(
       "  for (var f = startFrame, targetFrame = currentFrame; f <= targetFrame; f++) {",
     );
@@ -111,15 +121,18 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
       expr.push("  resetMatrix();");
     }
     expr.push("}");
-
   } else if (hasDraw) {
     // 只有 draw 模式
     expr.push("// ========================================");
     expr.push("// 执行 Draw (增量执行：只执行新增的帧)");
     expr.push("// ========================================");
-    expr.push("if (_needsFullRecompute || currentFrame > _lastComputedFrame) {");
+    expr.push(
+      "if (_needsFullRecompute || currentFrame > _lastComputedFrame) {",
+    );
     expr.push("  // 时间线回退或需要增量执行：从上次计算到当前帧");
-    expr.push("  var startFrame = _needsFullRecompute ? 0 : (_lastComputedFrame + 1);");
+    expr.push(
+      "  var startFrame = _needsFullRecompute ? 0 : (_lastComputedFrame + 1);",
+    );
     expr.push(
       "  for (var f = startFrame, targetFrame = currentFrame; f <= targetFrame; f++) {",
     );
@@ -145,7 +158,6 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
       expr.push("  resetMatrix();");
     }
     expr.push("}");
-
   } else if (hasSetup) {
     // 只有 setup 模式
     expr.push("// ========================================");
@@ -164,7 +176,6 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
     expr.push("if (currentFrame > _lastComputedFrame) {");
     expr.push("  _ctx._lastComputedFrame = currentFrame;");
     expr.push("}");
-
   } else {
     // 无代码模式
     expr.push("// ========================================");

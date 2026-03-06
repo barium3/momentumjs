@@ -3,7 +3,10 @@ const csInterface = new CSInterface();
 
 window.csInterface = csInterface;
 
-const extensionPath = csInterface.getSystemPath(SystemPath.EXTENSION);
+// 获取扩展路径并存为全局变量（供其他模块使用）
+window.extensionPath = csInterface.getSystemPath(SystemPath.EXTENSION);
+const extensionPath = window.extensionPath;
+
 csInterface.evalScript(`$.evalFile("${extensionPath}/jsx/main.jsx")`);
 
 window.persistentStorage = {};

@@ -54,7 +54,7 @@ function _buildAnalyzerCaches() {
     _shapeTypeMap = null;
   }
 
-  // math / environment / colors / controllers 的符号信息
+  // math / environment / colors / controllers / images 的符号信息
   _categoryInfo = {};
   var categories = [
     "math",
@@ -62,6 +62,7 @@ function _buildAnalyzerCaches() {
     "colors",
     "controllers",
     "typography",
+    "images",
   ];
 
   categories.forEach(function (category) {
