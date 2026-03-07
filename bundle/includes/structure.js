@@ -80,9 +80,17 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
   if (hasDraw && hasSetup) {
     // 完整模式：有 setup 和 draw
     expr.push("// ========================================");
+    expr.push("// 执行 Preload (仅在第一次执行或时间线回退后)");
+    expr.push("// ========================================");
+    expr.push("if (_lastComputedFrame === -1 && typeof preload === 'function') {");
+    expr.push("  preload();");
+    expr.push("}");
+
+    expr.push("// ========================================");
     expr.push("// 执行 Setup (仅在第一次执行或时间线回退后)");
     expr.push("// ========================================");
     expr.push("if (_lastComputedFrame === -1) {");
+    expr.push("  _render = true;");
     expr.push("  setup();");
     expr.push("}");
 
@@ -124,6 +132,13 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
   } else if (hasDraw) {
     // 只有 draw 模式
     expr.push("// ========================================");
+    expr.push("// 执行 Preload (仅在第一次执行或时间线回退后)");
+    expr.push("// ========================================");
+    expr.push("if (_lastComputedFrame === -1 && typeof preload === 'function') {");
+    expr.push("  preload();");
+    expr.push("}");
+
+    expr.push("// ========================================");
     expr.push("// 执行 Draw (增量执行：只执行新增的帧)");
     expr.push("// ========================================");
     expr.push(
@@ -161,9 +176,17 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
   } else if (hasSetup) {
     // 只有 setup 模式
     expr.push("// ========================================");
+    expr.push("// 执行 Preload (仅在第一次执行)");
+    expr.push("// ========================================");
+    expr.push("if (_lastComputedFrame === -1 && typeof preload === 'function') {");
+    expr.push("  preload();");
+    expr.push("}");
+
+    expr.push("// ========================================");
     expr.push("// 执行 Setup (仅在第一次执行)");
     expr.push("// ========================================");
     expr.push("if (_lastComputedFrame === -1) {");
+    expr.push("  _render = true;");
     expr.push("  setup();");
     if (hasShapes) {
       // 不在 setup 之后重置颜色，这样 setup 中设置的 fill/stroke/noStroke 会保留

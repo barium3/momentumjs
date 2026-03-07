@@ -14,7 +14,10 @@
    *   - createPoint(defaultX, defaultY)
    *   - createAngle(defaultDegrees)
    */
-  function installMomentumStubs() {
+  function installMomentumStubs(options) {
+    options = options || {};
+    var mode = options.mode || "execution";
+
     if (!window.__momentumStubs) {
       window.__momentumStubs = {};
     }
@@ -128,8 +131,8 @@
      *
      * 浏览器侧 stub 实现：
      * - 在代码分析阶段，返回一个占位对象
-     * - 实际的图片加载由 ImageAnalyzer 通过 AE 完成
-     * - 加载后的图片会注入到 runtime 环境中
+     * - 执行阶段会由 runtime 中的真实 p5.loadImage 包装器接管
+     * - 这里的 stub 只用于分析/降级场景
      *
      * 返回的对象需要有以下属性：
      *   - width: 图片宽度
@@ -138,10 +141,11 @@
     // loadImage 必须始终使用 Momentum stub（不能用 p5 原生版本）
     // p5 的 loadImage 是异步的，不返回 _momentumPath，会导致 image() 无法获取路径
     // 即使 exposeP5Functions 已经设置了 window.loadImage，这里也要覆盖它
-    {
+    if (mode !== "execution" || typeof window.loadImage === "undefined") {
       window.loadImage = function (path) {
         // 返回一个占位对象
-        // 实际的图片数据会由 ImageAnalyzer 加载后注入到全局变量
+        // 执行模式下会改由真实 p5.loadImage 处理；
+        // 这里保留分析/回退场景的占位返回值
         // 变量名基于图片路径生成，例如：
         //   loadImage("apple.png") -> window.apple_png
         //   loadImage("images/photo.jpg") -> window.images_photo_jpg
@@ -163,15 +167,37 @@
         }
 
         // 否则返回占位对象（尺寸为 0）
-        return {
+        var img = {
           width: 0,
           height: 0,
           _momentumPath: path,
+          _momentumResolvedUrl: null,
+          _momentumFullPath: null,
+          _momentumReady: false,
           _placeholder: true,
+          get: function (x, y, w, h) {
+            if (arguments.length >= 4) {
+              return {
+                width: Math.max(0, Math.floor(Number(w) || 0)),
+                height: Math.max(0, Math.floor(Number(h) || 0)),
+                _momentumPath: path,
+                _momentumResolvedUrl: null,
+                _momentumFullPath: null,
+                _momentumReady: false,
+                _placeholder: true,
+                get: function () {
+                  return [0, 0, 0, 0];
+                },
+              };
+            }
+            return [0, 0, 0, 0];
+          },
         };
+        return img;
       };
       window.__momentumStubs.loadImage = true;
     }
+
   }
 
   // 挂到全局，供 runtime.js 调用

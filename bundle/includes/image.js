@@ -18,6 +18,91 @@ function getImageLib(deps) {
   var lines = [];
   lines.push("// Image 库");
   // 注意：_imageCount 计数器由 core.js 的 buildExpression 统一生成，此处不需要重复声明
+  lines.push(
+    "var _momentumImageMetadata = (_ctx && _ctx.imageMetadata) ? _ctx.imageMetadata : {};",
+  );
+  lines.push("function _sanitizeImageSampleKey(path) {");
+  lines.push(
+    "  return String(path || '').replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\\d)/, '_$1');",
+  );
+  lines.push("}");
+  lines.push("function _getImageSampleCompName() {");
+  lines.push("  return thisComp.name + '_image';");
+  lines.push("}");
+  lines.push("function _getImageSampleLayer(path) {");
+  lines.push("  var compName = _getImageSampleCompName();");
+  lines.push("  var layerName = '__imgsrc__' + _sanitizeImageSampleKey(path);");
+  lines.push(
+    "  try { return comp(compName).layer(layerName); } catch (e) { return null; }",
+  );
+  lines.push("}");
+  lines.push("function _sampleImagePixel(path, x, y) {");
+  lines.push("  var layer = _getImageSampleLayer(path);");
+  lines.push("  if (!layer) return [0, 0, 0, 0];");
+  lines.push("  var sx = Math.floor(x !== undefined ? x : 0) + 0.5;");
+  lines.push("  var sy = Math.floor(y !== undefined ? y : 0) + 0.5;");
+  lines.push("  var c = layer.sampleImage([sx, sy], [0.5, 0.5], true, time);");
+  lines.push("  return [c[0], c[1], c[2], c[3]];");
+  lines.push("}");
+  lines.push("function _makeImageGet(img) {");
+  lines.push("  return function (x, y, w, h) {");
+  lines.push("    if (arguments.length >= 4) {");
+  lines.push("      return _createImageObject(");
+  lines.push("        img._momentumPath,");
+  lines.push("        Math.max(0, Math.floor(w !== undefined ? w : 0)),");
+  lines.push("        Math.max(0, Math.floor(h !== undefined ? h : 0)),");
+  lines.push("        img._momentumSourceWidth,");
+  lines.push("        img._momentumSourceHeight");
+  lines.push("      );");
+  lines.push("    }");
+  lines.push("    var currentW = img.width || 0;");
+  lines.push("    var currentH = img.height || 0;");
+  lines.push(
+    "    var sourceW = img._momentumSourceWidth !== undefined ? img._momentumSourceWidth : currentW;",
+  );
+  lines.push(
+    "    var sourceH = img._momentumSourceHeight !== undefined ? img._momentumSourceHeight : currentH;",
+  );
+  lines.push(
+    "    if (currentW <= 0 || currentH <= 0 || sourceW <= 0 || sourceH <= 0) return [0, 0, 0, 0];",
+  );
+  lines.push("    var sampleX = (Number(x) || 0) * sourceW / currentW;");
+  lines.push("    var sampleY = (Number(y) || 0) * sourceH / currentH;");
+  lines.push(
+    "    return _sampleImagePixel(img._momentumPath, sampleX, sampleY);",
+  );
+  lines.push("  };");
+  lines.push("}");
+  lines.push(
+    "function _createImageObject(path, width, height, sourceWidth, sourceHeight) {",
+  );
+  lines.push("  var img = {");
+  lines.push("    width: width,");
+  lines.push("    height: height,");
+  lines.push("    _momentumPath: path,");
+  lines.push(
+    "    _momentumSourceWidth: sourceWidth !== undefined ? sourceWidth : width,",
+  );
+  lines.push(
+    "    _momentumSourceHeight: sourceHeight !== undefined ? sourceHeight : height",
+  );
+  lines.push("  };");
+  lines.push("  img.get = _makeImageGet(img);");
+  lines.push("  return img;");
+  lines.push("}");
+  lines.push("function loadImage(path) {");
+  lines.push("  var key = String(path || '');");
+  lines.push(
+    "  var meta = _momentumImageMetadata[key] || _momentumImageMetadata[String(key).replace(/\\\\/g, '/')] || null;",
+  );
+  lines.push(
+    "  var width = meta && meta.width !== undefined ? meta.width : 0;",
+  );
+  lines.push(
+    "  var height = meta && meta.height !== undefined ? meta.height : 0;",
+  );
+  lines.push("  return _createImageObject(key, width, height, width, height);");
+  lines.push("}");
 
   // _image() 核心函数：将图片数据写入 _shapes
   // x, y   — 各模式下的原始参考点（CORNER/CORNERS=左上角，CENTER=中心），不做预转换。
@@ -105,6 +190,96 @@ function getImageLib(deps) {
   lines.push("}");
 
   return lines.join("\n");
+}
+
+function _sanitizeImageSampleLayerName(path) {
+  return (
+    "__imgsrc__" +
+    String(path || "")
+      .replace(/[^a-zA-Z0-9_]/g, "_")
+      .replace(/^(\d)/, "_$1")
+  );
+}
+
+function _getImageSampleCompName(targetComp) {
+  var baseName =
+    targetComp && targetComp.name ? targetComp.name : "Composition";
+  return baseName + "_image";
+}
+
+function _getOrCreateImageSampleComp(compFolder, targetComp) {
+  var compName = _getImageSampleCompName(targetComp);
+  for (var i = 1; i <= app.project.numItems; i++) {
+    var item = app.project.item(i);
+    if (item && item instanceof CompItem && item.name === compName) {
+      return item;
+    }
+  }
+
+  var width = targetComp && targetComp.width ? Number(targetComp.width) : 1;
+  var height = targetComp && targetComp.height ? Number(targetComp.height) : 1;
+  if (!(width > 0)) width = 1;
+  if (!(height > 0)) height = 1;
+
+  var duration =
+    targetComp && targetComp.duration
+      ? targetComp.duration
+      : DEFAULT_COMP_DURATION;
+  var frameRate =
+    targetComp && targetComp.frameRate ? targetComp.frameRate : 30;
+
+  var sampleComp = app.project.items.addComp(
+    compName,
+    width,
+    height,
+    1,
+    duration,
+    frameRate,
+  );
+  if (compFolder) {
+    sampleComp.parentFolder = compFolder;
+  }
+  setCompBackgroundColor(sampleComp, false);
+  return sampleComp;
+}
+
+function ensureImageSampleLayers(imageMetadata, compFolder, targetComp) {
+  if (!imageMetadata) return;
+
+  for (var relativePath in imageMetadata) {
+    if (!imageMetadata.hasOwnProperty(relativePath)) continue;
+    var info = imageMetadata[relativePath];
+    if (!info || !info.path) continue;
+
+    var sampleComp = _getOrCreateImageSampleComp(compFolder, targetComp);
+    if (!sampleComp) continue;
+
+    var layerName = _sanitizeImageSampleLayerName(relativePath);
+    var existingLayer = null;
+    for (var i = 1; i <= sampleComp.numLayers; i++) {
+      var candidate = sampleComp.layer(i);
+      if (candidate && candidate.name === layerName) {
+        existingLayer = candidate;
+        break;
+      }
+    }
+    if (existingLayer) continue;
+
+    var file = new File(info.path);
+    if (!file.exists) continue;
+
+    var footageItem = _getOrImportFootage(file, compFolder);
+    if (!footageItem) continue;
+
+    var sampleLayer = sampleComp.layers.add(footageItem);
+    sampleLayer.name = layerName;
+    sampleLayer.shy = true;
+    sampleLayer.property("Transform").property("Anchor Point").setValue([0, 0]);
+    sampleLayer.property("Transform").property("Position").setValue([0, 0]);
+    sampleLayer.property("Transform").property("Scale").setValue([100, 100]);
+    sampleLayer.property("Transform").property("Rotation").setValue(0);
+    sampleLayer.moveToEnd();
+  }
 }
 
 // ----------------------------------------

@@ -15,8 +15,8 @@ window.codeExecutor = (function () {
   }
 
   /**
-   * 从代码中收集图片并通过 AE 加载
-   * 内部调用 ImageAnalyzer 的 AST 收集 + AE 加载
+   * 从代码中收集图片并在前端预读取元数据
+   * 内部调用 ImageAnalyzer 的 AST 收集 + 前端图片尺寸读取
    * @param {string} code - 用户代码
    * @returns {Promise<Object>} 图片信息映射 { imagePath: { width, height, path, success } }
    */
@@ -35,25 +35,27 @@ window.codeExecutor = (function () {
 
     console.log("[CodeExecutor] Found images in code:", Array.from(imagePaths));
 
-    // 2. 通过 AE 加载图片
-    const loadedImages = await analyzer.loadImagesFromAE(imagePaths);
+    // 2. 前端读取图片元数据
+    const loadedImages = await analyzer.loadImagesFromFrontend(imagePaths);
 
-    // 存储到全局缓存，供 loadImage stub 使用
-    if (!window.__momentumLoadedImages) {
-      window.__momentumLoadedImages = {};
+    // 预存图片元数据，供 runtime 中的真实 p5.loadImage 包装器解析 user/ 路径
+    if (!window.__momentumImageMetadata) {
+      window.__momentumImageMetadata = {};
     }
     for (const [path, info] of Object.entries(loadedImages)) {
       if (info.success) {
-        window.__momentumLoadedImages[path] = {
+        window.__momentumImageMetadata[path] = {
           width: info.width,
           height: info.height,
-          _momentumPath: path,
-          _momentumFullPath: info.path,
+          path: info.path,
         };
       }
     }
 
-    console.log("[CodeExecutor] Images registered to runtime:", Object.keys(window.__momentumLoadedImages));
+    console.log(
+      "[CodeExecutor] Image metadata registered to runtime:",
+      Object.keys(window.__momentumImageMetadata),
+    );
 
     return loadedImages;
   }
@@ -578,6 +580,8 @@ window.codeExecutor = (function () {
           drawNeedsEcho +
           ", " +
           JSON.stringify(fontMetricsMap) +
+          ", " +
+          JSON.stringify(loadedImagesMap) +
           ")";
 
         const scriptToRun = `try { ${finalCode}; "SUCCESS"; } catch(e) { "ERROR: " + e.message + " at line " + e.line + " stack: " + e.stack; }`;

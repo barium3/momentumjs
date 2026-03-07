@@ -176,6 +176,7 @@ pub.runParsed = function (
   drawBackgroundCountArg,
   drawNeedsEchoArg,
   fontMetricsArg,
+  imageMetadataArg,
 ) {
   try {
     // 1. 初始化变量
@@ -253,6 +254,23 @@ pub.runParsed = function (
       parsedFontMetrics = null;
     }
 
+    var parsedImageMetadata = null;
+    try {
+      if (
+        typeof imageMetadataArg === "string" &&
+        imageMetadataArg !== "null"
+      ) {
+        parsedImageMetadata = JSON.parse(imageMetadataArg);
+      } else if (
+        typeof imageMetadataArg === "object" &&
+        imageMetadataArg !== null
+      ) {
+        parsedImageMetadata = imageMetadataArg;
+      }
+    } catch (e) {
+      parsedImageMetadata = null;
+    }
+
     // 提取环境配置并创建合成
     var env = extractEnvironmentConfig(
       setupCode,
@@ -316,7 +334,6 @@ pub.runParsed = function (
     } catch (e) {
       deps = null;
     }
-
     // 10. 根据是否有分别分析结果，决定创建方式
     var useSeparatedComps =
       setupShapeQueue.length > 0 || drawShapeQueue.length > 0;
@@ -407,7 +424,9 @@ pub.runParsed = function (
         mergedShapeCounts,
         allShapesQueue,
         parsedFontMetrics,
+        parsedImageMetadata,
       );
+      ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
       shapeQueue = originalShapeQueue;
 
       // 在主合成中添加预合成图层
@@ -505,7 +524,9 @@ pub.runParsed = function (
         mergedShapeCounts,
         shapeQueue,
         parsedFontMetrics,
+        parsedImageMetadata,
       );
+      ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
 
       // 在主合成中创建shape图层
       createShapeLayers(mainCompName, compFolder);
@@ -600,6 +621,7 @@ function createEngineLayer(
   shapeCountsParam,
   shapeQueueParam,
   fontMetricsParam,
+  imageMetadataParam,
 ) {
   // 1. 清理已存在的 __engine__ 图层
   cleanupEngineLayer();
@@ -657,6 +679,7 @@ function createEngineLayer(
     mainCompNameParam,
     shapeQueueParam,
     fontMetricsParam,
+    imageMetadataParam,
   );
 
   // 6. 应用表达式并设置图层属性（Source Text 表达式返回 JSON 字符串）
@@ -864,6 +887,7 @@ function buildExpression(
   mainCompNameParam,
   shapeQueueParam,
   fontMetricsParam,
+  imageMetadataParam,
 ) {
   // 解析依赖对象
   var mathDeps = deps && deps.math ? deps.math : {};
@@ -992,7 +1016,13 @@ function buildExpression(
   expr.push("  controllers: [],");
   // 将 fontMetrics 映射表序列化为 JSON 字符串，然后在表达式中解析
   var fontMetricsJson = JSON.stringify(fontMetricsMap);
+  var imageMetadataJson = JSON.stringify(
+    imageMetadataParam && typeof imageMetadataParam === "object"
+      ? imageMetadataParam
+      : {},
+  );
   expr.push("  fontMetrics: " + fontMetricsJson + ",");
+  expr.push("  imageMetadata: " + imageMetadataJson + ",");
   expr.push("  _lastComputedFrame: -1  // 帧循环缓存：记录上次计算的帧号");
   expr.push("};");
   expr.push("var _shapes = _ctx.shapes;");

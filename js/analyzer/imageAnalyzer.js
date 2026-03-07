@@ -3,13 +3,13 @@
  *
  * 功能：
  * 1. 从代码中收集 loadImage() 调用的图片路径
- * 2. 通过 AE 脚本加载图片并获取尺寸信息
- * 3. 将图片添加到 p5.js runtime 环境
+ * 2. 在前端读取 user/ 下图片并获取尺寸信息
+ * 3. 将图片元数据添加到 p5.js runtime 环境
  *
  * 使用方式：
  *   const analyzer = new ImageAnalyzer();
  *   const images = analyzer.collectImagesFromCode(code);
- *   const loadedImages = await analyzer.loadImagesFromAE(images);
+ *   const loadedImages = await analyzer.loadImagesFromFrontend(images);
  */
 
 class ImageAnalyzer {
@@ -20,7 +20,7 @@ class ImageAnalyzer {
     // 加载状态
     this.isLoaded = false;
 
-    // 用户目录路径（从 AE 获取）
+    // 用户目录路径（前端推导）
     this.userDirectory = null;
   }
 
@@ -125,7 +125,7 @@ class ImageAnalyzer {
   }
 
   // ========================================
-  // 从 AE 加载图片
+  // 前端加载图片
   // ========================================
 
   /**
@@ -138,7 +138,6 @@ class ImageAnalyzer {
     }
 
     return new Promise((resolve) => {
-      // 方法1：直接使用前端已获取的 extensionPath
       if (window.extensionPath) {
         this.userDirectory = window.extensionPath + "/user";
         console.log(
@@ -149,55 +148,73 @@ class ImageAnalyzer {
         return;
       }
 
-      // 方法2：通过 AE 脚本获取（备用）
-      const script = `
-        (function() {
-          try {
-            // 尝试从 JSX 文件位置推断
-            var startPath = "";
-            try {
-              startPath = File($.fileName).parent.fsName;
-            } catch(e) {}
-            
-            if (startPath) {
-              var dir = new Folder(startPath);
-              for (var i = 0; i < 4; i++) {
-                if (!dir || !dir.exists) break;
-                var userCheck = new Folder(dir.fsName + "/user");
-                if (userCheck.exists) {
-                  return dir.fsName + "/user";
-                }
-                dir = dir.parent;
-              }
-            }
-            
-            return null;
-          } catch (e) {
-            return null;
-          }
-        })();
-      `;
+      resolve(null);
+    });
+  }
 
-      if (typeof csInterface !== "undefined") {
-        csInterface.evalScript(script, (result) => {
-          console.log("[ImageAnalyzer] User directory from AE:", result);
-          this.userDirectory = result || null;
-          resolve(this.userDirectory);
-        });
-      } else {
-        resolve(null);
+  _normalizeRelativePath(relativePath) {
+    return String(relativePath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  }
+
+  _joinUserPath(userDir, relativePath) {
+    const base = String(userDir || "").replace(/[\\/]+$/, "");
+    const rel = this._normalizeRelativePath(relativePath);
+    return base + "/" + rel;
+  }
+
+  _toFileUrl(fullPath) {
+    const normalized = String(fullPath || "").replace(/\\/g, "/");
+    const encoded = encodeURI(normalized);
+    if (/^[A-Za-z]:\//.test(normalized)) {
+      return "file:///" + encoded;
+    }
+    if (normalized.charAt(0) !== "/") {
+      return "file:///" + encoded;
+    }
+    return "file://" + encoded;
+  }
+
+  _loadImageInfoFromFrontend(relativePath, fullPath) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      let settled = false;
+
+      function finalize(result) {
+        if (settled) return;
+        settled = true;
+        resolve(result);
       }
+
+      img.onload = () => {
+        finalize({
+          success: true,
+          width: img.naturalWidth || img.width || 0,
+          height: img.naturalHeight || img.height || 0,
+          name: relativePath.split("/").pop() || relativePath,
+          path: fullPath,
+        });
+      };
+
+      img.onerror = () => {
+        finalize({
+          success: false,
+          error: "Failed to load image from frontend: " + relativePath,
+          path: fullPath,
+        });
+      };
+
+      img.src = this._toFileUrl(fullPath);
     });
   }
 
   /**
-   * 从 AE 加载多个图片
+   * 从前端加载多个图片
    * - 命中 imageCache 的路径直接返回，不再请求 AE
-   * - 未命中的路径合并为一次 evalScript 批量请求
+   * - 未命中的路径通过浏览器 Image 批量读取尺寸
    * @param {Set<string>} imagePaths - 图片路径集合（如 "apple.png", "images/photo.jpg"）
    * @returns {Promise<Object>} { "apple.png": { width, height, path, success }, ... }
    */
-  async loadImagesFromAE(imagePaths) {
+  async loadImagesFromFrontend(imagePaths) {
     const userDir = await this._getUserDirectory();
     if (!userDir) {
       console.error("[ImageAnalyzer] Cannot get user directory");
@@ -208,28 +225,29 @@ class ImageAnalyzer {
     const uncachedPaths = [];
 
     for (const relativePath of imagePaths) {
+      const normalizedPath = this._normalizeRelativePath(relativePath);
+
       // 命中缓存：直接复用，不打 AE
-      if (this.imageCache[relativePath]) {
-        results[relativePath] = this.imageCache[relativePath];
-        console.log(`[ImageAnalyzer] Cache hit: ${relativePath}`);
+      if (this.imageCache[normalizedPath]) {
+        results[normalizedPath] = this.imageCache[normalizedPath];
+        console.log(`[ImageAnalyzer] Cache hit: ${normalizedPath}`);
         continue;
       }
 
-      const sep = userDir.includes("\\") || userDir.includes(":") ? "\\" : "/";
       uncachedPaths.push({
-        rel: relativePath,
-        full: userDir + sep + relativePath,
+        rel: normalizedPath,
+        full: this._joinUserPath(userDir, normalizedPath),
       });
     }
 
-    // 未命中缓存的路径批量发给 AE，一次 evalScript 拿回所有结果
+    // 未命中缓存的路径批量走前端加载
     if (uncachedPaths.length > 0) {
-      const batchResults = await this._loadAllImagesFromAE(uncachedPaths);
+      const batchResults = await this._loadAllImagesFromFrontend(uncachedPaths);
 
       for (const { rel } of uncachedPaths) {
         const info = batchResults[rel] || {
           success: false,
-          error: "No result returned from AE",
+          error: "No result returned from frontend",
         };
         results[rel] = info;
 
@@ -251,115 +269,36 @@ class ImageAnalyzer {
   }
 
   /**
-   * 批量从 AE 获取多张图片的尺寸信息，只发一次 evalScript。
-   * AE 端先查已有 footage，找不到才 importFile，避免重复导入。
+   * 批量从前端获取多张图片的尺寸信息。
    * @private
    * @param {Array<{rel: string, full: string}>} paths - 路径列表
    * @returns {Promise<Object>} { "apple.png": { width, height, path, success, error }, ... }
    */
-  _loadAllImagesFromAE(paths) {
-    return new Promise((resolve) => {
-      if (typeof csInterface === "undefined") {
-        const fallback = {};
-        for (const { rel } of paths) {
-          fallback[rel] = {
-            success: false,
-            error: "csInterface not available",
+  async _loadAllImagesFromFrontend(paths) {
+    const results = {};
+    const loaded = await Promise.all(
+      paths.map(async ({ rel, full }) => {
+        try {
+          const info = await this._loadImageInfoFromFrontend(rel, full);
+          return { rel, info };
+        } catch (e) {
+          return {
+            rel,
+            info: {
+              success: false,
+              error: e.message,
+              path: full,
+            },
           };
         }
-        resolve(fallback);
-        return;
-      }
+      }),
+    );
 
-      // 将路径数组序列化为 JS 字面量嵌入脚本
-      const pathsLiteral = JSON.stringify(paths);
+    for (const item of loaded) {
+      results[item.rel] = item.info;
+    }
 
-      const script = `
-        (function() {
-          try {
-            var paths = ${pathsLiteral};
-            var results = {};
-
-            if (!app.project) {
-              for (var k = 0; k < paths.length; k++) {
-                results[paths[k].rel] = { success: false, error: "No project available" };
-              }
-              return JSON.stringify(results);
-            }
-
-            for (var i = 0; i < paths.length; i++) {
-              var rel  = paths[i].rel;
-              var full = paths[i].full;
-              try {
-                var file = new File(full);
-                if (!file.exists) {
-                  results[rel] = { success: false, error: "File not found: " + full };
-                  continue;
-                }
-
-                // 先在项目中查找同名 footage，避免重复导入
-                var footageItem = null;
-                var fileName = file.name;
-                for (var j = 1; j <= app.project.numItems; j++) {
-                  var item = app.project.item(j);
-                  if (item instanceof FootageItem && item.name === fileName) {
-                    footageItem = item;
-                    break;
-                  }
-                }
-                if (!footageItem) {
-                  footageItem = app.project.importFile(new ImportOptions(file));
-                }
-
-                if (!footageItem) {
-                  results[rel] = { success: false, error: "Failed to import: " + full };
-                  continue;
-                }
-
-                results[rel] = {
-                  success: true,
-                  width:  footageItem.width,
-                  height: footageItem.height,
-                  name:   footageItem.name,
-                  path:   full
-                };
-              } catch (e) {
-                results[rel] = { success: false, error: e.message };
-              }
-            }
-
-            return JSON.stringify(results);
-          } catch (e) {
-            return JSON.stringify({ _batchError: e.message });
-          }
-        })();
-      `;
-
-      csInterface.evalScript(script, (result) => {
-        try {
-          const data = JSON.parse(result || "{}");
-          if (data._batchError) {
-            console.error("[ImageAnalyzer] Batch AE error:", data._batchError);
-            const fallback = {};
-            for (const { rel } of paths) {
-              fallback[rel] = { success: false, error: data._batchError };
-            }
-            resolve(fallback);
-          } else {
-            resolve(data);
-          }
-        } catch (e) {
-          const fallback = {};
-          for (const { rel } of paths) {
-            fallback[rel] = {
-              success: false,
-              error: "Failed to parse AE result: " + e.message,
-            };
-          }
-          resolve(fallback);
-        }
-      });
-    });
+    return results;
   }
 
   // ========================================
@@ -368,7 +307,7 @@ class ImageAnalyzer {
 
   /**
    * 将加载的图片添加到 p5.js runtime 环境
-   * @param {Object} loadedImages - loadImagesFromAE 返回的结果
+   * @param {Object} loadedImages - loadImagesFromFrontend 返回的结果
    * @param {Object} p - p5 实例
    */
   addToP5Runtime(loadedImages, p) {

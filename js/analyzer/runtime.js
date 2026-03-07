@@ -189,6 +189,181 @@ function getP5Function(p, funcName) {
   return original && typeof original === "function" ? original : null;
 }
 
+function getMomentumImageMetadataStore() {
+  if (!window.__momentumImageMetadata) {
+    window.__momentumImageMetadata = {};
+  }
+  return window.__momentumImageMetadata;
+}
+
+function getMomentumLoadedImageStore() {
+  if (!window.__momentumLoadedImages) {
+    window.__momentumLoadedImages = {};
+  }
+  return window.__momentumLoadedImages;
+}
+
+function normalizeMomentumImagePath(path) {
+  return String(path || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+}
+
+function getMomentumUserDirectory() {
+  if (!window.extensionPath) {
+    return null;
+  }
+  return String(window.extensionPath).replace(/[\\\/]+$/, "") + "/user";
+}
+
+function pathToFileUrl(fullPath) {
+  if (!fullPath) {
+    return null;
+  }
+  var normalized = String(fullPath).replace(/\\/g, "/");
+  var encoded = encodeURI(normalized);
+  if (/^[A-Za-z]:\//.test(normalized)) {
+    return "file:///" + encoded;
+  }
+  if (normalized.charAt(0) !== "/") {
+    return "file:///" + encoded;
+  }
+  return "file://" + encoded;
+}
+
+function resolveMomentumImageSource(path) {
+  var relativePath = normalizeMomentumImagePath(path);
+  var metadataStore = getMomentumImageMetadataStore();
+  var metadata = metadataStore[relativePath] || null;
+  var fullPath =
+    metadata && metadata.path
+      ? metadata.path
+      : (function () {
+          var userDir = getMomentumUserDirectory();
+          if (!userDir || !relativePath) {
+            return null;
+          }
+          return userDir.replace(/\\/g, "/") + "/" + relativePath;
+        })();
+
+  return {
+    relativePath: relativePath,
+    fullPath: fullPath,
+    resolvedUrl: fullPath ? pathToFileUrl(fullPath) : relativePath,
+    metadata: metadata,
+  };
+}
+
+function decorateMomentumImage(img, sourceInfo) {
+  if (!img || !sourceInfo) {
+    return img;
+  }
+
+  img._momentumPath = sourceInfo.relativePath;
+  img._momentumResolvedUrl = sourceInfo.resolvedUrl;
+  img._momentumFullPath = sourceInfo.fullPath;
+  if (img._momentumReady === undefined) {
+    img._momentumReady = false;
+  }
+
+  if (
+    sourceInfo.metadata &&
+    typeof img.width !== "number" &&
+    sourceInfo.metadata.width !== undefined
+  ) {
+    img.width = sourceInfo.metadata.width;
+  }
+  if (
+    sourceInfo.metadata &&
+    typeof img.height !== "number" &&
+    sourceInfo.metadata.height !== undefined
+  ) {
+    img.height = sourceInfo.metadata.height;
+  }
+
+  return img;
+}
+
+function createMomentumLoadImageWrapper(p, original, imageLoadTracker) {
+  return function (path, successCallback, failureCallback) {
+    var sourceInfo = resolveMomentumImageSource(path);
+    var relativePath = sourceInfo.relativePath;
+    var cache = getMomentumLoadedImageStore();
+
+    if (
+      relativePath &&
+      cache[relativePath] &&
+      cache[relativePath]._momentumResolvedUrl === sourceInfo.resolvedUrl
+    ) {
+      if (
+        imageLoadTracker &&
+        imageLoadTracker.pending &&
+        cache[relativePath]._momentumLoadPromise
+      ) {
+        imageLoadTracker.pending.push(cache[relativePath]._momentumLoadPromise);
+      }
+      return cache[relativePath];
+    }
+
+    var onSuccess = function (loadedImage) {
+      decorateMomentumImage(loadedImage, sourceInfo);
+      loadedImage._momentumReady = true;
+      if (relativePath) {
+        cache[relativePath] = loadedImage;
+      }
+      if (typeof successCallback === "function") {
+        successCallback(loadedImage);
+      }
+    };
+
+    var onFailure = function (err) {
+      if (typeof failureCallback === "function") {
+        failureCallback(err);
+      }
+    };
+
+    var img;
+    var loadPromise = new Promise(function (resolve) {
+      img = original.call(
+        p,
+        sourceInfo.resolvedUrl,
+        function (loadedImage) {
+          onSuccess(loadedImage);
+          resolve(loadedImage);
+        },
+        function (err) {
+          onFailure(err);
+          resolve(null);
+        },
+      );
+    });
+
+    decorateMomentumImage(img, sourceInfo);
+    img._momentumLoadPromise = loadPromise;
+    if (relativePath) {
+      cache[relativePath] = img;
+    }
+    if (imageLoadTracker && imageLoadTracker.pending) {
+      imageLoadTracker.pending.push(loadPromise);
+    }
+    return img;
+  };
+}
+
+function waitForMomentumImageLoads(imageLoadTracker) {
+  if (
+    !imageLoadTracker ||
+    !imageLoadTracker.pending ||
+    imageLoadTracker.pending.length === 0
+  ) {
+    return Promise.resolve();
+  }
+
+  var pending = imageLoadTracker.pending.slice();
+  imageLoadTracker.pending.length = 0;
+  return Promise.allSettled(pending).then(function () {});
+}
+
 /**
  * 创建 shape 状态管理器
  * 支持多个需要状态管理的 shape（如 polygon）
@@ -359,25 +534,21 @@ function createShapeWrapper(options) {
       if (funcName === "image") {
         // 图像：捕获 src（_momentumPath）以便 AE 脚本端创建 footage 图层
         var imgArg = arguments[0];
-        var srcPath = imgArg && imgArg._momentumPath ? imgArg._momentumPath : null;
-        context.renderOrder.push(srcPath ? { type: "image", src: srcPath } : baseType);
+        var srcPath =
+          imgArg && imgArg._momentumPath ? imgArg._momentumPath : null;
+        context.renderOrder.push(
+          srcPath ? { type: "image", src: srcPath } : baseType,
+        );
       } else {
         // 统一：所有形状（包括文本）都只记录基础类型，文本一律按点文本处理
         context.renderOrder.push(baseType);
       }
     }
 
-    // image() 使用非 p5 的 stub 图像对象，直接调用 p5 原生 image 可能崩溃；
-    // 对 image 单独保护：img 无效时跳过，有效时也包在 try-catch 内。
     if (funcName === "image") {
       var imgObj = arguments[0];
       if (!imgObj) return;
-      try {
-        return original.apply(p, arguments);
-      } catch (e) {
-        // stub 图像对象无法被 p5 渲染，静默忽略
-      }
-      return;
+      return original.apply(p, arguments);
     }
 
     return original.apply(p, arguments);
@@ -409,6 +580,7 @@ function exposeFunctions(context, mode) {
 
   // 执行模式下，可能携带 background 统计信息
   var backgroundInfo = context.backgroundInfo;
+  var imageLoadTracker = context.imageLoadTracker;
 
   var shapeTypeMap = getShapeTypeMap ? getShapeTypeMap(context.cache) : {};
   var transformFuncs =
@@ -488,10 +660,18 @@ function exposeFunctions(context, mode) {
       // 处理其他函数
       else {
         if (mode === "execution") {
-          // 执行模式：直接转发
-          window[funcName] = function () {
-            return original.apply(p, arguments);
-          };
+          // 执行模式：直接转发；loadImage 额外补齐 Momentum 路径字段
+          if (funcName === "loadImage") {
+            window[funcName] = createMomentumLoadImageWrapper(
+              p,
+              original,
+              imageLoadTracker,
+            );
+          } else {
+            window[funcName] = function () {
+              return original.apply(p, arguments);
+            };
+          }
         } else {
           // 分析模式：收集依赖
           window[funcName] = function () {
@@ -696,6 +876,7 @@ class P5Runtime {
         var renderOrder = [];
         var loopExecutions = { value: 0 };
         var backgroundInfo = { hasAlpha: false };
+        var imageLoadTracker = { pending: [] };
 
         exposeVariables(self.allVariables, p);
 
@@ -710,12 +891,13 @@ class P5Runtime {
             cache: self,
             loopExecutions: loopExecutions,
             maxLoopCount: self.options.maxLoopCount,
+            imageLoadTracker: imageLoadTracker,
           },
           "execution",
         );
 
         // 安装 Momentum 运行时 stub（如 createPoint），避免分析阶段缺少函数导致报错
-        installMomentumStubs();
+        installMomentumStubs({ mode: "execution" });
 
         clearUserEntryPoints();
 
@@ -742,36 +924,44 @@ class P5Runtime {
           }
         }
 
-        if (shouldRunSetup && typeof window.setup === "function") {
-          try {
-            window.setup();
-          } catch (setupErr) {
-            console.error(`[Runtime] setup() 调用失败`, setupErr);
-            throw setupErr;
-          }
-        }
+        waitForMomentumImageLoads(imageLoadTracker)
+          .then(function () {
+            if (shouldRunSetup && typeof window.setup === "function") {
+              try {
+                window.setup();
+              } catch (setupErr) {
+                console.error(`[Runtime] setup() 调用失败`, setupErr);
+                throw setupErr;
+              }
+            }
 
-        if (shouldRunDraw && typeof window.draw === "function") {
-          try {
-            window.draw();
-          } catch (drawErr) {
-            console.error(`[Runtime] draw() 调用失败`, drawErr);
-            throw drawErr;
-          }
-        }
+            if (shouldRunDraw && typeof window.draw === "function") {
+              try {
+                window.draw();
+              } catch (drawErr) {
+                console.error(`[Runtime] draw() 调用失败`, drawErr);
+                throw drawErr;
+              }
+            }
 
-        cleanupGlobals(self.allFunctions, self.allVariables);
+            cleanupGlobals(self.allFunctions, self.allVariables);
 
-        const result = {
-          renderOrder: renderOrder,
-          loopExecutions: loopExecutions.value,
-          background: {
-            hasAlpha: backgroundInfo.hasAlpha,
-          },
-        };
+            const result = {
+              renderOrder: renderOrder,
+              loopExecutions: loopExecutions.value,
+              background: {
+                hasAlpha: backgroundInfo.hasAlpha,
+              },
+            };
 
-        clearTimeout(timeoutId);
-        resolve(result);
+            clearTimeout(timeoutId);
+            resolve(result);
+          })
+          .catch(function (err) {
+            clearTimeout(timeoutId);
+            cleanupGlobals(self.allFunctions, self.allVariables);
+            reject(err);
+          });
       } catch (err) {
         clearTimeout(timeoutId);
         cleanupGlobals(self.allFunctions, self.allVariables);
@@ -857,6 +1047,7 @@ class P5Runtime {
         var setupRenderOrder = [];
         var setupLoopExecutions = { value: 0 };
         var setupBackgroundInfo = { hasAlpha: false };
+        var imageLoadTracker = { pending: [] };
 
         // draw 的统计
         var drawRenderOrder = [];
@@ -877,12 +1068,13 @@ class P5Runtime {
             cache: self,
             loopExecutions: setupLoopExecutions,
             maxLoopCount: self.options.maxLoopCount,
+            imageLoadTracker: imageLoadTracker,
           },
           "execution",
         );
 
         // 安装 Momentum 运行时 stub（如 createPoint），避免分析阶段缺少函数导致报错
-        installMomentumStubs();
+        installMomentumStubs({ mode: "execution" });
 
         clearUserEntryPoints();
 
@@ -904,65 +1096,74 @@ class P5Runtime {
           }
         }
 
-        // 执行 setup
-        if (typeof window.setup === "function") {
-          try {
-            window.setup();
-          } catch (setupErr) {
-            console.error(`[Runtime] setup() 调用失败`, setupErr);
-            throw setupErr;
-          }
-        }
+        waitForMomentumImageLoads(imageLoadTracker)
+          .then(function () {
+            // 执行 setup
+            if (typeof window.setup === "function") {
+              try {
+                window.setup();
+              } catch (setupErr) {
+                console.error(`[Runtime] setup() 调用失败`, setupErr);
+                throw setupErr;
+              }
+            }
 
-        // 现在执行 draw（在同一个环境中，可以访问setup中创建的变量）
-        exposeP5Functions(
-          {
-            p: p,
-            allFunctions: self.allFunctions,
-            renderFunctions: self.renderFunctions,
-            renderOrder: drawRenderOrder,
-            backgroundInfo: drawBackgroundInfo,
-            getShapeTypeMap: getShapeTypeMap,
-            cache: self,
-            loopExecutions: drawLoopExecutions,
-            maxLoopCount: self.options.maxLoopCount,
-          },
-          "execution",
-        );
+            // 现在执行 draw（在同一个环境中，可以访问setup中创建的变量）
+            exposeP5Functions(
+              {
+                p: p,
+                allFunctions: self.allFunctions,
+                renderFunctions: self.renderFunctions,
+                renderOrder: drawRenderOrder,
+                backgroundInfo: drawBackgroundInfo,
+                getShapeTypeMap: getShapeTypeMap,
+                cache: self,
+                loopExecutions: drawLoopExecutions,
+                maxLoopCount: self.options.maxLoopCount,
+                imageLoadTracker: imageLoadTracker,
+              },
+              "execution",
+            );
 
-        // 执行 draw
-        if (typeof window.draw === "function") {
-          try {
-            window.draw();
-          } catch (drawErr) {
-            console.error(`[Runtime] draw() 调用失败`, drawErr);
-            throw drawErr;
-          }
-        }
+            // 执行 draw
+            if (typeof window.draw === "function") {
+              try {
+                window.draw();
+              } catch (drawErr) {
+                console.error(`[Runtime] draw() 调用失败`, drawErr);
+                throw drawErr;
+              }
+            }
 
-        cleanupGlobals(self.allFunctions, self.allVariables);
+            cleanupGlobals(self.allFunctions, self.allVariables);
 
-        const setupResult = {
-          renderOrder: setupRenderOrder,
-          loopExecutions: setupLoopExecutions.value,
-          background: {
-            hasAlpha: setupBackgroundInfo.hasAlpha,
-          },
-        };
+            const setupResult = {
+              renderOrder: setupRenderOrder,
+              loopExecutions: setupLoopExecutions.value,
+              background: {
+                hasAlpha: setupBackgroundInfo.hasAlpha,
+              },
+            };
 
-        const drawResult = {
-          renderOrder: drawRenderOrder,
-          loopExecutions: drawLoopExecutions.value,
-          background: {
-            hasAlpha: drawBackgroundInfo.hasAlpha,
-          },
-        };
+            const drawResult = {
+              renderOrder: drawRenderOrder,
+              loopExecutions: drawLoopExecutions.value,
+              background: {
+                hasAlpha: drawBackgroundInfo.hasAlpha,
+              },
+            };
 
-        clearTimeout(timeoutId);
-        resolve({
-          setupResult: setupResult,
-          drawResult: drawResult,
-        });
+            clearTimeout(timeoutId);
+            resolve({
+              setupResult: setupResult,
+              drawResult: drawResult,
+            });
+          })
+          .catch(function (err) {
+            clearTimeout(timeoutId);
+            cleanupGlobals(self.allFunctions, self.allVariables);
+            reject(err);
+          });
       } catch (err) {
         clearTimeout(timeoutId);
         cleanupGlobals(self.allFunctions, self.allVariables);
