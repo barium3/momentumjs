@@ -425,6 +425,201 @@ functionRegistry.images = {
 };
 
 /**
+ * 表格 / CSV 函数定义
+ * 说明：
+ * - loadTable 是顶层全局函数，需要暴露给运行时
+ * - 其余为 Table / TableRow 实例方法描述，用于依赖分析与接口统一，不直接暴露为全局函数
+ */
+functionRegistry.tables = {
+  loadTable: { internal: "loadTable", returns: "Table" },
+  loadJSON: { internal: "loadJSON", returns: "object" },
+
+  // Table instance methods
+  getRowCount: {
+    internal: "getRowCount",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "number",
+  },
+  getColumnCount: {
+    internal: "getColumnCount",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "number",
+  },
+  get: {
+    internal: "get",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "value",
+  },
+  getRow: {
+    internal: "getRow",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "TableRow",
+  },
+  getString: {
+    internal: "getString",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "string",
+  },
+  getNum: {
+    internal: "getNum",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "number",
+  },
+  getColumn: {
+    internal: "getColumn",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "array",
+  },
+  getObject: {
+    internal: "getObject",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "object",
+  },
+  getArray: {
+    internal: "getArray",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "array",
+  },
+  findRow: {
+    internal: "findRow",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "TableRow",
+  },
+  findRows: {
+    internal: "findRows",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "TableRowArray",
+  },
+  matchRow: {
+    internal: "matchRow",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "TableRow",
+  },
+  matchRows: {
+    internal: "matchRows",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "TableRowArray",
+  },
+  set: {
+    internal: "set",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "value",
+  },
+  setString: {
+    internal: "setString",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "string",
+  },
+  setNum: {
+    internal: "setNum",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "number",
+  },
+  addRow: {
+    internal: "addRow",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "TableRow",
+  },
+  removeRow: {
+    internal: "removeRow",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "Table",
+  },
+  clearRows: {
+    internal: "clearRows",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "Table",
+  },
+  addColumn: {
+    internal: "addColumn",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "string",
+  },
+  removeColumn: {
+    internal: "removeColumn",
+    type: "instance_method",
+    receiver: "Table",
+    returns: "Table",
+  },
+
+  // TableRow instance methods
+  arr: {
+    internal: "arr",
+    type: "instance_method",
+    receiver: "TableRow",
+    returns: "array",
+  },
+  obj: {
+    internal: "obj",
+    type: "instance_method",
+    receiver: "TableRow",
+    returns: "object",
+  },
+  rowGet: {
+    internal: "get",
+    alias: "get",
+    type: "instance_method",
+    receiver: "TableRow",
+    returns: "value",
+  },
+  rowGetString: {
+    internal: "getString",
+    alias: "getString",
+    type: "instance_method",
+    receiver: "TableRow",
+    returns: "string",
+  },
+  rowGetNum: {
+    internal: "getNum",
+    alias: "getNum",
+    type: "instance_method",
+    receiver: "TableRow",
+    returns: "number",
+  },
+  rowSet: {
+    internal: "set",
+    alias: "set",
+    type: "instance_method",
+    receiver: "TableRow",
+    returns: "value",
+  },
+  rowSetString: {
+    internal: "setString",
+    alias: "setString",
+    type: "instance_method",
+    receiver: "TableRow",
+    returns: "string",
+  },
+  rowSetNum: {
+    internal: "setNum",
+    alias: "setNum",
+    type: "instance_method",
+    receiver: "TableRow",
+    returns: "number",
+  },
+};
+
+/**
  * 环境配置函数和变量定义
  * 包含：配置函数（createCanvas, frameRate）和环境变量（frameCount, width, height）
  * 环境变量按需注入，内部使用 currentFrame/fps 等语义化命名
@@ -488,6 +683,14 @@ functionRegistry.getP5Functions = function () {
   if (this.images) {
     result.push.apply(result, Object.keys(this.images));
   }
+  if (this.tables) {
+    for (var tableName in this.tables) {
+      if (!this.tables.hasOwnProperty(tableName)) continue;
+      var tableInfo = this.tables[tableName] || {};
+      if (tableInfo.type === "instance_method") continue;
+      result.push(tableName);
+    }
+  }
   // 收集所有 shape 的构建器函数
   if (this.shapes) {
     for (var shapeName in this.shapes) {
@@ -498,6 +701,24 @@ functionRegistry.getP5Functions = function () {
         }
       }
     }
+  }
+  return result;
+};
+
+functionRegistry.getTableInstanceMethods = function () {
+  var result = {};
+  if (!this.tables) return result;
+  for (var name in this.tables) {
+    if (!this.tables.hasOwnProperty(name)) continue;
+    var info = this.tables[name];
+    if (!info || info.type !== "instance_method") continue;
+    var methodName = info.alias || name;
+    if (!result[methodName]) result[methodName] = [];
+    result[methodName].push({
+      receiver: info.receiver,
+      returns: info.returns || null,
+      internal: info.internal || methodName,
+    });
   }
   return result;
 };

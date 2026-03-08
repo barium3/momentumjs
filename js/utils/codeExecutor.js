@@ -33,8 +33,6 @@ window.codeExecutor = (function () {
       return {};
     }
 
-    console.log("[CodeExecutor] Found images in code:", Array.from(imagePaths));
-
     // 2. 前端读取图片元数据
     const loadedImages = await analyzer.loadImagesFromFrontend(imagePaths);
 
@@ -51,12 +49,6 @@ window.codeExecutor = (function () {
         };
       }
     }
-
-    console.log(
-      "[CodeExecutor] Image metadata registered to runtime:",
-      Object.keys(window.__momentumImageMetadata),
-    );
-
     return loadedImages;
   }
 
@@ -454,7 +446,6 @@ window.codeExecutor = (function () {
         // 必须在 runtime 分析（fullAnalyzeAsync）之前完成，
         // 因为 runtime 会执行 preload()，preload 里的 loadImage() 需要从缓存中读取数据
         const loadedImagesMap = await collectAndLoadImages(code);
-        console.log("[CodeExecutor] Loaded images:", loadedImagesMap);
 
         // 使用 P5Analyzer 进行完整分析（包含 dependencies 等信息）
         let fullResult = null;
@@ -514,9 +505,6 @@ window.codeExecutor = (function () {
           separatedResult.setupRenderLayers.length > 0
             ? JSON.stringify(separatedResult.setupRenderLayers)
             : "null";
-
-        console.log("[CodeExecutor] setupRenderLayersArg:", setupRenderLayersArg);
-
         const drawRenderLayersArg =
           separatedResult &&
           separatedResult.drawRenderLayers &&

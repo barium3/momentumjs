@@ -271,6 +271,15 @@ pub.runParsed = function (
       parsedImageMetadata = null;
     }
 
+    var combinedCodeForTables =
+      String(globalCode || "") +
+      "\n" +
+      String(setupCode || "") +
+      "\n" +
+      String(drawCode || "");
+    var parsedTableData = collectTableDataFromCode(combinedCodeForTables);
+    var parsedJSONData = collectJSONDataFromCode(combinedCodeForTables);
+
     // 提取环境配置并创建合成
     var env = extractEnvironmentConfig(
       setupCode,
@@ -425,6 +434,8 @@ pub.runParsed = function (
         allShapesQueue,
         parsedFontMetrics,
         parsedImageMetadata,
+        parsedTableData,
+        parsedJSONData,
       );
       ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
       shapeQueue = originalShapeQueue;
@@ -525,6 +536,8 @@ pub.runParsed = function (
         shapeQueue,
         parsedFontMetrics,
         parsedImageMetadata,
+        parsedTableData,
+        parsedJSONData,
       );
       ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
 
@@ -622,6 +635,8 @@ function createEngineLayer(
   shapeQueueParam,
   fontMetricsParam,
   imageMetadataParam,
+  tableDataParam,
+  jsonDataParam,
 ) {
   // 1. 清理已存在的 __engine__ 图层
   cleanupEngineLayer();
@@ -680,6 +695,8 @@ function createEngineLayer(
     shapeQueueParam,
     fontMetricsParam,
     imageMetadataParam,
+    tableDataParam,
+    jsonDataParam,
   );
 
   // 6. 应用表达式并设置图层属性（Source Text 表达式返回 JSON 字符串）
@@ -888,6 +905,8 @@ function buildExpression(
   shapeQueueParam,
   fontMetricsParam,
   imageMetadataParam,
+  tableDataParam,
+  jsonDataParam,
 ) {
   // 解析依赖对象
   var mathDeps = deps && deps.math ? deps.math : {};
@@ -896,6 +915,7 @@ function buildExpression(
   var shapeDeps = deps && deps.shapes ? deps.shapes : {};
   var typographyDeps = deps && deps.typography ? deps.typography : {};
   var controllerDeps = deps && deps.controllers ? deps.controllers : {};
+  var tableDeps = deps && deps.tables ? deps.tables : {};
 
   // background 依赖 color()，确保加载 color 函数
   if (shapeCounts.background > 0) {
@@ -1021,8 +1041,16 @@ function buildExpression(
       ? imageMetadataParam
       : {},
   );
+  var tableDataJson = JSON.stringify(
+    tableDataParam && typeof tableDataParam === "object" ? tableDataParam : {},
+  );
+  var jsonDataJson = JSON.stringify(
+    jsonDataParam && typeof jsonDataParam === "object" ? jsonDataParam : {},
+  );
   expr.push("  fontMetrics: " + fontMetricsJson + ",");
   expr.push("  imageMetadata: " + imageMetadataJson + ",");
+  expr.push("  tableData: " + tableDataJson + ",");
+  expr.push("  jsonData: " + jsonDataJson + ",");
   expr.push("  _lastComputedFrame: -1  // 帧循环缓存：记录上次计算的帧号");
   expr.push("};");
   expr.push("var _shapes = _ctx.shapes;");
@@ -1084,6 +1112,11 @@ function buildExpression(
     colorDeps.color = true;
     expr.push("// 图像库（按需加载）");
     expr.push(getImageLib({ image: true }));
+  }
+
+  if (hasKeys(tableDeps)) {
+    expr.push("// IO 库（按需加载）");
+    expr.push(getIOLib(buildDepsFromRegistry(tableDeps, "tables")));
   }
 
   // 按需加载排版/文本库（不直接产生形状 path，只负责 text 相关表达式）

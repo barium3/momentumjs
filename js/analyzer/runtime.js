@@ -254,6 +254,7 @@ function resolveMomentumImageSource(path) {
   };
 }
 
+
 function decorateMomentumImage(img, sourceInfo) {
   if (!img || !sourceInfo) {
     return img;
@@ -350,6 +351,7 @@ function createMomentumLoadImageWrapper(p, original, imageLoadTracker) {
   };
 }
 
+
 function waitForMomentumImageLoads(imageLoadTracker) {
   if (
     !imageLoadTracker ||
@@ -361,6 +363,34 @@ function waitForMomentumImageLoads(imageLoadTracker) {
 
   var pending = imageLoadTracker.pending.slice();
   imageLoadTracker.pending.length = 0;
+  return Promise.allSettled(pending).then(function () {});
+}
+
+function waitForMomentumTableLoads(tableLoadTracker) {
+  if (
+    !tableLoadTracker ||
+    !tableLoadTracker.pending ||
+    tableLoadTracker.pending.length === 0
+  ) {
+    return Promise.resolve();
+  }
+
+  var pending = tableLoadTracker.pending.slice();
+  tableLoadTracker.pending.length = 0;
+  return Promise.allSettled(pending).then(function () {});
+}
+
+function waitForMomentumJSONLoads(jsonLoadTracker) {
+  if (
+    !jsonLoadTracker ||
+    !jsonLoadTracker.pending ||
+    jsonLoadTracker.pending.length === 0
+  ) {
+    return Promise.resolve();
+  }
+
+  var pending = jsonLoadTracker.pending.slice();
+  jsonLoadTracker.pending.length = 0;
   return Promise.allSettled(pending).then(function () {});
 }
 
@@ -581,6 +611,8 @@ function exposeFunctions(context, mode) {
   // 执行模式下，可能携带 background 统计信息
   var backgroundInfo = context.backgroundInfo;
   var imageLoadTracker = context.imageLoadTracker;
+  var tableLoadTracker = context.tableLoadTracker;
+  var jsonLoadTracker = context.jsonLoadTracker;
 
   var shapeTypeMap = getShapeTypeMap ? getShapeTypeMap(context.cache) : {};
   var transformFuncs =
@@ -602,7 +634,19 @@ function exposeFunctions(context, mode) {
     // 检查是否为某个 shape 的构建器函数
     var builderInfo = getBuilderInfo(funcName);
 
-    if (original) {
+    if (funcName === "loadTable" && mode === "execution") {
+      window[funcName] = createMomentumLoadTableWrapper(
+        p,
+        original,
+        tableLoadTracker,
+      );
+    } else if (funcName === "loadJSON" && mode === "execution") {
+      window[funcName] = createMomentumLoadJSONWrapper(
+        p,
+        original,
+        jsonLoadTracker,
+      );
+    } else if (original) {
       // 处理 shape 构建器函数（需要状态管理）
       if (builderInfo) {
         var builderContext =
@@ -877,6 +921,8 @@ class P5Runtime {
         var loopExecutions = { value: 0 };
         var backgroundInfo = { hasAlpha: false };
         var imageLoadTracker = { pending: [] };
+        var tableLoadTracker = { pending: [] };
+        var jsonLoadTracker = { pending: [] };
 
         exposeVariables(self.allVariables, p);
 
@@ -892,6 +938,8 @@ class P5Runtime {
             loopExecutions: loopExecutions,
             maxLoopCount: self.options.maxLoopCount,
             imageLoadTracker: imageLoadTracker,
+            tableLoadTracker: tableLoadTracker,
+            jsonLoadTracker: jsonLoadTracker,
           },
           "execution",
         );
@@ -924,7 +972,11 @@ class P5Runtime {
           }
         }
 
-        waitForMomentumImageLoads(imageLoadTracker)
+        Promise.all([
+          waitForMomentumImageLoads(imageLoadTracker),
+          waitForMomentumTableLoads(tableLoadTracker),
+          waitForMomentumJSONLoads(jsonLoadTracker),
+        ])
           .then(function () {
             if (shouldRunSetup && typeof window.setup === "function") {
               try {
@@ -1048,6 +1100,8 @@ class P5Runtime {
         var setupLoopExecutions = { value: 0 };
         var setupBackgroundInfo = { hasAlpha: false };
         var imageLoadTracker = { pending: [] };
+        var tableLoadTracker = { pending: [] };
+        var jsonLoadTracker = { pending: [] };
 
         // draw 的统计
         var drawRenderOrder = [];
@@ -1069,6 +1123,8 @@ class P5Runtime {
             loopExecutions: setupLoopExecutions,
             maxLoopCount: self.options.maxLoopCount,
             imageLoadTracker: imageLoadTracker,
+            tableLoadTracker: tableLoadTracker,
+            jsonLoadTracker: jsonLoadTracker,
           },
           "execution",
         );
@@ -1096,7 +1152,11 @@ class P5Runtime {
           }
         }
 
-        waitForMomentumImageLoads(imageLoadTracker)
+        Promise.all([
+          waitForMomentumImageLoads(imageLoadTracker),
+          waitForMomentumTableLoads(tableLoadTracker),
+          waitForMomentumJSONLoads(jsonLoadTracker),
+        ])
           .then(function () {
             // 执行 setup
             if (typeof window.setup === "function") {
@@ -1121,6 +1181,8 @@ class P5Runtime {
                 loopExecutions: drawLoopExecutions,
                 maxLoopCount: self.options.maxLoopCount,
                 imageLoadTracker: imageLoadTracker,
+                tableLoadTracker: tableLoadTracker,
+                jsonLoadTracker: jsonLoadTracker,
               },
               "execution",
             );

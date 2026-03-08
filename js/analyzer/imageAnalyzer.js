@@ -140,10 +140,6 @@ class ImageAnalyzer {
     return new Promise((resolve) => {
       if (window.extensionPath) {
         this.userDirectory = window.extensionPath + "/user";
-        console.log(
-          "[ImageAnalyzer] User directory from extensionPath:",
-          this.userDirectory,
-        );
         resolve(this.userDirectory);
         return;
       }
@@ -230,7 +226,6 @@ class ImageAnalyzer {
       // 命中缓存：直接复用，不打 AE
       if (this.imageCache[normalizedPath]) {
         results[normalizedPath] = this.imageCache[normalizedPath];
-        console.log(`[ImageAnalyzer] Cache hit: ${normalizedPath}`);
         continue;
       }
 
@@ -253,9 +248,6 @@ class ImageAnalyzer {
 
         if (info.success) {
           this.imageCache[rel] = info;
-          console.log(
-            `[ImageAnalyzer] Loaded image: ${rel} (${info.width}x${info.height})`,
-          );
         } else {
           console.error(
             `[ImageAnalyzer] Failed to load image: ${rel} - ${info.error}`,
@@ -334,7 +326,6 @@ class ImageAnalyzer {
           .replace(/^(\d)/, "_$1");
 
         window[varName] = img;
-        console.log(`[ImageAnalyzer] Added to runtime: ${varName}`);
       } catch (e) {
         console.error(
           `[ImageAnalyzer] Failed to add image to runtime: ${relativePath}`,

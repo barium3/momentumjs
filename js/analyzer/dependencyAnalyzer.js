@@ -8,6 +8,7 @@ var functionRegistry;
 var _momentumFunctionMappings = null;
 var _categoryInfo = null;
 var _shapeTypeMap = null;
+var _tableInstanceMethods = null;
 
 /**
  * 初始化 dependencyAnalyzer（由 Runtime 调用）
@@ -34,6 +35,7 @@ function _buildAnalyzerCaches() {
         colors: buildCategoryMappings("colors", ["color"]),
         typography: buildCategoryMappings("typography", ["transform", "color"]),
         math: buildCategoryMappings("math", ["math"]),
+        tables: buildCategoryMappings("tables", []),
       };
     } else {
       _momentumFunctionMappings = null;
@@ -54,7 +56,7 @@ function _buildAnalyzerCaches() {
     _shapeTypeMap = null;
   }
 
-  // math / environment / colors / controllers / images 的符号信息
+  // math / environment / colors / controllers / images / tables 的符号信息
   _categoryInfo = {};
   var categories = [
     "math",
@@ -63,6 +65,7 @@ function _buildAnalyzerCaches() {
     "controllers",
     "typography",
     "images",
+    "tables",
   ];
 
   categories.forEach(function (category) {
@@ -95,6 +98,19 @@ function _buildAnalyzerCaches() {
 
     _categoryInfo[category] = info;
   });
+
+  try {
+    if (
+      functionRegistry &&
+      typeof functionRegistry.getTableInstanceMethods === "function"
+    ) {
+      _tableInstanceMethods = functionRegistry.getTableInstanceMethods();
+    } else {
+      _tableInstanceMethods = null;
+    }
+  } catch (e3) {
+    _tableInstanceMethods = null;
+  }
 }
 
 /**
@@ -135,6 +151,7 @@ function analyzeDependenciesAST(code) {
     math: {},
     environment: {},
     controllers: {},
+    tables: {},
     requires: {
       transform: false,
       color: false,
@@ -180,8 +197,15 @@ function analyzeDependenciesAST(code) {
         : [];
 
   // 遍历 AST，收集依赖
+  var tableVarTypes = {};
   _walkAST(ast, function (node) {
     switch (node.type) {
+      case "VariableDeclarator":
+        _handleVariableDeclarator(node, tableVarTypes);
+        break;
+      case "AssignmentExpression":
+        _handleAssignmentExpression(node, tableVarTypes);
+        break;
       case "CallExpression":
         _handleCallExpression(
           node,
@@ -189,6 +213,7 @@ function analyzeDependenciesAST(code) {
           shapeNames,
           transformNames,
           colorNames,
+          tableVarTypes,
         );
         break;
       case "NewExpression":
@@ -333,9 +358,14 @@ function _handleCallExpression(
   shapeNames,
   transformNames,
   colorNames,
+  tableVarTypes,
 ) {
   var funcName = _getCalleeName(node.callee);
   if (!funcName) return;
+
+  if (_handleTableInstanceCall(node, dependencies, tableVarTypes)) {
+    return;
+  }
 
   // 1. shape 函数（ellipse / rect / line / polygon 等）
   if (shapeNames.indexOf(funcName) !== -1) {
@@ -382,7 +412,7 @@ function _handleCallExpression(
     return;
   }
 
-  // 5. 其它类别（math / environment / colors / controllers / typography）中声明的函数
+  // 5. 其它类别（math / environment / colors / controllers / typography / tables）中声明的函数
   if (_categoryInfo) {
     for (var cat in _categoryInfo) {
       if (!_categoryInfo.hasOwnProperty(cat)) continue;
@@ -399,6 +429,89 @@ function _handleCallExpression(
       }
     }
   }
+}
+
+function _getTableExprType(node, tableVarTypes) {
+  if (!node) return null;
+
+  if (node.type === "Identifier") {
+    return tableVarTypes && tableVarTypes[node.name]
+      ? tableVarTypes[node.name]
+      : null;
+  }
+
+  if (node.type === "CallExpression") {
+    var calleeName = _getCalleeName(node.callee);
+    if (calleeName === "loadTable") return "Table";
+
+    if (
+      node.callee &&
+      node.callee.type === "MemberExpression" &&
+      node.callee.property &&
+      node.callee.property.type === "Identifier"
+    ) {
+      var methodName = node.callee.property.name;
+      var receiverType = _getTableExprType(node.callee.object, tableVarTypes);
+      var methodInfos =
+        _tableInstanceMethods && _tableInstanceMethods[methodName]
+          ? _tableInstanceMethods[methodName]
+          : null;
+      if (!methodInfos || !receiverType) return null;
+      for (var i = 0; i < methodInfos.length; i++) {
+        if (methodInfos[i].receiver === receiverType) {
+          return methodInfos[i].returns || null;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function _handleVariableDeclarator(node, tableVarTypes) {
+  if (!node || !node.id || node.id.type !== "Identifier" || !node.init) return;
+  var inferredType = _getTableExprType(node.init, tableVarTypes);
+  if (inferredType) {
+    tableVarTypes[node.id.name] = inferredType;
+  }
+}
+
+function _handleAssignmentExpression(node, tableVarTypes) {
+  if (!node || !node.left || node.left.type !== "Identifier" || !node.right)
+    return;
+  var inferredType = _getTableExprType(node.right, tableVarTypes);
+  if (inferredType) {
+    tableVarTypes[node.left.name] = inferredType;
+  }
+}
+
+function _handleTableInstanceCall(node, dependencies, tableVarTypes) {
+  if (
+    !_tableInstanceMethods ||
+    !node ||
+    !node.callee ||
+    node.callee.type !== "MemberExpression" ||
+    !node.callee.property ||
+    node.callee.property.type !== "Identifier"
+  ) {
+    return false;
+  }
+
+  var methodName = node.callee.property.name;
+  var methodInfos = _tableInstanceMethods[methodName];
+  if (!methodInfos || methodInfos.length === 0) return false;
+
+  var receiverType = _getTableExprType(node.callee.object, tableVarTypes);
+  if (!receiverType) return false;
+
+  for (var i = 0; i < methodInfos.length; i++) {
+    var info = methodInfos[i];
+    if (info.receiver !== receiverType) continue;
+    _markFunctionDependency("tables", methodName, dependencies);
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -454,7 +567,7 @@ function _handleIdentifier(node, dependencies) {
     return;
   }
 
-  // 处理 math / environment / colors / controllers / typography 中声明的常量和变量
+  // 处理 math / environment / colors / controllers / typography / tables 中声明的常量和变量
   for (var cat in _categoryInfo) {
     if (!_categoryInfo.hasOwnProperty(cat)) continue;
     var info = _categoryInfo[cat];

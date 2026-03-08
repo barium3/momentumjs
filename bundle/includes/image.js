@@ -26,7 +26,7 @@ function getImageLib(deps) {
   );
   lines.push("}");
   lines.push("function _getImageSampleCompName() {");
-  lines.push("  return thisComp.name + '_image';");
+  lines.push("  return thisComp.name + '_footage';");
   lines.push("}");
   lines.push("function _getImageSampleLayer(path) {");
   lines.push("  var compName = _getImageSampleCompName();");
@@ -231,23 +231,31 @@ function getImageLib(deps) {
   return lines.join("\n");
 }
 
-function _sanitizeImageSampleLayerName(path) {
+function _sanitizeFootageSampleLayerName(prefix, path) {
   return (
-    "__imgsrc__" +
+    String(prefix || "__ftg__") +
     String(path || "")
       .replace(/[^a-zA-Z0-9_]/g, "_")
       .replace(/^(\d)/, "_$1")
   );
 }
 
-function _getImageSampleCompName(targetComp) {
-  var baseName =
-    targetComp && targetComp.name ? targetComp.name : "Composition";
-  return baseName + "_image";
+function _sanitizeImageSampleLayerName(path) {
+  return _sanitizeFootageSampleLayerName("__imgsrc__", path);
 }
 
-function _getOrCreateImageSampleComp(compFolder, targetComp) {
-  var compName = _getImageSampleCompName(targetComp);
+function _getFootageSampleCompName(targetComp) {
+  var baseName =
+    targetComp && targetComp.name ? targetComp.name : "Composition";
+  return baseName + "_footage";
+}
+
+function _getImageSampleCompName(targetComp) {
+  return _getFootageSampleCompName(targetComp);
+}
+
+function _getOrCreateFootageSampleComp(compFolder, targetComp) {
+  var compName = _getFootageSampleCompName(targetComp);
   for (var i = 1; i <= app.project.numItems; i++) {
     var item = app.project.item(i);
     if (item && item instanceof CompItem && item.name === compName) {
@@ -282,6 +290,61 @@ function _getOrCreateImageSampleComp(compFolder, targetComp) {
   return sampleComp;
 }
 
+function _getOrCreateImageSampleComp(compFolder, targetComp) {
+  return _getOrCreateFootageSampleComp(compFolder, targetComp);
+}
+
+function ensureFootageSampleLayer(
+  relativePath,
+  fullPath,
+  compFolder,
+  targetComp,
+  layerPrefix,
+  configureTransform,
+) {
+  if (!relativePath || !fullPath) return null;
+
+  var sampleComp = _getOrCreateFootageSampleComp(compFolder, targetComp);
+  if (!sampleComp) return null;
+
+  var layerName = _sanitizeFootageSampleLayerName(layerPrefix, relativePath);
+  for (var i = 1; i <= sampleComp.numLayers; i++) {
+    var candidate = sampleComp.layer(i);
+    if (candidate && candidate.name === layerName) {
+      return candidate;
+    }
+  }
+
+  var file = new File(fullPath);
+  if (!file.exists) return null;
+
+  var footageItem = _getOrImportFootage(file, compFolder);
+  if (!footageItem) return null;
+
+  var sampleLayer = sampleComp.layers.add(footageItem);
+  sampleLayer.name = layerName;
+  sampleLayer.shy = true;
+  if (configureTransform !== false) {
+    try {
+      sampleLayer
+        .property("Transform")
+        .property("Anchor Point")
+        .setValue([0, 0]);
+    } catch (e) {}
+    try {
+      sampleLayer.property("Transform").property("Position").setValue([0, 0]);
+    } catch (e2) {}
+    try {
+      sampleLayer.property("Transform").property("Scale").setValue([100, 100]);
+    } catch (e3) {}
+    try {
+      sampleLayer.property("Transform").property("Rotation").setValue(0);
+    } catch (e4) {}
+  }
+  sampleLayer.moveToEnd();
+  return sampleLayer;
+}
+
 function ensureImageSampleLayers(imageMetadata, compFolder, targetComp) {
   if (!imageMetadata) return;
 
@@ -289,35 +352,14 @@ function ensureImageSampleLayers(imageMetadata, compFolder, targetComp) {
     if (!imageMetadata.hasOwnProperty(relativePath)) continue;
     var info = imageMetadata[relativePath];
     if (!info || !info.path) continue;
-
-    var sampleComp = _getOrCreateImageSampleComp(compFolder, targetComp);
-    if (!sampleComp) continue;
-
-    var layerName = _sanitizeImageSampleLayerName(relativePath);
-    var existingLayer = null;
-    for (var i = 1; i <= sampleComp.numLayers; i++) {
-      var candidate = sampleComp.layer(i);
-      if (candidate && candidate.name === layerName) {
-        existingLayer = candidate;
-        break;
-      }
-    }
-    if (existingLayer) continue;
-
-    var file = new File(info.path);
-    if (!file.exists) continue;
-
-    var footageItem = _getOrImportFootage(file, compFolder);
-    if (!footageItem) continue;
-
-    var sampleLayer = sampleComp.layers.add(footageItem);
-    sampleLayer.name = layerName;
-    sampleLayer.shy = true;
-    sampleLayer.property("Transform").property("Anchor Point").setValue([0, 0]);
-    sampleLayer.property("Transform").property("Position").setValue([0, 0]);
-    sampleLayer.property("Transform").property("Scale").setValue([100, 100]);
-    sampleLayer.property("Transform").property("Rotation").setValue(0);
-    sampleLayer.moveToEnd();
+    ensureFootageSampleLayer(
+      relativePath,
+      info.path,
+      compFolder,
+      targetComp,
+      "__imgsrc__",
+      true,
+    );
   }
 }
 
@@ -434,12 +476,29 @@ function _getUserDirectory() {
  */
 function _getOrImportFootage(file, compFolder) {
   var name = file.name;
+  var targetPath = String(file.fsName || "").replace(/\\/g, "/");
+  var nameMatch = null;
   for (var i = 1; i <= app.project.numItems; i++) {
     var item = app.project.item(i);
-    if (item instanceof FootageItem && item.name === name) {
-      return item;
+    if (!(item instanceof FootageItem) || item.name !== name) {
+      continue;
+    }
+
+    try {
+      var itemPath =
+        item.file && item.file.fsName
+          ? String(item.file.fsName).replace(/\\/g, "/")
+          : null;
+      if (itemPath && targetPath && itemPath === targetPath) {
+        return item;
+      }
+    } catch (e) {}
+
+    if (!nameMatch) {
+      nameMatch = item;
     }
   }
+  if (nameMatch) return nameMatch;
   try {
     var footage = app.project.importFile(new ImportOptions(file));
     if (footage && compFolder) {
