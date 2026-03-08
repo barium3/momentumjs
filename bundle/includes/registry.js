@@ -145,7 +145,11 @@ functionRegistry.shapes = {
   //   id,
   //   type: "image",
   //   pos: [cx, cy],         // 中心点（已应用当前变换）
-  //   size: [w, h],          // 绘制尺寸（已乘 scale）
+  //   size: [w, h],          // 绘制尺寸（已乘当前 transform scale）
+  //   drawW: number,         // 未乘 transform scale 的目标绘制宽度
+  //   drawH: number,         // 未乘 transform scale 的目标绘制高度
+  //   natW: number,          // 原始图片宽度
+  //   natH: number,          // 原始图片高度
   //   rot: number,           // 旋转角度（度）
   //   src: "apple.png",      // 图片相对路径
   //   fillOpacity: 100,      // 不透明度 0-100
