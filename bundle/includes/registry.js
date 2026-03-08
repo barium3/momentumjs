@@ -406,6 +406,9 @@ functionRegistry.controllers = {
   // Point 控件：二维点控制，在 AE 表达式侧由 createPoint() 提供 [x, y] 控制
   // API：var pt = createPoint(defaultX, defaultY); var v = pt.value(); var x = pt.x(); var y = pt.y();
   createPoint: { internal: "createPoint" },
+  // Path 控件：在 __controller__ 图层上创建可编辑 mask path，并在表达式侧返回路径采样器
+  // API：var path = createPathController("guide", [[0,0],[100,0],[100,100]], true)
+  createPathController: { internal: "createPathController" },
 };
 
 /**

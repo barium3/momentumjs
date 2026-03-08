@@ -1,164 +1,117 @@
 // ----------------------------------------
-// Momentum.js - Processing Style Compiler
-// 将类 Processing 代码编译为 AE 图层结构
+// Core
+// 负责主合成 / 预合成创建、engine 表达式生成与图层装配
 // ----------------------------------------
 
-/** ExtendScript 无 Array.isArray，用本地辅助函数判断数组 */
 function isArray(arg) {
   return Object.prototype.toString.call(arg) === "[object Array]";
 }
 
-// ========================================
-// 全局变量
-// ========================================
 var engineLayer = null;
 var engineComp = null;
 var shapeQueue = [];
-var setupComp = null; // setup预合成
-var drawComp = null; // draw预合成
-var setupShapeQueue = []; // setup中的shape队列
-var drawShapeQueue = []; // draw中的shape队列
-var mainCompName = null; // 主合成名称（用于跨合成表达式通讯）
-// renderLayers 全局计数器（按基础类型统计调用序号，确保 setup 和 draw 共用同一套 id 序列）
+var setupComp = null;
+var drawComp = null;
+var setupShapeQueue = [];
+var drawShapeQueue = [];
+var mainCompName = null;
 var _globalRenderIndex = null;
 
-// ========================================
-// Public API - 公共接口
-// ========================================
+var DEFAULT_COMP_DURATION = 10;
 
-// 默认合成配置常量
-var DEFAULT_COMP_DURATION = 10; // 默认合成时长（秒）
+function _findProjectItemByName(name, predicate) {
+  for (var i = 1; i <= app.project.items.length; i++) {
+    var item = app.project.items[i];
+    if (!item || item.name !== name) continue;
+    if (!predicate || predicate(item)) return item;
+  }
+  return null;
+}
 
-/**
- * 获取唯一的合成名称（如果名称已存在，则添加编号）
- * @param {string} baseName - 基础名称
- * @returns {string} 唯一的合成名称
- */
+function _uniqueProjectItemName(baseName, fallbackName, predicate) {
+  var name = baseName && baseName.length ? baseName : fallbackName;
+  if (!_findProjectItemByName(name, predicate)) {
+    return name;
+  }
+
+  var counter = 1;
+  do {
+    var newName = name + " " + counter;
+    if (!_findProjectItemByName(newName, predicate)) {
+      return newName;
+    }
+    counter++;
+  } while (counter < 10000);
+
+  return name + " " + new Date().getTime();
+}
+
 function getUniqueCompName(baseName) {
-  if (!baseName || baseName.length === 0) {
-    baseName = "New Composition";
-  }
-
-  // 检查基础名称是否已存在
-  var exists = false;
-  for (var i = 1; i <= app.project.items.length; i++) {
-    var item = app.project.items[i];
-    if (item && item.name === baseName) {
-      exists = true;
-      break;
-    }
-  }
-
-  // 如果不存在，直接返回
-  if (!exists) {
-    return baseName;
-  }
-
-  // 如果存在，尝试添加编号
-  var counter = 1;
-  var newName;
-  do {
-    newName = baseName + " " + counter;
-    exists = false;
-    for (var j = 1; j <= app.project.items.length; j++) {
-      var item2 = app.project.items[j];
-      if (item2 && item2.name === newName) {
-        exists = true;
-        break;
-      }
-    }
-    if (!exists) {
-      return newName;
-    }
-    counter++;
-  } while (counter < 10000); // 防止无限循环，最多尝试10000次
-
-  // 如果10000次都失败（理论上不应该发生），返回带时间戳的名称
-  return baseName + " " + new Date().getTime();
+  return _uniqueProjectItemName(baseName, "New Composition");
 }
 
-/**
- * 获取唯一的文件夹名称（如果名称已存在，则添加编号）
- * @param {string} baseName - 基础名称
- * @returns {string} 唯一的文件夹名称
- */
 function getUniqueFolderName(baseName) {
-  if (!baseName || baseName.length === 0) {
-    baseName = "New Folder";
-  }
-
-  // 检查基础名称是否已存在
-  var exists = false;
-  for (var i = 1; i <= app.project.items.length; i++) {
-    var item = app.project.items[i];
-    if (item && item instanceof FolderItem && item.name === baseName) {
-      exists = true;
-      break;
-    }
-  }
-
-  // 如果不存在，直接返回
-  if (!exists) {
-    return baseName;
-  }
-
-  // 如果存在，尝试添加编号
-  var counter = 1;
-  var newName;
-  do {
-    newName = baseName + " " + counter;
-    exists = false;
-    for (var j = 1; j <= app.project.items.length; j++) {
-      var item2 = app.project.items[j];
-      if (item2 && item2 instanceof FolderItem && item2.name === newName) {
-        exists = true;
-        break;
-      }
-    }
-    if (!exists) {
-      return newName;
-    }
-    counter++;
-  } while (counter < 10000); // 防止无限循环，最多尝试10000次
-
-  // 如果10000次都失败（理论上不应该发生），返回带时间戳的名称
-  return baseName + " " + new Date().getTime();
+  return _uniqueProjectItemName(baseName, "New Folder", function (item) {
+    return item instanceof FolderItem;
+  });
 }
 
-/**
- * 创建以合成名称命名的唯一项目文件夹。
- * 后续所有属于该合成的资源（预合成、footage、控件）在创建时直接设置 parentFolder，
- * 无需在最后统一移动。
- * @param {string} folderName - 文件夹名称（通常与主合成名称相同）
- * @returns {FolderItem} 新创建的文件夹
- */
 function createCompFolder(folderName) {
-  var uniqueFolderName = getUniqueFolderName(folderName);
-  return app.project.items.addFolder(uniqueFolderName);
+  return app.project.items.addFolder(getUniqueFolderName(folderName));
 }
 
-/**
- * 检查 registry 是否可用
- * @returns {boolean} registry 是否可用
- */
 function isRegistryAvailable() {
   return typeof functionRegistry !== "undefined" && functionRegistry !== null;
 }
 
-/**
- * 设置合成背景色
- * @param {CompItem} comp - 合成对象
- * @param {boolean} hasSetupOrDraw - 是否有 setup 或 draw 函数
- */
 function setCompBackgroundColor(comp, hasSetupOrDraw) {
   if (hasSetupOrDraw) {
-    // 纯白色 RGB(255, 255, 255)
     comp.bgColor = [1, 1, 1];
   } else {
-    // p5.js 默认灰色 RGB(200, 200, 200)
-    // After Effects 中颜色值范围是 0-1
     comp.bgColor = [200 / 255, 200 / 255, 200 / 255];
   }
+}
+
+function _parseJSONArg(arg) {
+  if (arg === undefined || arg === null || arg === "null") return null;
+  try {
+    return typeof arg === "string" ? JSON.parse(arg) : arg;
+  } catch (e) {
+    return null;
+  }
+}
+
+function _parseRenderLayersArg(arg) {
+  var parsed = _parseJSONArg(arg);
+  return isArray(parsed) ? parsed : null;
+}
+
+function _mergeShapeCounts(queue) {
+  var counts = {};
+  for (var i = 0; i < queue.length; i++) {
+    var item = queue[i];
+    if (!item || !item.type) continue;
+    if (!counts[item.type]) counts[item.type] = 0;
+    counts[item.type]++;
+  }
+  return counts;
+}
+
+function _countBackgroundItems(renderLayers) {
+  var count = 0;
+  if (!renderLayers || !isArray(renderLayers)) return count;
+  for (var i = 0; i < renderLayers.length; i++) {
+    var item = renderLayers[i];
+    if (!item) continue;
+    if (typeof item === "string") {
+      if (item === "background") count++;
+      continue;
+    }
+    if (item.type === "background") {
+      count += typeof item.count === "number" ? item.count : 1;
+    }
+  }
+  return count;
 }
 
 pub.runParsed = function (
@@ -179,97 +132,28 @@ pub.runParsed = function (
   imageMetadataArg,
 ) {
   try {
-    // 1. 初始化变量
     shapeQueue = [];
     setupShapeQueue = [];
     drawShapeQueue = [];
     setupComp = null;
     drawComp = null;
-    // 重置全局 renderIndex 计数器，保证每次编译从 0 开始累加
     _globalRenderIndex = {};
 
-    // 2. 解析renderLayers参数（可能是字符串或对象）
-    var parsedSetupRenderLayers = null;
-    var parsedDrawRenderLayers = null;
+    var parsedSetupRenderLayers = _parseRenderLayersArg(setupRenderLayersArg);
+    var parsedDrawRenderLayers = _parseRenderLayersArg(drawRenderLayersArg);
 
-    try {
-      if (
-        typeof setupRenderLayersArg === "string" &&
-        setupRenderLayersArg !== "null"
-      ) {
-        parsedSetupRenderLayers = JSON.parse(setupRenderLayersArg);
-      } else if (isArray(setupRenderLayersArg)) {
-        parsedSetupRenderLayers = setupRenderLayersArg;
-      }
-    } catch (e) {
-      parsedSetupRenderLayers = null;
-    }
-
-    try {
-      if (
-        typeof drawRenderLayersArg === "string" &&
-        drawRenderLayersArg !== "null"
-      ) {
-        parsedDrawRenderLayers = JSON.parse(drawRenderLayersArg);
-      } else if (isArray(drawRenderLayersArg)) {
-        parsedDrawRenderLayers = drawRenderLayersArg;
-      }
-    } catch (e) {
-      parsedDrawRenderLayers = null;
-    }
-
-    // 3. 处理前端传递的 renderLayers（仅使用新的分别分析结果）
     if (parsedSetupRenderLayers || parsedDrawRenderLayers) {
-      // 使用新的分别分析结果
-      if (
-        parsedSetupRenderLayers &&
-        isArray(parsedSetupRenderLayers) &&
-        parsedSetupRenderLayers.length > 0
-      ) {
+      if (parsedSetupRenderLayers && parsedSetupRenderLayers.length > 0) {
         setupShapeQueue = processRenderLayers(parsedSetupRenderLayers);
       }
-      if (
-        parsedDrawRenderLayers &&
-        isArray(parsedDrawRenderLayers) &&
-        parsedDrawRenderLayers.length > 0
-      ) {
+      if (parsedDrawRenderLayers && parsedDrawRenderLayers.length > 0) {
         drawShapeQueue = processRenderLayers(parsedDrawRenderLayers);
       }
-      // 合并到shapeQueue，供后续统计使用
       shapeQueue = setupShapeQueue.concat(drawShapeQueue);
     }
 
-    // 4. 解析 fontMetrics 参数（前端传递的字体度量数据）
-    var parsedFontMetrics = null;
-    try {
-      if (typeof fontMetricsArg === "string" && fontMetricsArg !== "null") {
-        parsedFontMetrics = JSON.parse(fontMetricsArg);
-      } else if (
-        typeof fontMetricsArg === "object" &&
-        fontMetricsArg !== null
-      ) {
-        parsedFontMetrics = fontMetricsArg;
-      }
-    } catch (e) {
-      parsedFontMetrics = null;
-    }
-
-    var parsedImageMetadata = null;
-    try {
-      if (
-        typeof imageMetadataArg === "string" &&
-        imageMetadataArg !== "null"
-      ) {
-        parsedImageMetadata = JSON.parse(imageMetadataArg);
-      } else if (
-        typeof imageMetadataArg === "object" &&
-        imageMetadataArg !== null
-      ) {
-        parsedImageMetadata = imageMetadataArg;
-      }
-    } catch (e) {
-      parsedImageMetadata = null;
-    }
+    var parsedFontMetrics = _parseJSONArg(fontMetricsArg);
+    var parsedImageMetadata = _parseJSONArg(imageMetadataArg);
 
     var combinedCodeForTables =
       String(globalCode || "") +
@@ -280,7 +164,6 @@ pub.runParsed = function (
     var parsedTableData = collectTableDataFromCode(combinedCodeForTables);
     var parsedJSONData = collectJSONDataFromCode(combinedCodeForTables);
 
-    // 提取环境配置并创建合成
     var env = extractEnvironmentConfig(
       setupCode,
       compName,
@@ -288,7 +171,6 @@ pub.runParsed = function (
       compHeight,
       compFrameRate,
     );
-    // 获取唯一的合成名称
     var uniqueMainCompName = getUniqueCompName(env.name);
     engineComp = m.composition(
       uniqueMainCompName,
@@ -298,62 +180,40 @@ pub.runParsed = function (
       DEFAULT_COMP_DURATION,
       env.frameRate,
     );
-    // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
-    // 否则使用 p5.js 默认灰色 RGB(200, 200, 200)
     var hasSetupOrDraw =
       hasSetupOrDrawArg !== undefined && hasSetupOrDrawArg !== null
         ? Boolean(hasSetupOrDrawArg)
         : false;
     setCompBackgroundColor(engineComp, hasSetupOrDraw);
 
-    // 提前创建合成文件夹，后续所有相关资源（预合成、footage）创建时直接归入，
-    // 无需事后统一移动。
     var compFolder = createCompFolder(uniqueMainCompName);
     engineComp.parentFolder = compFolder;
 
-    // 5. 检查代码块存在性
     var hasDraw = drawCode && drawCode.length > 0;
     var hasSetup = setupCode && setupCode.length > 0;
     var hasGlobal = globalCode && globalCode.length > 0;
 
-    // 6. Processing 逻辑：没有 setup 和 draw 时，把全局代码当作 setup
     if (!hasDraw && !hasSetup && hasGlobal) {
       setupCode = globalCode;
       globalCode = "";
       hasSetup = true;
     }
 
-    // 7. 没有 draw 时创建空函数（允许只有 setup）
     if (!hasDraw) {
       drawCode = "// Empty draw function";
     }
 
-    // 8. 没有任何代码时抛出错误
     if (!hasDraw && !hasSetup && !hasGlobal) {
       throw new Error("No code provided");
     }
 
-    // 9. 解析依赖信息
-    var deps = null;
-    try {
-      deps =
-        typeof dependenciesArg === "string"
-          ? JSON.parse(dependenciesArg)
-          : dependenciesArg;
-    } catch (e) {
-      deps = null;
-    }
-    // 10. 根据是否有分别分析结果，决定创建方式
+    var deps = _parseJSONArg(dependenciesArg);
     var useSeparatedComps =
       setupShapeQueue.length > 0 || drawShapeQueue.length > 0;
 
     if (useSeparatedComps) {
-      // 新架构：分别创建setup和draw预合成
-
-      // 设置主合成名称（用于跨合成表达式通讯）
       mainCompName = uniqueMainCompName;
 
-      // 创建setup预合成（如果有setup中的shape）
       if (setupShapeQueue.length > 0 && hasSetup) {
         var setupCompName = getUniqueCompName(uniqueMainCompName + "_Setup");
         setupComp = app.project.items.addComp(
@@ -364,22 +224,18 @@ pub.runParsed = function (
           DEFAULT_COMP_DURATION, // setup合成时长与主合成一致
           env.frameRate,
         );
-        // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
         setCompBackgroundColor(setupComp, hasSetupOrDraw);
 
         setupComp.parentFolder = compFolder;
 
-        // 临时设置engineComp为setupComp，创建setup中的图层
         var originalEngineComp = engineComp;
         engineComp = setupComp;
         shapeQueue = setupShapeQueue;
-        // 子合成中不创建engine图层，渲染图层通过表达式引用父合成的engine
         createShapeLayers(mainCompName, compFolder);
         engineComp = originalEngineComp;
         shapeQueue = [];
       }
 
-      // 创建draw预合成（如果有draw中的shape）
       if (drawShapeQueue.length > 0 && hasDraw) {
         var drawCompName = getUniqueCompName(uniqueMainCompName + "_Draw");
         drawComp = app.project.items.addComp(
@@ -390,40 +246,23 @@ pub.runParsed = function (
           DEFAULT_COMP_DURATION,
           env.frameRate,
         );
-        // 根据前端 AST 判断：当有 setup 或 draw 时，设置合成背景色为纯白色
         setCompBackgroundColor(drawComp, hasSetupOrDraw);
 
         drawComp.parentFolder = compFolder;
 
-        // 临时设置engineComp为drawComp，创建draw中的图层
         var originalEngineComp2 = engineComp;
         engineComp = drawComp;
         shapeQueue = drawShapeQueue;
-        // 子合成中不创建engine图层，渲染图层通过表达式引用父合成的engine
         createShapeLayers(mainCompName, compFolder);
 
         engineComp = originalEngineComp2;
         shapeQueue = [];
       }
 
-      // 在主合成中创建engine图层（用于全局代码和协调）
-      // 合并所有子合成中的图形信息，用于统计 shapeCounts
       var allShapesQueue = setupShapeQueue.concat(drawShapeQueue);
-      var mergedShapeCounts = {};
-      for (var i = 0; i < allShapesQueue.length; i++) {
-        var item = allShapesQueue[i];
-        if (!mergedShapeCounts[item.type]) {
-          mergedShapeCounts[item.type] = 0;
-        }
-        mergedShapeCounts[item.type]++;
-      }
-      // 恢复shapeQueue为空，因为主合成不需要创建shape图层
+      var mergedShapeCounts = _mergeShapeCounts(allShapesQueue);
       var originalShapeQueue = shapeQueue;
       shapeQueue = [];
-      // 主合成的 __engine__ 图层需要执行所有代码（setup + draw），以便生成 shapes 数据
-      // 子合成中的形状图层会通过表达式从主合成的 __engine__ 图层读取数据
-      // 主合成中的 engine 图层不需要跨合成访问，传入 null
-      // 传入 allShapesQueue 以便 buildExpression 可以收集 fontMetrics
       createEngineLayer(
         drawCode || "",
         setupCode || "",
@@ -440,7 +279,6 @@ pub.runParsed = function (
       ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
       shapeQueue = originalShapeQueue;
 
-      // 在主合成中添加预合成图层
       if (setupComp) {
         var setupLayer = engineComp.layers.add(setupComp);
         setupLayer.name = "__setup__";
@@ -451,49 +289,22 @@ pub.runParsed = function (
         drawLayer.name = "__draw__";
         drawLayer.startTime = 0;
 
-        // 计算 draw 中 background 的数量：
-        // 优先使用前端分析给出的精确值（drawBackgroundCountArg），
-        // 在缺省或异常情况下退回到旧的静态统计逻辑，保持向后兼容。
         var drawBackgroundCount = 0;
         if (
           typeof drawBackgroundCountArg === "number" &&
           !isNaN(drawBackgroundCountArg)
         ) {
           drawBackgroundCount = Math.max(0, drawBackgroundCountArg);
-        } else if (parsedDrawRenderLayers && isArray(parsedDrawRenderLayers)) {
-          // 旧逻辑：基于 renderLayers 粗略统计 background 次数
-          for (var i = 0; i < parsedDrawRenderLayers.length; i++) {
-            var item = parsedDrawRenderLayers[i];
-            if (!item) continue;
-
-            // 字符串形式："background"
-            if (typeof item === "string") {
-              if (item === "background") {
-                drawBackgroundCount++;
-              }
-            }
-            // 对象形式：{ type: "background", count: N }
-            else if (item.type === "background") {
-              if (typeof item.count === "number") {
-                drawBackgroundCount += item.count;
-              } else {
-                drawBackgroundCount++;
-              }
-            }
-          }
+        } else if (parsedDrawRenderLayers) {
+          drawBackgroundCount = _countBackgroundItems(parsedDrawRenderLayers);
         }
 
-        // 前端综合分析得出的「是否需要挂 Echo」标记：
-        // - 没有 background / 有透明 background / background 在条件中 -> true
-        // - 每帧实心 background 清屏 -> false
         var drawNeedsEcho =
           drawNeedsEchoArg !== undefined && drawNeedsEchoArg !== null
             ? !!drawNeedsEchoArg
-            : drawBackgroundCount === 0; // 兜底：保持旧行为
+            : drawBackgroundCount === 0;
 
         if (drawNeedsEcho) {
-          // 添加 Echo 效果来模拟 draw 中的 background 拖尾效果
-          // 是否真正产生拖尾、以及衰减多少，由 __engine__ JSON 中的 backgrounds 数组与透明度决定
           addEchoEffect(
             drawLayer,
             engineComp,
@@ -503,29 +314,13 @@ pub.runParsed = function (
         }
       }
 
-      // 在主合成中为 createSlider() 创建控制图层与 Slider 控件（放在所有图层创建之后，保证控制图层置顶）
-      // 仅从 __engine__ JSON 上下文中自动提取 controllers（已移除旧版 sliderConfigArg 兼容逻辑）
       controllerSliderCount = setupControllersFromConfigs(engineComp, null);
-
-      // 最终跳转到主合成
       engineComp.openInViewer();
     } else {
-      // 没有分别分析结果时，使用新架构但只在主合成中创建图层
       mainCompName = uniqueMainCompName;
 
-      // 合并所有图形信息用于统计
-      var mergedShapeCounts = {};
-      for (var i = 0; i < shapeQueue.length; i++) {
-        var item = shapeQueue[i];
-        if (!mergedShapeCounts[item.type]) {
-          mergedShapeCounts[item.type] = 0;
-        }
-        mergedShapeCounts[item.type]++;
-      }
+      var mergedShapeCounts = _mergeShapeCounts(shapeQueue);
 
-      // 在主合成中创建engine图层
-      // 主合成中的 engine 图层不需要跨合成访问，传入 null
-      // 传递 shapeQueue 以便 buildExpression 可以收集 fontMetrics
       createEngineLayer(
         drawCode || "",
         setupCode || "",
@@ -541,14 +336,9 @@ pub.runParsed = function (
       );
       ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
 
-      // 在主合成中创建shape图层
       createShapeLayers(mainCompName, compFolder);
 
-      // 在主合成中为 createSlider() 创建控制图层与 Slider 控件（放在所有图层创建之后，保证控制图层置顶）
-      // 仅从 __engine__ JSON 上下文中自动提取 controllers（已移除旧版 sliderConfigArg 兼容逻辑）
       controllerSliderCount = setupControllersFromConfigs(engineComp, null);
-
-      // 最终跳转到主合成
       engineComp.openInViewer();
     }
   } catch (e) {
@@ -579,7 +369,6 @@ pub.composition = function (
   duration,
   frameRate,
 ) {
-  // 默认配置（与 p5.js 一致）
   var defaults = {
     name: "New Composition",
     width: 100,
@@ -589,7 +378,6 @@ pub.composition = function (
     frameRate: 30,
   };
 
-  // 根据参数数量覆盖默认值
   var args = arguments;
   var n = args.length;
   if (n >= 1) defaults.name = typeof name === "string" ? name : String(name);
@@ -599,10 +387,8 @@ pub.composition = function (
   if (n >= 5) defaults.duration = Number(duration);
   if (n >= 6) defaults.frameRate = Number(frameRate);
 
-  // 获取唯一的合成名称
   var uniqueName = getUniqueCompName(defaults.name);
 
-  // 创建合成并打开查看器
   var comp = app.project.items.addComp(
     uniqueName,
     defaults.width,
@@ -611,7 +397,6 @@ pub.composition = function (
     defaults.duration,
     defaults.frameRate,
   );
-  // 设置合成背景色为 p5.js 默认灰色（pub.composition 默认没有 setup/draw）
   setCompBackgroundColor(comp, false);
   comp.openInViewer();
   return comp;
@@ -620,10 +405,6 @@ pub.composition = function (
 error = pub.error = function (msg) {
   throw new Error(msg);
 };
-
-// ========================================
-// Engine Layer - 引擎图层
-// ========================================
 
 function createEngineLayer(
   drawCode,
@@ -638,17 +419,12 @@ function createEngineLayer(
   tableDataParam,
   jsonDataParam,
 ) {
-  // 1. 清理已存在的 __engine__ 图层
   cleanupEngineLayer();
 
-  // 2. 创建新的引擎图层（使用 Text 作为上下文载体）
   var ctxLayer = engineComp.layers.addText("");
   ctxLayer.name = "__engine__";
-
-  // Text 图层的 Source Text 属性承载 JSON 上下文
   var textProp = ctxLayer.property("Source Text");
 
-  // 3. 预处理代码（移除配置函数，替换形状函数名）
   var processedDraw = drawCode
     ? replaceShapeFunctions(removeConfigFunctions(drawCode))
     : "";
@@ -659,20 +435,14 @@ function createEngineLayer(
     ? replaceShapeFunctions(removeConfigFunctions(globalVars))
     : "";
 
-  // 4. 确定代码块存在性
   var hasDraw =
     drawCode && drawCode.length > 0 && !drawCode.match(/^\/\/\s*Empty/);
   var hasSetup = setupCode && setupCode.length > 0;
 
-  // 5. 构建表达式
-  // 获取每种渲染函数需要的数量，用于初始化计数器
-  // 如果传入了 shapeCountsParam，使用它；否则从 shapeQueue 统计
   var shapeCounts = {};
   if (shapeCountsParam) {
-    // 使用传入的 shapeCounts（合并了所有子合成的图形信息）
     shapeCounts = shapeCountsParam;
   } else {
-    // 从 shapeQueue 统计（向后兼容）
     for (var i = 0; i < shapeQueue.length; i++) {
       var item = shapeQueue[i];
       if (!shapeCounts[item.type]) {
@@ -682,7 +452,6 @@ function createEngineLayer(
     }
   }
 
-  // 传递依赖信息用于按需加载
   var expr = buildExpression(
     processedDraw,
     processedSetup,
@@ -699,7 +468,6 @@ function createEngineLayer(
     jsonDataParam,
   );
 
-  // 6. 应用表达式并设置图层属性（Source Text 表达式返回 JSON 字符串）
   textProp.expression = expr.join("\n");
   ctxLayer.shy = true;
   ctxLayer.enabled = false;
@@ -708,9 +476,6 @@ function createEngineLayer(
   engineLayer = ctxLayer;
 }
 
-/**
- * 清理已存在的引擎图层
- */
 function cleanupEngineLayer() {
   for (var i = 1; i <= engineComp.numLayers; i++) {
     if (engineComp.layer(i).name === "__engine__") {
@@ -720,15 +485,7 @@ function cleanupEngineLayer() {
   }
 }
 
-/**
- * 处理renderLayers数组，构建shapeQueue
- * 使用全局的 _globalRenderIndex 按基础类型累加调用次数，
- * 确保 setup 与 draw 共用同一套稳定的 id 序列：
- *   id = typeCode * 10000 + 调用次数
- *
- * @param {Array} renderLayersArg - renderLayers数组
- * @returns {Array} shapeQueue数组
- */
+// renderLayers 使用基础类型的全局递增索引，保证 setup / draw 共用稳定 id。
 function processRenderLayers(renderLayersArg) {
   var queue = [];
   if (
@@ -736,32 +493,23 @@ function processRenderLayers(renderLayersArg) {
     isArray(renderLayersArg) &&
     renderLayersArg.length > 0
   ) {
-    // 如果还没有初始化，全局 renderIndex 从空对象开始
     var renderIndex = _globalRenderIndex || {};
-
-    // 支持精确调用序列格式：
-    // ["ellipse", "rect", "ellipse", ...] 或 [{ type: "ellipse" }, { type: "rect" }, ...]
     for (var i = 0; i < renderLayersArg.length; i++) {
       var item = renderLayersArg[i];
       var type = null;
 
-      // 对象格式：{ type: "ellipse" }
       if (item && typeof item === "object") {
         if (item.type) {
           type = item.type;
         }
       } else if (typeof item === "string") {
-        // 字符串格式："ellipse"
         type = item;
       }
 
-      // 无法识别的条目直接跳过
       if (!type) {
         continue;
       }
 
-      // 归一化到基础类型（circle -> ellipse, square -> rect, ...）
-      // 保证后续 createShapeLayers 的 creator map 可以命中
       if (isRegistryAvailable() && functionRegistry.getShapeInfo) {
         var info = functionRegistry.getShapeInfo(type);
         if (info && info.baseType) {
@@ -769,13 +517,11 @@ function processRenderLayers(renderLayersArg) {
         }
       }
 
-      // 计算该类型的调用次数，用于生成稳定的 id（类型前缀 + 调用次数）
       if (!renderIndex[type]) {
         renderIndex[type] = 0;
       }
       renderIndex[type]++;
 
-      // 从 registry 中读取各基础图形类型的前缀编码（1xxxx = ellipse, 2xxxx = rect, ...）
       var typeCode = 0;
       if (
         typeof functionRegistry !== "undefined" &&
@@ -789,13 +535,11 @@ function processRenderLayers(renderLayersArg) {
 
       var id = typeCode * 10000 + renderIndex[type];
 
-      // 保留来自前端的附加元数据（如 textKind），便于后端根据更多信息创建图层
       var entry = {
         type: type,
         id: id,
       };
 
-      // 如果是对象格式，拷贝除 type 以外的字段（例如 textKind）
       if (item && typeof item === "object") {
         for (var key in item) {
           if (item.hasOwnProperty(key) && key !== "type") {
@@ -803,21 +547,13 @@ function processRenderLayers(renderLayersArg) {
           }
         }
       }
-
       queue.push(entry);
     }
-    // 将本次统计结果写回全局，供后续的 processRenderLayers 继续累加
     _globalRenderIndex = renderIndex;
   }
   return queue;
 }
 
-// （已废弃）静态 renderIndex 注入逻辑已移除，运行时改为简单顺序 index
-
-/**
- * 检查对象是否有属性值（AEScript 兼容，不支持 Object.keys）
- * 检查属性是否存在且为 true/false（不检查 undefined）
- */
 function hasKeys(obj) {
   if (!obj) return false;
   for (var key in obj) {
@@ -826,20 +562,10 @@ function hasKeys(obj) {
   return false;
 }
 
-/**
- * 从 registry 自动构建某个类别的依赖对象
- * @param {Object} categoryDeps - 依赖信息对象，如 transformDeps
- * @param {string} registryKey - registry 中的键名，如 'transforms'
- * @returns {Object} 构建好的依赖对象
- */
 function buildDepsFromRegistry(categoryDeps, registryKey) {
   var result = {};
-
-  // 从 registry 获取该类别的所有函数名（ES3 兼容，使用 for...in）
   if (isRegistryAvailable() && functionRegistry[registryKey]) {
     var category = functionRegistry[registryKey];
-
-    // 为每个函数设置依赖状态
     for (var funcName in category) {
       if (category.hasOwnProperty(funcName)) {
         result[funcName] = categoryDeps[funcName] || false;
@@ -850,19 +576,10 @@ function buildDepsFromRegistry(categoryDeps, registryKey) {
   return result;
 }
 
-/**
- * 从 registry 和 shapeCounts 自动构建形状库依赖对象
- * @param {Object} shapeCounts - 形状计数对象，如 {ellipse: 2, rect: 1}
- * @returns {Object} 构建好的形状依赖对象
- */
 function buildShapeDepsFromRegistry(shapeCounts) {
   var result = {};
-
-  // 从 registry 获取所有形状函数名（ES3 兼容，使用 for...in）
   if (isRegistryAvailable() && functionRegistry.shapes) {
     var shapes = functionRegistry.shapes;
-
-    // 为每个形状函数设置依赖状态（根据 count > 0）
     for (var shapeName in shapes) {
       if (shapes.hasOwnProperty(shapeName)) {
         result[shapeName] = (shapeCounts[shapeName] || 0) > 0;
@@ -873,26 +590,12 @@ function buildShapeDepsFromRegistry(shapeCounts) {
   return result;
 }
 
-/**
- * 检测用户代码中是否使用了某个变量或函数
- * @param {string} code - 用户代码
- * @param {string} name - 变量/函数名
- * @returns {boolean} - 是否使用
- */
 function detectUsage(code, name) {
   if (!code) return false;
-  // 使用词边界确保匹配完整名称（避免 frameCount2 被识别为 frameCount）
   var pattern = new RegExp("\\b" + name + "\\b");
   return pattern.test(code);
 }
 
-/**
- * 构建表达式代码 - 按需加载版本
- * 遵循 Processing 语义：setup() 和 draw() 是真正的函数调用
- * 这样可以确保变量作用域正确隔离
- * @param {Object} shapeCounts - 每种渲染函数需要的数量 {ellipse: 2, rect: 1, ...}
- * @param {Object} deps - 依赖分析结果（来自 P5Runtime.analyzeDependencies）
- */
 function buildExpression(
   processedDraw,
   processedSetup,
@@ -908,7 +611,6 @@ function buildExpression(
   tableDataParam,
   jsonDataParam,
 ) {
-  // 解析依赖对象
   var mathDeps = deps && deps.math ? deps.math : {};
   var transformDeps = deps && deps.transforms ? deps.transforms : {};
   var colorDeps = deps && deps.colors ? deps.colors : {};
@@ -917,28 +619,22 @@ function buildExpression(
   var controllerDeps = deps && deps.controllers ? deps.controllers : {};
   var tableDeps = deps && deps.tables ? deps.tables : {};
 
-  // background 依赖 color()，确保加载 color 函数
   if (shapeCounts.background > 0) {
     if (!colorDeps.color) colorDeps = colorDeps || {};
     colorDeps.color = true;
   }
 
-  // curve 依赖 _curveTightness 变量，确保加载该变量
   if (shapeCounts.curve > 0) {
     if (!mathDeps._curveTightnessVar) mathDeps = mathDeps || {};
     mathDeps._curveTightnessVar = true;
   }
 
-  // text 在 box 模式下依赖 rectMode，确保加载 rectMode 相关代码
-  // 注意：即使没有显式调用 rectMode，box 文本也需要 _rectMode 变量（使用默认值 CORNER）
   if (shapeCounts.text > 0) {
     if (!mathDeps.rectMode) mathDeps = mathDeps || {};
     mathDeps.rectMode = true;
-    // 确保 CORNER 常量也被注入（rectMode 默认值）
     if (!mathDeps.CORNER) mathDeps.CORNER = true;
   }
 
-  // setup 函数中自动调用 randomSeed() 和 noiseSeed()，确保这两个函数始终被注入
   if (hasSetup) {
     if (!mathDeps.randomSeed) mathDeps = mathDeps || {};
     mathDeps.randomSeed = true;
@@ -946,10 +642,8 @@ function buildExpression(
     mathDeps.noiseSeed = true;
   }
 
-  // 环境依赖：由前端的 AST 依赖分析统一处理
   var envDeps = deps && deps.environment ? deps.environment : {};
 
-  // 检查是否有任何形状需要渲染（动态检查）
   var hasShapes = false;
   for (var key in shapeCounts) {
     if (shapeCounts[key] > 0) {
@@ -965,10 +659,8 @@ function buildExpression(
     "// 初始化各类型图形的计数器（仅当需要时）",
   ];
 
-  // 根据实际需要的形状添加计数器（动态生成）
   for (var shapeType in shapeCounts) {
     if (shapeCounts[shapeType] > 0) {
-      // 获取基础类型（circle -> ellipse, square -> rect）
       var shapeInfo = null;
       if (isRegistryAvailable() && functionRegistry.getShapeInfo) {
         shapeInfo = functionRegistry.getShapeInfo(shapeType);
@@ -980,13 +672,11 @@ function buildExpression(
         );
       }
       var internalName = shapeInfo.internal;
-      // 提取内部函数名中的计数器名 (_ellipseCount)
       var counterName = internalName + "Count";
       expr.push("var " + counterName + " = 0;");
     }
   }
 
-  // 基础变量定义（内部系统，始终需要）
   expr.push(
     "// ========================================",
     "// 环境变量（内部系统）",
@@ -996,32 +686,17 @@ function buildExpression(
     "var currentTime = time;",
   );
 
-  // 按需加载环境变量库
   if (hasKeys(envDeps)) {
     expr.push("// 环境变量库（按需加载）");
     expr.push(getEnvironmentLib(envDeps));
   }
 
-  // 构建 fontMetrics 映射表供表达式使用
-  // 优先使用传入的 fontMetricsParam（由前端传递的精确数据）
-  // 回退：从 shapeQueue 中的 fontFamily 查找（但没有精确数据）
   var fontMetricsMap = {};
   if (fontMetricsParam && typeof fontMetricsParam === "object") {
-    // 使用前端传递的精确 fontMetrics
     fontMetricsMap = fontMetricsParam;
   }
-  // 如果没有传入 fontMetricsParam，回退到从 shapeQueue 收集（但这只能得到 fontFamily，没有精确宽度）
-  // 这种情况 textWidth 等函数会使用估算值
 
-  // 上下文对象：统一承载环境信息与渲染结果（语义化 JSON）
-  // - version: 协议版本，便于未来演进
-  // - fps/frame/time: 当前合成播放状态
-  // - env: 环境信息（frameCount/width/height）
-  // - shapes: 形状对象数组（由形状库填充）
-  // - backgrounds: 背景对象数组（由 background 库填充）
-  // - globals: 全局变量对象（用于跨合成访问）
-  // - controllers: 控制器配置数组（由 controller 库填充）
-  // 注：font/image/table/json 等冷数据仅供 engine 内部使用，不导出到最终 JSON
+  // 冷数据只供 engine 内部使用，不导出到最终 JSON。
   expr.push("var _ctx = {");
   expr.push("  version: 1,");
   expr.push("  fps: fps,");
@@ -1046,7 +721,7 @@ function buildExpression(
   var jsonDataJson = JSON.stringify(
     jsonDataParam && typeof jsonDataParam === "object" ? jsonDataParam : {},
   );
-  expr.push("  _lastComputedFrame: -1  // 帧循环缓存：记录上次计算的帧号");
+  expr.push("  _lastComputedFrame: -1");
   expr.push("};");
   expr.push("var _fm = " + fontMetricsJson + ";");
   expr.push("var _imd = " + imageMetadataJson + ";");
@@ -1055,7 +730,6 @@ function buildExpression(
   expr.push("var _shapes = _ctx.shapes;");
   expr.push("var _backgrounds = _ctx.backgrounds;");
 
-  // 控制器库（按需加载）
   if (hasKeys(controllerDeps)) {
     expr.push("// 控制器库（按需加载）");
     expr.push(
@@ -1063,49 +737,36 @@ function buildExpression(
     );
   }
 
-  // 按需加载数学库（每个函数单独判断）
   if (hasKeys(mathDeps)) {
     expr.push("// 数学库（按需加载）");
     expr.push(getMathLib(buildDepsFromRegistry(mathDeps, "math")));
   }
 
-  // 按需加载变换库
-  // state 模式：只加载形状函数需要的内部函数（状态 + _applyTransform + resetMatrix）
-  // 用户函数模式：加载用户显式使用的变换函数
   if (hasShapes) {
     expr.push("// 变换库（内部函数）");
     expr.push(getTransformationLib({ state: true }));
   }
   if (hasKeys(transformDeps)) {
     expr.push("// 变换库（用户函数）");
-    // 从 registry 自动构建依赖对象，不需要手动维护函数列表
     expr.push(
       getTransformationLib(buildDepsFromRegistry(transformDeps, "transforms")),
     );
   }
 
-  // 按需加载颜色库
-  // state 模式：只加载形状函数需要的内部函数（颜色状态 + _encodeColorState）
-  // 用户函数模式：加载用户显式使用的颜色函数
   if (hasShapes) {
     expr.push("// 颜色库（内部函数）");
     expr.push(getColorLib({ state: true }));
   }
   if (hasKeys(colorDeps)) {
     expr.push("// 颜色库（用户函数）");
-    // 从 registry 自动构建依赖对象，不需要手动维护函数列表
     expr.push(getColorLib(buildDepsFromRegistry(colorDeps, "colors")));
   }
 
-  // 按需加载形状函数
   if (hasShapes) {
     expr.push("// 形状函数库（按需加载）");
-    // 从 registry 自动构建形状依赖对象，不需要手动维护函数列表
     expr.push(getShapeLib(buildShapeDepsFromRegistry(shapeCounts)));
   }
 
-  // 按需加载图像库
-  // tint() 依赖 color()，确保 color 库也被加载
   if (shapeCounts && shapeCounts.image > 0) {
     if (!colorDeps.color) colorDeps = colorDeps || {};
     colorDeps.color = true;
@@ -1118,7 +779,6 @@ function buildExpression(
     expr.push(getIOLib(buildDepsFromRegistry(tableDeps, "tables")));
   }
 
-  // 按需加载排版/文本库（不直接产生形状 path，只负责 text 相关表达式）
   var needsTextShape = shapeCounts && shapeCounts.text > 0;
   var hasTypographyFuncs = hasKeys(typographyDeps);
 
@@ -1147,8 +807,6 @@ function buildExpression(
     expr.push(getTypographyLib(typoDepsForLib));
   }
 
-  // 跨合成全局变量访问支持（仅在子合成中生成，主合成不需要）
-  // 主合成中的 engine 图层直接使用本地全局变量，不需要跨合成访问
   if (mainCompNameParam) {
     expr.push("// ========================================");
     expr.push("// 跨合成全局变量访问（仅子合成需要）");
@@ -1170,30 +828,23 @@ function buildExpression(
     expr.push("");
   }
 
-  // 全局变量
   if (processedGlobal) {
     expr.push("// Global (变量声明)");
     expr.push(processedGlobal);
 
-    // 如果是在子合成中，在执行逻辑之前从主合成读取全局变量
-    // 主合成中的 engine 图层不需要此逻辑，因为全局变量就在本地
     if (mainCompNameParam) {
-      // 解析全局变量声明，提取变量名
       var globalVarNames = [];
       var globalLines = processedGlobal.split("\n");
       for (var i = 0; i < globalLines.length; i++) {
         var line = globalLines[i];
         if (line && typeof line === "string") {
-          // ExtendScript 兼容的 trim 方法
           line = line.replace(/^\s+|\s+$/g, "");
-          // 匹配变量声明：var variableName = value; 或 var variableName;
           var varMatch = line.match(/^var\s+(\w+)\s*(?:=\s*(.+))?;?$/);
           if (varMatch) {
             globalVarNames.push(varMatch[1]);
           }
         }
       }
-      // 在执行逻辑之前，从主合成读取全局变量并覆盖本地变量
       if (globalVarNames.length > 0) {
         expr.push("// 从主合成读取全局变量（仅子合成需要）");
         for (var j = 0; j < globalVarNames.length; j++) {
@@ -1221,37 +872,28 @@ function buildExpression(
     }
   }
 
-  // 构建 setup 和 draw 函数定义
   expr.push.apply(
     expr,
     buildFunctionDefinitions(processedSetup, processedDraw, hasSetup, hasDraw),
   );
 
-  // 构建执行逻辑
   expr.push.apply(
     expr,
     buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps),
   );
 
-  // 最终路径创建（仅当有形状时）
   expr.push(buildPathCreation(hasShapes));
 
   return expr;
 }
 
-// ========================================
-// Shape Analysis - 图形分析
-// ========================================
-
 function replaceShapeFunctions(code) {
-  // 从 registry 获取形状映射
   var funcMap = {};
 
   if (isRegistryAvailable() && functionRegistry.shapes) {
     for (var name in functionRegistry.shapes) {
       if (functionRegistry.shapes.hasOwnProperty(name)) {
         var info = functionRegistry.shapes[name];
-        // 内部函数名去掉前缀 '_' 作为映射目标
         var target = info.internal.replace(/^_/, "");
         funcMap[name] = target;
       }
@@ -1266,10 +908,6 @@ function replaceShapeFunctions(code) {
   return code;
 }
 
-// ========================================
-// Utilities - 工具函数
-// ========================================
-
 function isIdentifierChar(c) {
   return (
     (c >= "a" && c <= "z") ||
@@ -1280,14 +918,11 @@ function isIdentifierChar(c) {
 }
 
 function isInComment(code, pos) {
-  // 从当前位置向前查找
   for (var i = pos - 1; i >= 0; i--) {
     if (code.charAt(i) === "\n") {
-      // 检查行注释
       return code.substring(i + 1, pos).indexOf("//") !== -1;
     }
   }
-  // 检查文件开头的注释
   return code.substring(0, pos).indexOf("//") !== -1;
 }
 
@@ -1300,7 +935,6 @@ function replaceFunctionCalls(code, oldName, newName) {
   while ((idx = code.indexOf(searchStr, lastIdx)) !== -1) {
     var prevChar = idx > 0 ? code.charAt(idx - 1) : "";
 
-    // 确保不是标识符的一部分，且不在注释中
     if (!isIdentifierChar(prevChar) && !isInComment(code, idx)) {
       result += code.substring(lastIdx, idx) + newName + "(";
       lastIdx = idx + oldName.length + 1;

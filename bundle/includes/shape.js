@@ -25,19 +25,49 @@ function createShapeLayers(mainCompName, compFolder) {
     image: createImageFromContext,
   };
 
+  var batchItems = [];
+
+  function flushBatch() {
+    if (!batchItems.length) return;
+
+    var batchLayer = _createShapeBatchLayer(batchItems[0].index);
+    for (var j = batchItems.length - 1; j >= 0; j--) {
+      var item = batchItems[j];
+      var batchCreator = shapeCreators[item.shape.type];
+      if (batchCreator) {
+        batchCreator(item.index, item.shape.id, mainCompName, batchLayer);
+      }
+    }
+    batchItems = [];
+  }
+
   for (var i = 0; i < shapeQueue.length; i++) {
     var shape = shapeQueue[i];
     var id = shape.id;
     var creator = shapeCreators[shape.type];
     if (creator) {
+      if (
+        shape.type !== "text" &&
+        shape.type !== "image" &&
+        shape.type !== "background"
+      ) {
+        batchItems.push({
+          index: i,
+          shape: shape,
+        });
+        continue;
+      }
+
+      flushBatch();
       if (shape.type === "image") {
-        // image 需要 shapeData 和 compFolder（导入的 footage 直接放入合成文件夹）
         creator(i, id, mainCompName, shape, compFolder);
       } else {
         creator(i, id, mainCompName);
       }
     }
   }
+
+  flushBatch();
 }
 
 function _joinExpr(lines) {
@@ -74,6 +104,25 @@ function _createBaseShapeLayer(index) {
   return { layer: layer, shapeGroup: shapeGroup };
 }
 
+function _createShapeBatchLayer(index) {
+  var layer = engineComp.layers.addShape();
+  layer.name = "Shapes_" + index;
+  layer.property("Transform").property("Anchor Point").setValue([0, 0]);
+  layer.property("Transform").property("Position").setValue([0, 0]);
+  return layer;
+}
+
+function _createBaseShapeTarget(index, targetLayer) {
+  if (targetLayer) {
+    var group = targetLayer.property("Contents").addProperty("ADBE Vector Group");
+    try {
+      group.name = "Shape_" + index;
+    } catch (e) {}
+    return { layer: targetLayer, shapeGroup: group };
+  }
+  return _createBaseShapeLayer(index);
+}
+
 function _contents(group) {
   return group.property("Contents");
 }
@@ -82,9 +131,9 @@ function _addPathGroup(shapeGroup) {
   return _contents(shapeGroup).addProperty("ADBE Vector Shape - Group");
 }
 
-function _bindBasicTransform(transform, indexFind) {
-  transform.property("Position").expression = _getPositionExpr(indexFind);
-  transform.property("Rotation").expression = _getRotationExpr(indexFind);
+function _bindBasicTransform(transform, indexFind, shapeId) {
+  transform.property("Position").expression = _getPositionExpr(indexFind, shapeId);
+  transform.property("Rotation").expression = _getRotationExpr(indexFind, shapeId);
 }
 
 function _getFillColorExpr(indexFind) {
@@ -128,7 +177,7 @@ function _getStrokeWidthExpr(indexFind, defaultValue) {
   ]);
 }
 
-function _getPositionExpr(indexFind) {
+function _getPositionExpr(indexFind, shapeId) {
   return _joinExpr([
     indexFind,
     "var p = shape && shape.pos;",
@@ -136,7 +185,7 @@ function _getPositionExpr(indexFind) {
   ]);
 }
 
-function _getRotationExpr(indexFind) {
+function _getRotationExpr(indexFind, shapeId) {
   return _joinExpr([
     indexFind,
     "var r = shape && shape.rot;",
@@ -171,89 +220,99 @@ function _getArcPathExpr(indexFind, defaultMode) {
   var modeCode = defaultMode || 0;
   return _joinExpr([
     indexFind,
-    "if (!shape) createPath([[-9999,-9999]], [], [], false);",
-    "var pos = shape.pos;",
-    "var size = shape.size;",
-    "var angs = shape.angles;",
-    "var mode = shape.mode;",
-    "if (!pos || !size || !angs) createPath([[-9999,-9999]], [], [], false);",
-    "var cx = pos[0];",
-    "var cy = pos[1];",
-    "var w = size[0];",
-    "var h = size[1];",
-    "var rx = w * 0.5;",
-    "var ry = h * 0.5;",
-    "var start = angs[0];",
-    "var stop = angs[1];",
-    "if (!(start===start) || !(stop===stop)) createPath([[-9999,-9999]], [], [], false);",
-    "if (start === stop) createPath([[-9999,-9999]], [], [], false);",
-    "var twoPi = Math.PI * 2;",
-    "if (stop < start) {",
-    "  stop += twoPi * Math.ceil((start - stop) / twoPi);",
-    "}",
-    "var total = stop - start;",
-    "if (total <= 0) createPath([[-9999,-9999]], [], [], false);",
-    "var segs = Math.ceil(total / (Math.PI/2));",
-    "if (segs < 1) segs = 1;",
-    "if (segs > 4) segs = 4;",
-    "var step = total / segs;",
-    "var verts = [];",
-    "var ins = [];",
-    "var outs = [];",
-    "var i;",
-    "for (i = 0; i <= segs; i++) {",
-    "  var a = start + step * i;",
-    "  var cosA = Math.cos(a);",
-    "  var sinA = Math.sin(a);",
-    "  verts.push([cx + rx * cosA, cy + ry * sinA]);",
-    "  ins.push([0,0]);",
-    "  outs.push([0,0]);",
-    "}",
-    "for (i = 0; i < segs; i++) {",
-    "  var a0 = start + step * i;",
-    "  var a1 = start + step * (i+1);",
-    "  var delta = a1 - a0;",
-    "  var k = (4/3) * Math.tan(delta/4);",
-    "  var c0 = Math.cos(a0);",
-    "  var s0 = Math.sin(a0);",
-    "  var c1 = Math.cos(a1);",
-    "  var s1 = Math.sin(a1);",
-    "  outs[i] = [k * -rx * s0, k * ry * c0];",
-    "  ins[i+1] = [k * rx * s1, k * -ry * c1];",
-    "}",
-    "var auto = (mode && mode.length > 1) ? mode[1] : 0;",
-    "var mcode = (mode && mode.length > 0) ? mode[0] : " + modeCode + ";",
-    "if (auto === 1) {",
-    "  mcode = " + modeCode + ";",
-    "}",
-    "mcode = Math.floor(mcode + 0.5);",
-    "if (mcode < 0) mcode = 0;",
-    "if (mcode > 2) mcode = 2;",
-    "var closed = false;",
-    "if (mcode === 2) {",
-    "  // PIE: 在前面插入圆心顶点，形成扇形",
-    "  verts.unshift([cx, cy]);",
-    "  ins.unshift([0,0]);",
-    "  outs.unshift([0,0]);",
-    "  closed = true;",
-    "} else if (mcode === 1) {",
-    "  closed = true;",
+    "if (!shape) {",
+    "  createPath([[-9999,-9999]], [], [], false);",
     "} else {",
-    "  closed = false;",
+    "  var pos = shape.pos;",
+    "  var size = shape.size;",
+    "  var angs = shape.angles;",
+    "  var mode = shape.mode;",
+    "  if (!pos || !size || !angs) {",
+    "    createPath([[-9999,-9999]], [], [], false);",
+    "  } else {",
+    "    var cx = pos[0];",
+    "    var cy = pos[1];",
+    "    var w = size[0];",
+    "    var h = size[1];",
+    "    var rx = w * 0.5;",
+    "    var ry = h * 0.5;",
+    "    var start = angs[0];",
+    "    var stop = angs[1];",
+    "    if (!(start===start) || !(stop===stop) || start === stop) {",
+    "      createPath([[-9999,-9999]], [], [], false);",
+    "    } else {",
+    "      var twoPi = Math.PI * 2;",
+    "      if (stop < start) {",
+    "        stop += twoPi * Math.ceil((start - stop) / twoPi);",
+    "      }",
+    "      var total = stop - start;",
+    "      if (total <= 0) {",
+    "        createPath([[-9999,-9999]], [], [], false);",
+    "      } else {",
+    "        var segs = Math.ceil(total / (Math.PI/2));",
+    "        if (segs < 1) segs = 1;",
+    "        if (segs > 4) segs = 4;",
+    "        var step = total / segs;",
+    "        var verts = [];",
+    "        var ins = [];",
+    "        var outs = [];",
+    "        var i;",
+    "        for (i = 0; i <= segs; i++) {",
+    "          var a = start + step * i;",
+    "          var cosA = Math.cos(a);",
+    "          var sinA = Math.sin(a);",
+    "          verts.push([cx + rx * cosA, cy + ry * sinA]);",
+    "          ins.push([0,0]);",
+    "          outs.push([0,0]);",
+    "        }",
+    "        for (i = 0; i < segs; i++) {",
+    "          var a0 = start + step * i;",
+    "          var a1 = start + step * (i+1);",
+    "          var delta = a1 - a0;",
+    "          var k = (4/3) * Math.tan(delta/4);",
+    "          var c0 = Math.cos(a0);",
+    "          var s0 = Math.sin(a0);",
+    "          var c1 = Math.cos(a1);",
+    "          var s1 = Math.sin(a1);",
+    "          outs[i] = [k * -rx * s0, k * ry * c0];",
+    "          ins[i+1] = [k * rx * s1, k * -ry * c1];",
+    "        }",
+    "        var auto = (mode && mode.length > 1) ? mode[1] : 0;",
+    "        var mcode = (mode && mode.length > 0) ? mode[0] : " + modeCode + ";",
+    "        if (auto === 1) {",
+    "          mcode = " + modeCode + ";",
+    "        }",
+    "        mcode = Math.floor(mcode + 0.5);",
+    "        if (mcode < 0) mcode = 0;",
+    "        if (mcode > 2) mcode = 2;",
+    "        var closed = false;",
+    "        if (mcode === 2) {",
+    "          verts.unshift([cx, cy]);",
+    "          ins.unshift([0,0]);",
+    "          outs.unshift([0,0]);",
+    "          closed = true;",
+    "        } else if (mcode === 1) {",
+    "          closed = true;",
+    "        } else {",
+    "          closed = false;",
+    "        }",
+    "        createPath(verts, ins, outs, closed);",
+    "      }",
+    "    }",
+    "  }",
     "}",
-    "createPath(verts, ins, outs, closed);",
   ]);
 }
 
-function createEllipseFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createEllipseFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var ellipse = _contents(shapeGroup).addProperty(
     "ADBE Vector Shape - Ellipse",
   );
   var transform = shapeGroup.property("Transform");
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-  _bindBasicTransform(transform, indexFind);
+  _bindBasicTransform(transform, indexFind, shapeId);
   ellipse.property("Size").expression = _joinExpr([
     indexFind,
     "var s = shape && shape.size;",
@@ -279,8 +338,8 @@ function createEllipseFromContext(index, shapeId, mainCompName) {
  * 顶点数量可变，支持多个轮廓（洞形）。
  * 主轮廓从 points 构建，子轮廓从 contours 数组构建。
  */
-function createPolygonFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createPolygonFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
   var mainPathGroup = _addPathGroup(shapeGroup);
@@ -396,13 +455,13 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
   _addStrokeProperties(shapeGroup, indexFind, 1);
 }
 
-function createRectFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createRectFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var rect = _contents(shapeGroup).addProperty("ADBE Vector Shape - Rect");
   var transform = shapeGroup.property("Transform");
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-  _bindBasicTransform(transform, indexFind);
+  _bindBasicTransform(transform, indexFind, shapeId);
   rect.property("Size").expression = _joinExpr([
     indexFind,
     "var s = shape && shape.size;",
@@ -423,23 +482,29 @@ function createRectFromContext(index, shapeId, mainCompName) {
  *   strokeWeight
  * }
  */
-function createQuadFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createQuadFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
   path.property("Path").expression = _joinExpr([
     indexFind,
-    "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
-    "var p1 = shape.points[0];",
-    "var p2 = shape.points[1];",
-    "var p3 = shape.points[2];",
-    "var p4 = shape.points[3];",
-    "if (!p1 || !p2 || !p3 || !p4) createPath([[-9999,-9999]], [], [], false);",
-    "var verts = [p1, p2, p3, p4];",
-    "var ins = [[0,0],[0,0],[0,0],[0,0]];",
-    "var outs = [[0,0],[0,0],[0,0],[0,0]];",
-    "createPath(verts, ins, outs, true);",
+    "if (!shape || !shape.points || shape.points.length < 4) {",
+    "  createPath([[-9999,-9999]], [], [], false);",
+    "} else {",
+    "  var p1 = shape.points[0];",
+    "  var p2 = shape.points[1];",
+    "  var p3 = shape.points[2];",
+    "  var p4 = shape.points[3];",
+    "  if (!p1 || !p2 || !p3 || !p4) {",
+    "    createPath([[-9999,-9999]], [], [], false);",
+    "  } else {",
+    "    var verts = [p1, p2, p3, p4];",
+    "    var ins = [[0,0],[0,0],[0,0],[0,0]];",
+    "    var outs = [[0,0],[0,0],[0,0],[0,0]];",
+    "    createPath(verts, ins, outs, true);",
+    "  }",
+    "}",
   ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
@@ -456,22 +521,28 @@ function createQuadFromContext(index, shapeId, mainCompName) {
  *   strokeWeight
  * }
  */
-function createTriangleFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createTriangleFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
   path.property("Path").expression = _joinExpr([
     indexFind,
-    "if (!shape || !shape.points || shape.points.length < 3) createPath([[-9999,-9999]], [], [], false);",
-    "var p1 = shape.points[0];",
-    "var p2 = shape.points[1];",
-    "var p3 = shape.points[2];",
-    "if (!p1 || !p2 || !p3) createPath([[-9999,-9999]], [], [], false);",
-    "var verts = [p1, p2, p3];",
-    "var ins = [[0,0],[0,0],[0,0]];",
-    "var outs = [[0,0],[0,0],[0,0]];",
-    "createPath(verts, ins, outs, true);",
+    "if (!shape || !shape.points || shape.points.length < 3) {",
+    "  createPath([[-9999,-9999]], [], [], false);",
+    "} else {",
+    "  var p1 = shape.points[0];",
+    "  var p2 = shape.points[1];",
+    "  var p3 = shape.points[2];",
+    "  if (!p1 || !p2 || !p3) {",
+    "    createPath([[-9999,-9999]], [], [], false);",
+    "  } else {",
+    "    var verts = [p1, p2, p3];",
+    "    var ins = [[0,0],[0,0],[0,0]];",
+    "    var outs = [[0,0],[0,0],[0,0]];",
+    "    createPath(verts, ins, outs, true);",
+    "  }",
+    "}",
   ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
@@ -487,16 +558,20 @@ function createTriangleFromContext(index, shapeId, mainCompName) {
  *   strokeWeight
  * }
  */
-function createLineFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createLineFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
   path.property("Path").expression = _joinExpr([
     indexFind,
-    "if (!shape || !shape.points || shape.points.length < 2) createPath([[-9999,-9999],[-9999,-9999]], [], [], false);",
-    "var p1 = shape.points[0], p2 = shape.points[1];",
-    "createPath([p1||[-9999,-9999], p2||[-9999,-9999]], [], [], false)",
+    "if (!shape || !shape.points || shape.points.length < 2) {",
+    "  createPath([[-9999,-9999],[-9999,-9999]], [], [], false);",
+    "} else {",
+    "  var p1 = shape.points[0];",
+    "  var p2 = shape.points[1];",
+    "  createPath([p1||[-9999,-9999], p2||[-9999,-9999]], [], [], false);",
+    "}",
   ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
@@ -512,15 +587,15 @@ function createLineFromContext(index, shapeId, mainCompName) {
  * }
  * 注意: point 使用 strokeWeight 控制点的大小，颜色使用 stroke 作为可见颜色（导出到 fillColor）
  */
-function createPointFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createPointFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var ellipse = _contents(shapeGroup).addProperty(
     "ADBE Vector Shape - Ellipse",
   );
   var transform = shapeGroup.property("Transform");
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-  transform.property("Position").expression = _getPositionExpr(indexFind);
+  transform.property("Position").expression = _getPositionExpr(indexFind, shapeId);
   ellipse.property("Size").expression = _joinExpr([
     indexFind,
     "if (!shape) [2,2];",
@@ -551,21 +626,24 @@ function createPointFromContext(index, shapeId, mainCompName) {
  *   strokeWeight
  * }
  */
-function createBezierFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createBezierFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
   path.property("Path").expression = _joinExpr([
     indexFind,
-    "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
-    "var p1 = shape.points[0] || [-9999,-9999];",
-    "var p2 = shape.points[1] || [-9999,-9999];",
-    "var p3 = shape.points[2] || [-9999,-9999];",
-    "var p4 = shape.points[3] || [-9999,-9999];",
-    "var out1 = [p2[0]-p1[0], p2[1]-p1[1]];",
-    "var in4 = [p3[0]-p4[0], p3[1]-p4[1]];",
-    "createPath([p1, p4], [[0,0], in4], [out1, [0,0]], false)",
+    "if (!shape || !shape.points || shape.points.length < 4) {",
+    "  createPath([[-9999,-9999]], [], [], false);",
+    "} else {",
+    "  var p1 = shape.points[0] || [-9999,-9999];",
+    "  var p2 = shape.points[1] || [-9999,-9999];",
+    "  var p3 = shape.points[2] || [-9999,-9999];",
+    "  var p4 = shape.points[3] || [-9999,-9999];",
+    "  var out1 = [p2[0]-p1[0], p2[1]-p1[1]];",
+    "  var in4 = [p3[0]-p4[0], p3[1]-p4[1]];",
+    "  createPath([p1, p4], [[0,0], in4], [out1, [0,0]], false);",
+    "}",
   ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
@@ -581,8 +659,8 @@ function createBezierFromContext(index, shapeId, mainCompName) {
  *   strokeWeight
  * }
  */
-function createCurveFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createCurveFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
@@ -597,48 +675,37 @@ function createCurveFromContext(index, shapeId, mainCompName) {
   // 其中 P0=p1, P1=p2, P2=p3, P3=p4, t ∈ [0, 1]
   path.property("Path").expression = _joinExpr([
     indexFind,
-    "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
-    "var p0 = shape.points[0] || [-9999,-9999];", // P0: 第一个控制点 (x1, y1)
-    "var p1 = shape.points[1] || [-9999,-9999];", // P1: 第一个锚点 (x2, y2) - 起点
-    "var p2 = shape.points[2] || [-9999,-9999];", // P2: 第二个锚点 (x3, y3) - 终点
-    "var p3 = shape.points[3] || [-9999,-9999];", // P3: 最后一个控制点 (x4, y4)
-    "",
-    "// 带张力的 Cardinal Spline 样条曲线公式（p5.js 兼容）",
-    "// 张力参数 s，范围 [-2, 3]，默认 0.5（产生平滑曲线）",
-    "var s = shape.tightness !== undefined ? shape.tightness : 0.5;",
-    "",
-    "// Cardinal Spline 公式：P(t) = (2*t³-3*t²+1)*P1 + (t³-2*t²+t)*s*(P2-P0) + (-2*t³+3*t²)*P2 + (t³-t²)*s*(P3-P1)",
-    "",
-    "// 采样点数（足够密集以保证平滑）",
-    "var numSamples = 50;",
-    "var vertices = [];",
-    "",
-    "// 采样曲线上的点",
-    "for (var i = 0; i <= numSamples; i++) {",
-    "  var t = i / numSamples;",
-    "  var t2 = t * t;",
-    "  var t3 = t2 * t;",
-    "  // Cardinal Spline 基函数",
-    "  var h1 = 2*t3 - 3*t2 + 1;",
-    "  var h2 = t3 - 2*t2 + t;",
-    "  var h3 = -2*t3 + 3*t2;",
-    "  var h4 = t3 - t2;",
-    "  // 计算曲线点",
-    "  var x = h1*p1[0] + h2*s*(p2[0]-p0[0]) + h3*p2[0] + h4*s*(p3[0]-p1[0]);",
-    "  var y = h1*p1[1] + h2*s*(p2[1]-p0[1]) + h3*p2[1] + h4*s*(p3[1]-p1[1]);",
-    "  vertices.push([x, y]);",
+    "if (!shape || !shape.points || shape.points.length < 4) {",
+    "  createPath([[-9999,-9999]], [], [], false);",
+    "} else {",
+    "  var p0 = shape.points[0] || [-9999,-9999];",
+    "  var p1 = shape.points[1] || [-9999,-9999];",
+    "  var p2 = shape.points[2] || [-9999,-9999];",
+    "  var p3 = shape.points[3] || [-9999,-9999];",
+    "  var s = shape.tightness !== undefined ? shape.tightness : 0.5;",
+    "  var numSamples = 50;",
+    "  var vertices = [];",
+    "  for (var i = 0; i <= numSamples; i++) {",
+    "    var t = i / numSamples;",
+    "    var t2 = t * t;",
+    "    var t3 = t2 * t;",
+    "    var h1 = 2*t3 - 3*t2 + 1;",
+    "    var h2 = t3 - 2*t2 + t;",
+    "    var h3 = -2*t3 + 3*t2;",
+    "    var h4 = t3 - t2;",
+    "    var x = h1*p1[0] + h2*s*(p2[0]-p0[0]) + h3*p2[0] + h4*s*(p3[0]-p1[0]);",
+    "    var y = h1*p1[1] + h2*s*(p2[1]-p0[1]) + h3*p2[1] + h4*s*(p3[1]-p1[1]);",
+    "    vertices.push([x, y]);",
+    "  }",
+    "  var numVerts = vertices.length;",
+    "  var inTangents = [];",
+    "  var outTangents = [];",
+    "  for (var j = 0; j < numVerts; j++) {",
+    "    inTangents.push([0, 0]);",
+    "    outTangents.push([0, 0]);",
+    "  }",
+    "  createPath(vertices, inTangents, outTangents, false);",
     "}",
-    "",
-    "// 创建路径，使用直线段连接采样点（切线为0）",
-    "var numVerts = vertices.length;",
-    "var inTangents = [];",
-    "var outTangents = [];",
-    "for (var i = 0; i < numVerts; i++) {",
-    "  inTangents.push([0, 0]);",
-    "  outTangents.push([0, 0]);",
-    "}",
-    "",
-    "createPath(vertices, inTangents, outTangents, false)",
   ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
@@ -1200,8 +1267,8 @@ function getShapeLib(deps) {
   return funcs.join("\n");
 }
 
-function createArcFromContext(index, shapeId, mainCompName) {
-  var base = _createBaseShapeLayer(index);
+function createArcFromContext(index, shapeId, mainCompName, targetLayer) {
+  var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
 

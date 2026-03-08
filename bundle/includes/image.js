@@ -324,13 +324,13 @@ function createImageFromContext(
   imgLayer.property("Transform").property("Position").expression = [
     indexFind,
     "var p = shape && shape.pos;",
-    "p ? [p[0], p[1]] : [thisComp.width/2, thisComp.height/2]",
+    "p ? [p[0], p[1]] : [thisComp.width/2, thisComp.height/2];",
   ].join("\n");
 
   imgLayer.property("Transform").property("Scale").expression = [
     indexFind,
     "var fw = " + fw + ", fh = " + fh + ";",
-    "if (!shape || fw === 0 || fh === 0) { [100, 100]; } else {",
+    "if (!shape || fw === 0 || fh === 0) [100, 100]; else {",
     "  var drawW = shape.drawW !== undefined ? shape.drawW : (shape.natW || fw);",
     "  var drawH = shape.drawH !== undefined ? shape.drawH : (shape.natH || fh);",
     "  var natW = shape.natW || fw, natH = shape.natH || fh;",
@@ -343,7 +343,7 @@ function createImageFromContext(
   imgLayer.property("Transform").property("Rotation").expression = [
     indexFind,
     "var r = shape && shape.rot;",
-    "r !== undefined ? r : 0",
+    "r !== undefined ? r : 0;",
   ].join("\n");
 
   imgLayer.property("Transform").property("Opacity").expression = [
@@ -352,7 +352,7 @@ function createImageFromContext(
     "var o = shape && shape.fillOpacity;",
     "var tintAlpha = t && t[3] !== undefined ? t[3] : 1;",
     "var fillAlpha = o !== undefined ? o / 100 : 1;",
-    "tintAlpha * fillAlpha * 100",
+    "tintAlpha * fillAlpha * 100;",
   ].join("\n");
 
   var tintEffect = imgLayer.Effects.addProperty("ADBE Tint");

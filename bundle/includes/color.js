@@ -696,11 +696,16 @@ function getBackgroundLib() {
  * 纯色图层，使用形状矩形 + 填色效果（效果-生成-填色）
  * 数据格式（语义化 JSON）: { id, type:"background", color:[r,g,b,a] }
  */
-function createBackgroundFromContext(index, renderIndex, mainCompName) {
-  var layer = engineComp.layers.addShape();
-  layer.name = "Background_" + index;
+function createBackgroundFromContext(index, renderIndex, mainCompName, targetLayer) {
+  var layer = targetLayer || engineComp.layers.addShape();
+  if (!targetLayer) {
+    layer.name = "Background_" + index;
+  }
 
   var shapeGroup = layer.property("Contents").addProperty("ADBE Vector Group");
+  try {
+    shapeGroup.name = "Background_" + index;
+  } catch (e0) {}
   var rect = shapeGroup
     .property("Contents")
     .addProperty("ADBE Vector Shape - Rect");
@@ -734,8 +739,15 @@ function createBackgroundFromContext(index, renderIndex, mainCompName) {
   ].join("\n");
 
   // 矩形覆盖整个合成：锚点左上角，位置 (0,0)，尺寸为合成宽高
+  if (!targetLayer) {
+    layer.property("Transform").property("Anchor Point").setValue([0, 0]);
+    layer.property("Transform").property("Position").setValue([0, 0]);
+  }
   transform.property("Anchor Point").setValue([0, 0]);
-  transform.property("Position").setValue([0, 0]);
+  transform.property("Position").setValue([
+    engineComp.width / 2,
+    engineComp.height / 2,
+  ]);
   rect.property("Size").expression = [
     indexFind,
     "!bg ? [0, 0] : [thisComp.width, thisComp.height]",

@@ -651,7 +651,7 @@ function createTextLayerFromContext(index, shapeId, mainCompName) {
     "textStyle;",
   ].join("\n");
 
-  transform.property("Position").expression = _getTextPositionExpr(indexFind);
+  transform.property("Position").expression = _getPositionExpr(indexFind, shapeId);
   transform.property("Anchor Point").expression =
     _getAnchorPointExpr(indexFind);
 
