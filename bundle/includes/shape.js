@@ -1,18 +1,14 @@
 // ----------------------------------------
-// Shape - 动态索引分配模式
+// Shape helpers
 // ----------------------------------------
 
 // 从 registry 获取形状函数信息
 // #include "registry.js"
 
-/**
- * 创建形状图层
- * 根据 shapeQueue 中的数据创建对应的 AE 图层
- */
+// 根据 shapeQueue 创建 AE 图层。
 function createShapeLayers(mainCompName, compFolder) {
   if (shapeQueue.length === 0) return;
 
-  // 形状类型到创建函数的映射表
   var shapeCreators = {
     text: createTextFromContext,
     ellipse: createEllipseFromContext,
@@ -31,19 +27,12 @@ function createShapeLayers(mainCompName, compFolder) {
 
   for (var i = 0; i < shapeQueue.length; i++) {
     var shape = shapeQueue[i];
-    // 渲染图层使用稳定的 id（类型前缀 + 调用次数），与运行时生成规则对齐
     var id = shape.id;
     var creator = shapeCreators[shape.type];
     if (creator) {
-      // 对于 text，额外把前端已经构建好的 shape 对象（含 wh 信息）传给后端，
-      // 后端只基于 shape.wh 做“伪 box”布局（不再创建 AE Box Text）。
-      // text 和 image 需要传递完整的 shape 对象
       if (shape.type === "image") {
         // image 需要 shapeData 和 compFolder（导入的 footage 直接放入合成文件夹）
         creator(i, id, mainCompName, shape, compFolder);
-      } else if (shape.type === "text") {
-        // text 需要完整的 shape 对象（含 wh 信息）
-        creator(i, id, mainCompName, shape);
       } else {
         creator(i, id, mainCompName);
       }
@@ -51,41 +40,31 @@ function createShapeLayers(mainCompName, compFolder) {
   }
 }
 
-/**
- * 生成查找 shape.id 的表达式代码片段
- * @param {number} shapeId - 形状唯一 id（类型前缀 + 调用次数）
- * @param {string} mainCompName - 主合成名称（可选，如果提供则从主合成读取）
- */
+function _joinExpr(lines) {
+  return lines.join("\n");
+}
+
 function _getIdFindExpr(shapeId, mainCompName) {
   var engineLayerExpr;
   if (mainCompName) {
-    // 从主合成读取，通过合成名称直接调用
-    // 转义合成名称中的引号（如果存在）
     var escapedName = mainCompName.replace(/"/g, '\\"');
     engineLayerExpr =
       'comp("' + escapedName + '").layer("__engine__").text.sourceText';
   } else {
-    // 从当前合成读取
     engineLayerExpr = 'thisComp.layer("__engine__").text.sourceText';
   }
 
-  return [
+  return _joinExpr([
     "var raw = " + engineLayerExpr + ";",
-    // TextDocument -> string：优先使用 .text（更直接），回退到 toString()
     "var json = (raw && raw.text !== undefined) ? raw.text : (raw && raw.toString ? raw.toString() : raw);",
     "var data = JSON.parse(json);",
     "var shapes = data.shapes || [];",
     "var idx = data.shapeIndex;",
     "var targetId = " + shapeId + ";",
     "var shape = (idx && idx[targetId] !== undefined) ? shapes[idx[targetId]] : null;",
-  ].join("\n");
+  ]);
 }
 
-/**
- * 创建基础形状图层和组
- * @param {number} index - 形状索引
- * @returns {Object} 包含 layer 和 shapeGroup 的对象
- */
 function _createBaseShapeLayer(index) {
   var layer = engineComp.layers.addShape();
   layer.name = "Shape_" + index;
@@ -95,125 +74,87 @@ function _createBaseShapeLayer(index) {
   return { layer: layer, shapeGroup: shapeGroup };
 }
 
-/**
- * 生成 Fill 颜色表达式
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @returns {string} Fill 颜色表达式
- */
+function _contents(group) {
+  return group.property("Contents");
+}
+
+function _addPathGroup(shapeGroup) {
+  return _contents(shapeGroup).addProperty("ADBE Vector Shape - Group");
+}
+
+function _bindBasicTransform(transform, indexFind) {
+  transform.property("Position").expression = _getPositionExpr(indexFind);
+  transform.property("Rotation").expression = _getRotationExpr(indexFind);
+}
+
 function _getFillColorExpr(indexFind) {
-  return [
+  return _joinExpr([
     indexFind,
     "var fc = shape && shape.fillColor;",
     "!fc ? [0,0,0,0] : [fc[0], fc[1], fc[2], 1]",
-  ].join("\n");
+  ]);
 }
 
-/**
- * 生成 Fill 透明度表达式
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @returns {string} Fill 透明度表达式
- */
 function _getFillOpacityExpr(indexFind) {
-  return [
+  return _joinExpr([
     indexFind,
     "var o = shape && shape.fillOpacity;",
     "o === undefined ? 100 : o",
-  ].join("\n");
+  ]);
 }
 
-/**
- * 生成 Stroke 颜色表达式
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @returns {string} Stroke 颜色表达式
- */
 function _getStrokeColorExpr(indexFind) {
-  return [
+  return _joinExpr([
     indexFind,
     "var sc = shape && shape.strokeColor;",
     "!sc ? [0,0,0,0] : [sc[0], sc[1], sc[2], 1]",
-  ].join("\n");
+  ]);
 }
 
-/**
- * 生成 Stroke 透明度表达式
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @returns {string} Stroke 透明度表达式
- */
 function _getStrokeOpacityExpr(indexFind) {
-  return [
+  return _joinExpr([
     indexFind,
     "var o = shape && shape.strokeOpacity;",
     "o === undefined ? 100 : o",
-  ].join("\n");
+  ]);
 }
 
-/**
- * 生成 Stroke 宽度表达式
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @param {number} defaultValue - 默认宽度值
- * @returns {string} Stroke 宽度表达式
- */
 function _getStrokeWidthExpr(indexFind, defaultValue) {
   defaultValue = defaultValue !== undefined ? defaultValue : 1;
-  return [
+  return _joinExpr([
     indexFind,
     "var w = shape && shape.strokeWeight;",
     "w === undefined ? " + defaultValue + " : w",
-  ].join("\n");
+  ]);
 }
 
-/**
- * 生成 Position 表达式
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @returns {string} Position 表达式
- */
 function _getPositionExpr(indexFind) {
-  return [
+  return _joinExpr([
     indexFind,
     "var p = shape && shape.pos;",
     "!p ? [-9999, -9999] : [p[0], p[1]]",
-  ].join("\n");
+  ]);
 }
 
-/**
- * 生成 Rotation 表达式
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @returns {string} Rotation 表达式
- */
 function _getRotationExpr(indexFind) {
-  return [
+  return _joinExpr([
     indexFind,
     "var r = shape && shape.rot;",
     "r === undefined ? 0 : r",
-  ].join("\n");
+  ]);
 }
 
-/**
- * 为形状组添加 Fill 属性
- * @param {Object} shapeGroup - 形状组
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @returns {Object} Fill 属性对象
- */
 function _addFillProperties(shapeGroup, indexFind) {
-  var fill = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Graphic - Fill");
+  var fill = _contents(shapeGroup).addProperty("ADBE Vector Graphic - Fill");
   fill.property("Color").expression = _getFillColorExpr(indexFind);
   fill.property("Opacity").expression = _getFillOpacityExpr(indexFind);
   return fill;
 }
 
-/**
- * 为形状组添加 Stroke 属性
- * @param {Object} shapeGroup - 形状组
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @param {number} defaultWidth - 默认描边宽度
- * @returns {Object} Stroke 属性对象
- */
 function _addStrokeProperties(shapeGroup, indexFind, defaultWidth) {
-  var stroke = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Graphic - Stroke");
+  var stroke = _contents(shapeGroup).addProperty(
+    "ADBE Vector Graphic - Stroke",
+  );
   stroke.property("Color").expression = _getStrokeColorExpr(indexFind);
   stroke.property("Opacity").expression = _getStrokeOpacityExpr(indexFind);
   stroke.property("Stroke Width").expression = _getStrokeWidthExpr(
@@ -224,14 +165,11 @@ function _addStrokeProperties(shapeGroup, indexFind, defaultWidth) {
 }
 
 /**
- * 生成 arc 路径表达式
- * @param {string} indexFind - index 查找表达式（需要在表达式内提供 shape 变量）
- * @param {number} defaultMode - 默认模式（0=OPEN, 1=CHORD, 2=PIE）
- * @returns {string} arc 路径表达式
+ * 生成 arc 路径表达式。
  */
 function _getArcPathExpr(indexFind, defaultMode) {
   var modeCode = defaultMode || 0;
-  return [
+  return _joinExpr([
     indexFind,
     "if (!shape) createPath([[-9999,-9999]], [], [], false);",
     "var pos = shape.pos;",
@@ -247,13 +185,10 @@ function _getArcPathExpr(indexFind, defaultMode) {
     "var ry = h * 0.5;",
     "var start = angs[0];",
     "var stop = angs[1];",
-    "// 规范化角度（确保非 NaN）",
     "if (!(start===start) || !(stop===stop)) createPath([[-9999,-9999]], [], [], false);",
     "if (start === stop) createPath([[-9999,-9999]], [], [], false);",
-    "// 将 stop 规范化到 >= start 的范围，接近 p5 的行为",
     "var twoPi = Math.PI * 2;",
     "if (stop < start) {",
-    "  // 直接计算需要加的圈数，避免 while 循环",
     "  stop += twoPi * Math.ceil((start - stop) / twoPi);",
     "}",
     "var total = stop - start;",
@@ -274,7 +209,6 @@ function _getArcPathExpr(indexFind, defaultMode) {
     "  ins.push([0,0]);",
     "  outs.push([0,0]);",
     "}",
-    "// 为每段计算贝塞尔切线（Kappa 公式）",
     "for (i = 0; i < segs; i++) {",
     "  var a0 = start + step * i;",
     "  var a1 = start + step * (i+1);",
@@ -284,16 +218,12 @@ function _getArcPathExpr(indexFind, defaultMode) {
     "  var s0 = Math.sin(a0);",
     "  var c1 = Math.cos(a1);",
     "  var s1 = Math.sin(a1);",
-    "  // 起点的 out 切线",
     "  outs[i] = [k * -rx * s0, k * ry * c0];",
-    "  // 终点的 in 切线",
     "  ins[i+1] = [k * rx * s1, k * -ry * c1];",
     "}",
-    "// 处理模式：0=OPEN, 1=CHORD, 2=PIE（与 p5 arc 对齐）",
     "var auto = (mode && mode.length > 1) ? mode[1] : 0;",
     "var mcode = (mode && mode.length > 0) ? mode[0] : " + modeCode + ";",
     "if (auto === 1) {",
-    "  // 默认模式：根据 defaultMode 设置",
     "  mcode = " + modeCode + ";",
     "}",
     "mcode = Math.floor(mcode + 0.5);",
@@ -307,50 +237,28 @@ function _getArcPathExpr(indexFind, defaultMode) {
     "  outs.unshift([0,0]);",
     "  closed = true;",
     "} else if (mcode === 1) {",
-    "  // CHORD: 闭合，自动用直线连接弧线两端",
     "  closed = true;",
     "} else {",
     "  closed = false;",
     "}",
     "createPath(verts, ins, outs, closed);",
-  ].join("\n");
+  ]);
 }
 
-/**
- * ellipse 数据结构（语义化 JSON）:
- * {
- *   id,
- *   type: "ellipse",
- *   pos, size, rot,
- *   fillColor, strokeColor,
- *   fillOpacity, strokeOpacity,
- *   strokeWeight
- * }
- */
 function createEllipseFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-  var ellipse = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Ellipse");
+  var ellipse = _contents(shapeGroup).addProperty(
+    "ADBE Vector Shape - Ellipse",
+  );
   var transform = shapeGroup.property("Transform");
-
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-
-  // Position (pos at -9)
-  transform.property("Position").expression = _getPositionExpr(indexFind);
-
-  // Size (size at -8)
-  ellipse.property("Size").expression = [
+  _bindBasicTransform(transform, indexFind);
+  ellipse.property("Size").expression = _joinExpr([
     indexFind,
     "var s = shape && shape.size;",
     "!s ? [0, 0] : [s[0], s[1]]",
-  ].join("\n");
-
-  // Rotation (rot at -7)
-  transform.property("Rotation").expression = _getRotationExpr(indexFind);
-
-  // Fill and Stroke
+  ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
 }
@@ -374,18 +282,13 @@ function createEllipseFromContext(index, shapeId, mainCompName) {
 function createPolygonFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-
-  // 主路径 Group：包含主路径和子轮廓路径（复合路径）
-  var mainPathGroup = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Group");
+  var mainPathGroup = _addPathGroup(shapeGroup);
 
   // 主路径：从 contours[0] 构建（主轮廓），如果没有 contours 则使用 points（向后兼容）
   // 注意：在 After Effects 中，要创建带洞的路径，需要在同一个 Vector Group 内
   // 主路径和子轮廓路径都需要在同一个 Group 中，且子轮廓需要反向
-  mainPathGroup.property("Path").expression = [
+  mainPathGroup.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape) {",
     "  createPath([[-9999,-9999]], [], [], false);",
@@ -414,7 +317,7 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
     "    createPath(verts, ins, outs, closed);",
     "  }",
     "}",
-  ].join("\n");
+  ]);
 
   // 子轮廓路径：只在代码中实际调用了 beginContour() 时才创建
   // 检查依赖信息，判断是否使用了 beginContour
@@ -430,9 +333,7 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
     // 在 After Effects 中，要创建复合路径（带洞），子轮廓路径必须在同一个 Vector Group 内
     // 并且需要设置为反向（通过 Reverse Path 属性实现）
     // 注意：ADBE Vector Shape - Group 没有 Contents 属性，需要在 shapeGroup 下创建
-    var contourPathGroup = shapeGroup
-      .property("Contents")
-      .addProperty("ADBE Vector Shape - Group");
+    var contourPathGroup = _addPathGroup(shapeGroup);
 
     // 设置子轮廓路径为反向（Reverse Path）
     // After Effects 中，Shape Group 的 "Reverse Path" 属性用于创建洞
@@ -453,7 +354,7 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
 
     // 子轮廓路径：从 contours[1] 开始构建（第一个子轮廓）
     // 注意：不在表达式中反转顶点顺序，反转由脚本中的 Reverse Path 属性处理
-    contourPathGroup.property("Path").expression = [
+    contourPathGroup.property("Path").expression = _joinExpr([
       indexFind,
       "// 使用第一个子轮廓（contours[1]）",
       "var contour = shape.contours[1];",
@@ -474,7 +375,7 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
       "  // 子轮廓（洞）应该闭合",
       "  createPath(verts, ins, outs, true);",
       "}",
-    ].join("\n");
+    ]);
 
     // 在创建 Path 属性后，再次尝试设置 Reverse Path 属性
     // 因为 Reverse Path 属性可能在 Path 属性创建后才可用
@@ -491,46 +392,22 @@ function createPolygonFromContext(index, shapeId, mainCompName) {
     }
   }
 
-  // Fill and Stroke
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
 }
 
-/**
- * rect 数据结构（语义化 JSON）:
- * {
- *   id,
- *   type: "rect",
- *   pos, size, rot,
- *   fillColor, strokeColor,
- *   fillOpacity, strokeOpacity,
- *   strokeWeight
- * }
- */
 function createRectFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-  var rect = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Rect");
+  var rect = _contents(shapeGroup).addProperty("ADBE Vector Shape - Rect");
   var transform = shapeGroup.property("Transform");
-
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-
-  // Position (pos at -9)
-  transform.property("Position").expression = _getPositionExpr(indexFind);
-
-  // Size (size at -8)
-  rect.property("Size").expression = [
+  _bindBasicTransform(transform, indexFind);
+  rect.property("Size").expression = _joinExpr([
     indexFind,
     "var s = shape && shape.size;",
     "!s ? [0, 0] : [s[0], s[1]]",
-  ].join("\n");
-
-  // Rotation (rot at -7)
-  transform.property("Rotation").expression = _getRotationExpr(indexFind);
-
-  // Fill and Stroke
+  ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
 }
@@ -549,15 +426,9 @@ function createRectFromContext(index, shapeId, mainCompName) {
 function createQuadFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-
-  var path = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Group");
-
+  var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-
-  // Path (p1~p4 at -10..-7)
-  path.property("Path").expression = [
+  path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
     "var p1 = shape.points[0];",
@@ -569,9 +440,7 @@ function createQuadFromContext(index, shapeId, mainCompName) {
     "var ins = [[0,0],[0,0],[0,0],[0,0]];",
     "var outs = [[0,0],[0,0],[0,0],[0,0]];",
     "createPath(verts, ins, outs, true);",
-  ].join("\n");
-
-  // Fill and Stroke
+  ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
 }
@@ -590,15 +459,9 @@ function createQuadFromContext(index, shapeId, mainCompName) {
 function createTriangleFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-
-  var path = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Group");
-
+  var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-
-  // Path (p1~p3 at -9..-7)
-  path.property("Path").expression = [
+  path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 3) createPath([[-9999,-9999]], [], [], false);",
     "var p1 = shape.points[0];",
@@ -609,9 +472,7 @@ function createTriangleFromContext(index, shapeId, mainCompName) {
     "var ins = [[0,0],[0,0],[0,0]];",
     "var outs = [[0,0],[0,0],[0,0]];",
     "createPath(verts, ins, outs, true);",
-  ].join("\n");
-
-  // Fill and Stroke
+  ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
 }
@@ -629,21 +490,14 @@ function createTriangleFromContext(index, shapeId, mainCompName) {
 function createLineFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-  var path = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Group");
-
+  var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-
-  // Path (p1 at -8, p2 at -7)
-  path.property("Path").expression = [
+  path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 2) createPath([[-9999,-9999],[-9999,-9999]], [], [], false);",
     "var p1 = shape.points[0], p2 = shape.points[1];",
     "createPath([p1||[-9999,-9999], p2||[-9999,-9999]], [], [], false)",
-  ].join("\n");
-
-  // Stroke only (line has no fill)
+  ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
 
@@ -661,39 +515,30 @@ function createLineFromContext(index, shapeId, mainCompName) {
 function createPointFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-  var ellipse = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Ellipse");
+  var ellipse = _contents(shapeGroup).addProperty(
+    "ADBE Vector Shape - Ellipse",
+  );
   var transform = shapeGroup.property("Transform");
-
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-
-  // Position (pos at -7)
   transform.property("Position").expression = _getPositionExpr(indexFind);
-
-  // Size (based on strokeWeight at -1, 与 p5 对齐：strokeWeight 直接作为直径)
-  ellipse.property("Size").expression = [
+  ellipse.property("Size").expression = _joinExpr([
     indexFind,
     "if (!shape) [2,2];",
     "var d = shape.size;",
     "d ? [d[0], d[1]] : [2,2]",
-  ].join("\n");
-
-  // Fill (point uses stroke color as fill, but stored in fillColor)
-  var fill = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Graphic - Fill");
-  fill.property("Color").expression = [
+  ]);
+  var fill = _contents(shapeGroup).addProperty("ADBE Vector Graphic - Fill");
+  fill.property("Color").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.fillColor) [0,0,0,1];",
     "var fc = shape.fillColor;",
     "[fc[0], fc[1], fc[2], 1]",
-  ].join("\n");
-  fill.property("Opacity").expression = [
+  ]);
+  fill.property("Opacity").expression = _joinExpr([
     indexFind,
     "if (!shape) 100;",
     "shape.strokeOpacity !== undefined ? shape.strokeOpacity : 100",
-  ].join("\n");
+  ]);
 }
 
 /**
@@ -709,31 +554,19 @@ function createPointFromContext(index, shapeId, mainCompName) {
 function createBezierFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-  var path = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Group");
-
+  var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
-
-  // Path (p1 at -10, p2 at -9, p3 at -8, p4 at -7)
-  // 贝塞尔曲线：起点 p1，终点 p4，控制点 p2 和 p3
-  // After Effects 使用顶点和切线：起点 p1，终点 p4
-  // 起点出切线：p2 - p1，终点入切线：p3 - p4
-  path.property("Path").expression = [
+  path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
     "var p1 = shape.points[0] || [-9999,-9999];",
     "var p2 = shape.points[1] || [-9999,-9999];",
     "var p3 = shape.points[2] || [-9999,-9999];",
     "var p4 = shape.points[3] || [-9999,-9999];",
-    "// 贝塞尔曲线：起点 p1，终点 p4，控制点 p2 和 p3",
-    "// After Effects 切线是相对于顶点的向量",
     "var out1 = [p2[0]-p1[0], p2[1]-p1[1]];",
     "var in4 = [p3[0]-p4[0], p3[1]-p4[1]];",
     "createPath([p1, p4], [[0,0], in4], [out1, [0,0]], false)",
-  ].join("\n");
-
-  // Stroke only (bezier has no fill)
+  ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
 
@@ -751,10 +584,7 @@ function createBezierFromContext(index, shapeId, mainCompName) {
 function createCurveFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
-  var path = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Group");
-
+  var path = _addPathGroup(shapeGroup);
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
   // Path (p1 at -10, p2 at -9, p3 at -8, p4 at -7)
@@ -765,7 +595,7 @@ function createCurveFromContext(index, shapeId, mainCompName) {
   // - p4 (x4, y4): 最后一个控制点（不绘制）
   // 使用标准 Catmull-Rom 样条曲线公式：P(t) = 0.5 * [2*P1 + (-P0+P2)*t + (2*P0-5*P1+4*P2-P3)*t^2 + (-P0+3*P1-3*P2+P3)*t^3]
   // 其中 P0=p1, P1=p2, P2=p3, P3=p4, t ∈ [0, 1]
-  path.property("Path").expression = [
+  path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 4) createPath([[-9999,-9999]], [], [], false);",
     "var p0 = shape.points[0] || [-9999,-9999];", // P0: 第一个控制点 (x1, y1)
@@ -809,9 +639,7 @@ function createCurveFromContext(index, shapeId, mainCompName) {
     "}",
     "",
     "createPath(vertices, inTangents, outTangents, false)",
-  ].join("\n");
-
-  // Stroke only (curve has no fill)
+  ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
 
@@ -845,6 +673,25 @@ function getShapeLib(deps) {
 
   // 渲染标记
   funcs.push("var _render = true;");
+  funcs.push("function _nextShapeId(typeName, count) {");
+  funcs.push("  return _shapeTypeCode[typeName] * 10000 + count;");
+  funcs.push("}");
+  funcs.push("function _shapeStyle() {");
+  funcs.push("  var c2 = _encodeColorState();");
+  funcs.push("  var hasFill = !(c2[0][0] < 0);");
+  funcs.push("  var hasStroke = !(c2[2][0] < 0);");
+  funcs.push("  return {");
+  funcs.push(
+    "    fillColor: hasFill ? [c2[0][0], c2[0][1], c2[1][0], c2[1][1]] : null,",
+  );
+  funcs.push(
+    "    strokeColor: hasStroke ? [c2[2][0], c2[2][1], c2[3][0], c2[3][1]] : null,",
+  );
+  funcs.push("    fillOpacity: hasFill ? c2[4][0] : 0,");
+  funcs.push("    strokeOpacity: hasStroke ? c2[4][1] : 0,");
+  funcs.push("    strokeWeight: c2[5][0]");
+  funcs.push("  };");
+  funcs.push("}");
 
   // 形状类型前缀映射（用于生成 id = typeCode * 10000 + 调用次数）
   // 从 registry 中读取各基础图形类型的前缀编码，保证与前端/宿主逻辑一致
@@ -911,38 +758,30 @@ function getShapeLib(deps) {
 
   if (deps.ellipse || deps.circle) {
     funcs.push(
-      [
+      _joinExpr([
         "function _ellipse(a,b,c,d){",
         "  if(!_render){return;}",
         "  _ellipseCount++;",
-        "  var m=_ellipseCount;",
-        "  var id = _shapeTypeCode.ellipse * 10000 + m;",
-        "  // 椭圆模式：兼容 p5.ellipseMode",
-        "  // 支持模式常量 CENTER/RADIUS/CORNER/CORNERS（数值 0..3），",
-        "  // 当 _ellipseMode 未定义时，默认为 CENTER。",
+        "  var id = _nextShapeId('ellipse', _ellipseCount);",
         "  var mode = (typeof _ellipseMode !== 'undefined') ? _ellipseMode : 0;",
         "  var x = a;",
         "  var y = b;",
         "  var w = c;",
         "  var h = (d !== undefined) ? d : c;",
-        "  // 归一化数值，防止 NaN 影响后续计算",
         "  if (!(w===w)) w = 0;",
         "  if (!(h===h)) h = 0;",
         "  var cx, cy, ww, hh;",
         "  if (mode === 1) {",
-        "    // RADIUS：a,b 为圆心，c,d 为半径",
         "    cx = x;",
         "    cy = y;",
         "    ww = w * 2;",
         "    hh = h * 2;",
         "  } else if (mode === 2) {",
-        "    // CORNER：a,b 为左上角，c,d 为宽高",
         "    cx = x + w * 0.5;",
         "    cy = y + h * 0.5;",
         "    ww = w;",
         "    hh = h;",
         "  } else if (mode === 3) {",
-        "    // CORNERS：a,b 和 c,d 为对角点坐标",
         "    var x2 = c;",
         "    var y2 = (d !== undefined) ? d : b;",
         "    var dx = x2 - x;",
@@ -952,7 +791,6 @@ function getShapeLib(deps) {
         "    ww = Math.abs(dx);",
         "    hh = Math.abs(dy);",
         "  } else {",
-        "    // CENTER（默认）：a,b 为圆心，c,d 为宽高（直径）",
         "    cx = x;",
         "    cy = y;",
         "    ww = w;",
@@ -961,160 +799,118 @@ function getShapeLib(deps) {
         "  var p=_applyTransform(cx,cy);",
         "  var s=[ww*_scaleX,hh*_scaleY];",
         "  var r=_rotation*180/Math.PI;",
-        "  var c2=_encodeColorState();",
-        "  var hasFill = !(c2[0][0] < 0);",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var fillColor = hasFill ? [c2[0][0],c2[0][1],c2[1][0],c2[1][1]] : null;",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var fillOp = hasFill ? c2[4][0] : 0;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style=_shapeStyle();",
         "  _shapes.push({",
         '    id:id, type:"ellipse",',
         "    pos:p, size:s, rot:r,",
-        "    fillColor:fillColor, strokeColor:strokeColor,",
-        "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
+        "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.arc) {
     funcs.push(
-      [
+      _joinExpr([
         "function _arc(x,y,w,h,start,stop,mode){",
         "  if(!_render){return;}",
         "  _arcCount++;",
-        "  var m = _arcCount;",
-        "  var id = _shapeTypeCode.arc * 10000 + m;",
+        "  var id = _nextShapeId('arc', _arcCount);",
         "  var p = _applyTransform(x,y);",
         "  var ww = w * _scaleX;",
         "  var hh = (h || w) * _scaleY;",
         "  var ang = [start, stop];",
-        "  // mode 编码: [modeCode, autoFlag]",
-        "  // - 当用户未传入 mode 时: modeCode=0, autoFlag=1（默认使用 PIE 填充 + OPEN 描边）",
-        "  // - 当用户显式传入 mode 时: modeCode=mode, autoFlag=0（保持与 p5.arc 对齐）",
         "  var md;",
         "  if (mode === undefined) {",
         "    md = [0, 1];",
         "  } else {",
         "    md = [mode, 0];",
         "  }",
-        "  var c2 = _encodeColorState();",
-        "  var hasFill = !(c2[0][0] < 0);",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var fillColor = hasFill ? [c2[0][0],c2[0][1],c2[1][0],c2[1][1]] : null;",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var fillOp = hasFill ? c2[4][0] : 0;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style = _shapeStyle();",
         "  _shapes.push({",
         '    id:id, type:"arc",',
         "    pos:p, size:[ww,hh], angles:ang, mode:md,",
-        "    fillColor:fillColor, strokeColor:strokeColor,",
-        "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
+        "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.quad) {
     funcs.push(
-      [
+      _joinExpr([
         "function _quad(x1,y1,x2,y2,x3,y3,x4,y4){",
         "  if(!_render){return;}",
         "  _quadCount++;",
-        "  var m=_quadCount;",
-        "  var id = _shapeTypeCode.quad * 10000 + m;",
+        "  var id = _nextShapeId('quad', _quadCount);",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
         "  var p4=_applyTransform(x4,y4);",
-        "  var c2=_encodeColorState();",
-        "  var hasFill = !(c2[0][0] < 0);",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var fillColor = hasFill ? [c2[0][0],c2[0][1],c2[1][0],c2[1][1]] : null;",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var fillOp = hasFill ? c2[4][0] : 0;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style=_shapeStyle();",
         "  _shapes.push({",
         '    id:id, type:"quad",',
         "    points:[p1,p2,p3,p4],",
-        "    fillColor:fillColor, strokeColor:strokeColor,",
-        "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
+        "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.triangle) {
     funcs.push(
-      [
+      _joinExpr([
         "function _triangle(x1,y1,x2,y2,x3,y3){",
         "  if(!_render){return;}",
         "  _triangleCount++;",
-        "  var m=_triangleCount;",
-        "  var id = _shapeTypeCode.triangle * 10000 + m;",
+        "  var id = _nextShapeId('triangle', _triangleCount);",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
-        "  var c2=_encodeColorState();",
-        "  var hasFill = !(c2[0][0] < 0);",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var fillColor = hasFill ? [c2[0][0],c2[0][1],c2[1][0],c2[1][1]] : null;",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var fillOp = hasFill ? c2[4][0] : 0;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style=_shapeStyle();",
         "  _shapes.push({",
         '    id:id, type:"triangle",',
         "    points:[p1,p2,p3],",
-        "    fillColor:fillColor, strokeColor:strokeColor,",
-        "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
+        "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.rect || deps.square) {
     funcs.push(
-      [
+      _joinExpr([
         "function _rect(a,b,c,d){",
         "  if(!_render){return;}",
         "  _rectCount++;",
-        "  var m=_rectCount;",
-        "  var id = _shapeTypeCode.rect * 10000 + m;",
-        "  // 矩形模式：兼容 p5.rectMode",
-        "  // 支持模式常量 CENTER/RADIUS/CORNER/CORNERS（数值 0..3），",
-        "  // 当 _rectMode 未定义时，默认为 CORNER（与 p5.rect 默认一致）。",
+        "  var id = _nextShapeId('rect', _rectCount);",
         "  var mode = (typeof _rectMode !== 'undefined') ? _rectMode : 2;",
         "  var x = a;",
         "  var y = b;",
         "  var w = c;",
         "  var h = (d !== undefined) ? d : c;",
-        "  // 归一化数值，防止 NaN 影响后续计算",
         "  if (!(w===w)) w = 0;",
         "  if (!(h===h)) h = 0;",
         "  var cx, cy, ww, hh;",
         "  if (mode === 0) {",
-        "    // CENTER：a,b 为矩形中心，c,d 为宽高",
         "    cx = x;",
         "    cy = y;",
         "    ww = w;",
         "    hh = h;",
         "  } else if (mode === 1) {",
-        "    // RADIUS：a,b 为矩形中心，c,d 为半宽/半高",
         "    cx = x;",
         "    cy = y;",
         "    ww = w * 2;",
         "    hh = h * 2;",
         "  } else if (mode === 3) {",
-        "    // CORNERS：a,b 和 c,d 为对角点坐标",
         "    var x2 = c;",
         "    var y2 = (d !== undefined) ? d : b;",
         "    var dx = x2 - x;",
@@ -1124,7 +920,6 @@ function getShapeLib(deps) {
         "    ww = Math.abs(dx);",
         "    hh = Math.abs(dy);",
         "  } else {",
-        "    // CORNER（默认）：a,b 为左上角，c,d 为宽高",
         "    cx = x + w * 0.5;",
         "    cy = y + h * 0.5;",
         "    ww = w;",
@@ -1133,144 +928,114 @@ function getShapeLib(deps) {
         "  var p=_applyTransform(cx,cy);",
         "  var s=[ww*_scaleX,hh*_scaleY];",
         "  var r=_rotation*180/Math.PI;",
-        "  var c2=_encodeColorState();",
-        "  var hasFill = !(c2[0][0] < 0);",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var fillColor = hasFill ? [c2[0][0],c2[0][1],c2[1][0],c2[1][1]] : null;",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var fillOp = hasFill ? c2[4][0] : 0;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style=_shapeStyle();",
         "  _shapes.push({",
         '    id:id, type:"rect",',
         "    pos:p, size:s, rot:r,",
-        "    fillColor:fillColor, strokeColor:strokeColor,",
-        "    fillOpacity:fillOp, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
+        "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.line) {
     funcs.push(
-      [
+      _joinExpr([
         "function _line(x1,y1,x2,y2){",
         "  if(!_render){return;}",
         "  _lineCount++;",
-        "  var m=_lineCount;",
-        "  var id = _shapeTypeCode.line * 10000 + m;",
+        "  var id = _nextShapeId('line', _lineCount);",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
-        "  var c2=_encodeColorState();",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style=_shapeStyle();",
         "  _shapes.push({",
         '    id:id, type:"line",',
         "    points:[p1,p2],",
-        "    fillColor:null, strokeColor:strokeColor,",
-        "    fillOpacity:0, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    fillColor:null, strokeColor:style.strokeColor,",
+        "    fillOpacity:0, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.point) {
     funcs.push(
-      [
+      _joinExpr([
         "function _point(x,y){",
         "  if(!_render){return;}",
         "  _pointCount++;",
-        "  var m=_pointCount;",
-        "  var id = _shapeTypeCode.point * 10000 + m;",
+        "  var id = _nextShapeId('point', _pointCount);",
         "  var p=_applyTransform(x,y);",
-        "  var c2=_encodeColorState();",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style=_shapeStyle();",
         "  _shapes.push({",
         '    id:id, type:"point",',
-        "    pos:p, size:[sw,sw],",
-        "    // point 使用 stroke 作为可见颜色",
-        "    fillColor:strokeColor, strokeColor:strokeColor,",
-        "    fillOpacity:strokeOp, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    pos:p, size:[style.strokeWeight,style.strokeWeight],",
+        "    fillColor:style.strokeColor, strokeColor:style.strokeColor,",
+        "    fillOpacity:style.strokeOpacity, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.bezier) {
     funcs.push(
-      [
+      _joinExpr([
         "function _bezier(x1,y1,x2,y2,x3,y3,x4,y4){",
         "  if(!_render){return;}",
         "  _bezierCount++;",
-        "  var m=_bezierCount;",
-        "  var id = _shapeTypeCode.bezier * 10000 + m;",
+        "  var id = _nextShapeId('bezier', _bezierCount);",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
         "  var p4=_applyTransform(x4,y4);",
-        "  var c2=_encodeColorState();",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style=_shapeStyle();",
         "  _shapes.push({",
         '    id:id, type:"bezier",',
         "    points:[p1,p2,p3,p4],",
-        "    fillColor:null, strokeColor:strokeColor,",
-        "    fillOpacity:0, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    fillColor:null, strokeColor:style.strokeColor,",
+        "    fillOpacity:0, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.curve) {
     funcs.push(
-      [
+      _joinExpr([
         "function _curve(x1,y1,x2,y2,x3,y3,x4,y4){",
         "  if(!_render){return;}",
         "  _curveCount++;",
-        "  var m=_curveCount;",
-        "  var id = _shapeTypeCode.curve * 10000 + m;",
+        "  var id = _nextShapeId('curve', _curveCount);",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
         "  var p4=_applyTransform(x4,y4);",
-        "  var c2=_encodeColorState();",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style=_shapeStyle();",
         "  var tightness = typeof _curveTightness !== 'undefined' ? _curveTightness : 0.5;",
         "  _shapes.push({",
         '    id:id, type:"curve",',
         "    points:[p1,p2,p3,p4],",
         "    tightness:tightness,",
-        "    fillColor:null, strokeColor:strokeColor,",
-        "    fillOpacity:0, strokeOpacity:strokeOp,",
-        "    strokeWeight:sw",
+        "    fillColor:null, strokeColor:style.strokeColor,",
+        "    fillOpacity:0, strokeOpacity:style.strokeOpacity,",
+        "    strokeWeight:style.strokeWeight",
         "  });",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.polygon) {
     funcs.push(
-      [
+      _joinExpr([
         "// beginShape/vertex 系列多边形支持（含轮廓与贝塞尔/曲线采样）",
         "var _currentPolygon = null;",
-        "// 兼容 p5 的 CLOSE 常量，如未定义则提供占位符",
         "var CLOSE = typeof CLOSE !== 'undefined' ? CLOSE : 'CLOSE';",
         "",
-        "// 采样细分数（贝塞尔/曲线插值步数）",
         "var _VERTEX_SUBDIV = 16;",
         "",
         "function beginShape(kind){",
@@ -1278,24 +1043,23 @@ function getShapeLib(deps) {
         "  _currentPolygon = {",
         "    id: 0,",
         '    type: "polygon",',
-        "    points: [],           // 主轮廓的顶点（向后兼容）",
+        "    points: [],",
         "    closed: false,",
         "    fillColor: null,",
         "    strokeColor: null,",
         "    fillOpacity: 0,",
         "    strokeOpacity: 0,",
         "    strokeWeight: 0,",
-        "    contours: [],         // 所有轮廓数组：[主轮廓, 子轮廓1, 子轮廓2, ...]",
-        "    _currentContour: [],  // 当前正在构建的轮廓",
-        "    _curveBuffer: [],     // curveVertex 用的历史点缓冲",
-        "    _inContour: false      // 标志：是否在 beginContour/endContour 之间",
+        "    contours: [],",
+        "    _currentContour: [],",
+        "    _curveBuffer: [],",
+        "    _inContour: false",
         "  };",
         "}",
         "",
         "function _pushVertexPoint(p){",
         "  if(!_currentPolygon){ return; }",
         "  _currentPolygon._currentContour.push(p);",
-        "  // 只有在非 Contour 状态下，才添加到主轮廓（points）",
         "  if(!_currentPolygon._inContour){",
         "    _currentPolygon.points.push(p);",
         "  }",
@@ -1308,23 +1072,14 @@ function getShapeLib(deps) {
         "  }",
         "  var p = _applyTransform(x,y);",
         "  _pushVertexPoint(p);",
-        "  // 记录到 curve 缓冲，用于后续 curveVertex 计算",
         "  _currentPolygon._curveBuffer.push(p);",
         "}",
         "",
         "function beginContour(){",
         "  if(!_render || !_currentPolygon){ return; }",
-        "  // 如果当前有轮廓（主轮廓），先保存到 contours",
         "  if(_currentPolygon._currentContour && _currentPolygon._currentContour.length){",
-        "    // 如果 contours 为空，说明这是主轮廓",
-        "    if(_currentPolygon.contours.length === 0){",
-        "      _currentPolygon.contours.push(_currentPolygon._currentContour);",
-        "    } else {",
-        "      // 否则是上一个子轮廓，也保存",
-        "      _currentPolygon.contours.push(_currentPolygon._currentContour);",
-        "    }",
+        "    _currentPolygon.contours.push(_currentPolygon._currentContour);",
         "  }",
-        "  // 开始新的子轮廓",
         "  _currentPolygon._currentContour = [];",
         "  _currentPolygon._curveBuffer = [];",
         "  _currentPolygon._inContour = true;",
@@ -1332,24 +1087,18 @@ function getShapeLib(deps) {
         "",
         "function endContour(){",
         "  if(!_render || !_currentPolygon){ return; }",
-        "  // 保存当前的子轮廓",
         "  if(_currentPolygon._currentContour && _currentPolygon._currentContour.length){",
         "    _currentPolygon.contours.push(_currentPolygon._currentContour);",
         "  }",
-        "  // 结束子轮廓，准备返回主轮廓（如果有）或开始新的轮廓",
         "  _currentPolygon._currentContour = [];",
         "  _currentPolygon._curveBuffer = [];",
         "  _currentPolygon._inContour = false;",
         "}",
         "",
-        "// 三次贝塞尔插值，采样后转直线顶点",
         "function bezierVertex(cx1,cy1,cx2,cy2,x,y){",
         "  if(!_render || !_currentPolygon){ return; }",
         "  var contour = _currentPolygon._currentContour;",
-        "  if(!contour || contour.length === 0){",
-        "    // 没有起点时无法绘制贝塞尔，兼容 p5 行为直接忽略",
-        "    return;",
-        "  }",
+        "  if(!contour || contour.length === 0) return;",
         "  var p0 = contour[contour.length-1];",
         "  var p1 = _applyTransform(cx1,cy1);",
         "  var p2 = _applyTransform(cx2,cy2);",
@@ -1365,14 +1114,10 @@ function getShapeLib(deps) {
         "  _currentPolygon._curveBuffer.push(p3);",
         "}",
         "",
-        "// 二次贝塞尔插值，采样后转直线顶点",
         "function quadraticVertex(cpx,cpy,x,y){",
         "  if(!_render || !_currentPolygon){ return; }",
         "  var contour = _currentPolygon._currentContour;",
-        "  if(!contour || contour.length === 0){",
-        "    // 没有起点时无法绘制贝塞尔，兼容 p5 行为直接忽略",
-        "    return;",
-        "  }",
+        "  if(!contour || contour.length === 0) return;",
         "  var p0 = contour[contour.length-1];",
         "  var p1 = _applyTransform(cpx,cpy);",
         "  var p2 = _applyTransform(x,y);",
@@ -1387,7 +1132,6 @@ function getShapeLib(deps) {
         "  _currentPolygon._curveBuffer.push(p2);",
         "}",
         "",
-        "// 带张力的 Cardinal Spline 样条近似 curveVertex，内部用线段采样",
         "function curveVertex(x,y){",
         "  if(!_render || !_currentPolygon){ return; }",
         "  if(!_currentPolygon._currentContour){",
@@ -1397,30 +1141,23 @@ function getShapeLib(deps) {
         "  var buf = _currentPolygon._curveBuffer;",
         "  buf.push(p);",
         "  if(buf.length < 4){",
-        "    // 前三个点仅用于缓冲，不直接输出（靠后续样条补线）",
-        "    if(buf.length === 1){",
-        "      // p5 会在首次 curveVertex 前需要额外点，这里简单加入轮廓起点",
-        "      _pushVertexPoint(p);",
-        "    }",
+        "    if(buf.length === 1) _pushVertexPoint(p);",
         "    return;",
         "  }",
         "  var p0 = buf[buf.length-4];",
         "  var p1 = buf[buf.length-3];",
         "  var p2 = buf[buf.length-2];",
         "  var p3 = buf[buf.length-1];",
-        "  // 获取张力参数（与 curveTightness 对齐）",
         "  var s = typeof _curveTightness !== 'undefined' ? _curveTightness : 0;",
         "  var n = _VERTEX_SUBDIV;",
         "  for(var i=1;i<=n;i++){",
         "    var t = i/n;",
         "    var t2 = t*t;",
         "    var t3 = t2*t;",
-        "    // Cardinal Spline 基函数",
         "    var h1 = 2*t3 - 3*t2 + 1;",
         "    var h2 = t3 - 2*t2 + t;",
         "    var h3 = -2*t3 + 3*t2;",
         "    var h4 = t3 - t2;",
-        "    // 计算曲线点",
         "    var xC = h1*p1[0] + h2*s*(p2[0]-p0[0]) + h3*p2[0] + h4*s*(p3[0]-p1[0]);",
         "    var yC = h1*p1[1] + h2*s*(p2[1]-p0[1]) + h3*p2[1] + h4*s*(p3[1]-p1[1]);",
         "    _pushVertexPoint([xC,yC]);",
@@ -1429,46 +1166,30 @@ function getShapeLib(deps) {
         "",
         "function endShape(mode){",
         "  if(!_render || !_currentPolygon){ return; }",
-        "  // 将最后一个轮廓推入 contours，保证所有顶点被收集",
         "  if(_currentPolygon._currentContour && _currentPolygon._currentContour.length){",
-        "    // 如果 contours 为空，说明这是主轮廓",
-        "    if(_currentPolygon.contours.length === 0){",
-        "      _currentPolygon.contours.push(_currentPolygon._currentContour);",
-        "    } else {",
-        "      // 否则是最后一个子轮廓",
-        "      _currentPolygon.contours.push(_currentPolygon._currentContour);",
-        "    }",
+        "    _currentPolygon.contours.push(_currentPolygon._currentContour);",
         "  }",
         "  if (!_currentPolygon.points || _currentPolygon.points.length === 0) {",
         "    _currentPolygon = null;",
         "    return;",
         "  }",
-        "  var c2 = _encodeColorState();",
-        "  var hasFill = !(c2[0][0] < 0);",
-        "  var hasStroke = !(c2[2][0] < 0);",
-        "  var fillColor = hasFill ? [c2[0][0],c2[0][1],c2[1][0],c2[1][1]] : null;",
-        "  var strokeColor = hasStroke ? [c2[2][0],c2[2][1],c2[3][0],c2[3][1]] : null;",
-        "  var fillOp = hasFill ? c2[4][0] : 0;",
-        "  var strokeOp = hasStroke ? c2[4][1] : 0;",
-        "  var sw = c2[5][0];",
+        "  var style = _shapeStyle();",
         "  _polygonCount++;",
-        "  var m = _polygonCount;",
         "  var closed = false;",
         "  if (mode !== undefined) {",
         "    closed = (mode === true || mode === CLOSE);",
         "  }",
-        "  var id = _shapeTypeCode.polygon * 10000 + m;",
-        "  _currentPolygon.id = id;",
-        "  _currentPolygon.fillColor = fillColor;",
-        "  _currentPolygon.strokeColor = strokeColor;",
-        "  _currentPolygon.fillOpacity = fillOp;",
-        "  _currentPolygon.strokeOpacity = strokeOp;",
-        "  _currentPolygon.strokeWeight = sw;",
+        "  _currentPolygon.id = _nextShapeId('polygon', _polygonCount);",
+        "  _currentPolygon.fillColor = style.fillColor;",
+        "  _currentPolygon.strokeColor = style.strokeColor;",
+        "  _currentPolygon.fillOpacity = style.fillOpacity;",
+        "  _currentPolygon.strokeOpacity = style.strokeOpacity;",
+        "  _currentPolygon.strokeWeight = style.strokeWeight;",
         "  _currentPolygon.closed = closed;",
         "  _shapes.push(_currentPolygon);",
         "  _currentPolygon = null;",
         "}",
-      ].join("\n"),
+      ]),
     );
   }
   if (deps.background) {
@@ -1479,69 +1200,37 @@ function getShapeLib(deps) {
   return funcs.join("\n");
 }
 
-/**
- * arc 数据结构（语义化 JSON）:
- * {
- *   id,
- *   type: "arc",
- *   pos, size, angles, mode,
- *   fillColor, strokeColor,
- *   fillOpacity, strokeOpacity,
- *   strokeWeight
- * }
- *
- * 与 ellipse/rect 等保持一致，使用稳定的 id（类型前缀 + 调用次数）进行查找，
- * 这样表达式层的查找逻辑完全由 _getIdFindExpr 统一负责。
- */
 function createArcFromContext(index, shapeId, mainCompName) {
   var base = _createBaseShapeLayer(index);
   var shapeGroup = base.shapeGroup;
   var indexFind = _getIdFindExpr(shapeId, mainCompName);
 
-  // Stroke 子 group（用于描边，仅画 OPEN 弧线）——先添加 Stroke，让其渲染在 Fill 之上
-  var strokeGroup = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Group");
+  var strokeGroup = _contents(shapeGroup).addProperty("ADBE Vector Group");
   strokeGroup.name = "Stroke_Arc";
-  var strokePath = strokeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Group");
-
-  // Path for Stroke (默认使用 OPEN 弧线)
+  var strokePath = _addPathGroup(strokeGroup);
   strokePath.property("Path").expression = _getArcPathExpr(indexFind, 0);
 
-  // Stroke
-  var stroke = strokeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Graphic - Stroke");
-  stroke.property("Color").expression = [
+  var stroke = _contents(strokeGroup).addProperty(
+    "ADBE Vector Graphic - Stroke",
+  );
+  stroke.property("Color").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.strokeColor) [0,0,0,1];",
     "var sc = shape.strokeColor;",
     "[sc[0], sc[1], sc[2], 1]",
-  ].join("\n");
+  ]);
   stroke.property("Opacity").expression = _getStrokeOpacityExpr(indexFind);
   stroke.property("Stroke Width").expression = _getStrokeWidthExpr(
     indexFind,
     1,
   );
 
-  // Fill 子 group（用于扇形填充）
-  var fillGroup = shapeGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Group");
+  var fillGroup = _contents(shapeGroup).addProperty("ADBE Vector Group");
   fillGroup.name = "Fill_Arc";
-  var fillPath = fillGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Shape - Group");
-
-  // Path for Fill (默认使用 PIE 形状)
+  var fillPath = _addPathGroup(fillGroup);
   fillPath.property("Path").expression = _getArcPathExpr(indexFind, 2);
 
-  // Fill（与 ellipse/rect 一致，支持 fill()/noFill() 状态）
-  var fill = fillGroup
-    .property("Contents")
-    .addProperty("ADBE Vector Graphic - Fill");
+  var fill = _contents(fillGroup).addProperty("ADBE Vector Graphic - Fill");
   fill.property("Color").expression = _getFillColorExpr(indexFind);
   fill.property("Opacity").expression = _getFillOpacityExpr(indexFind);
 }

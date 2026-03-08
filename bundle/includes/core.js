@@ -1021,7 +1021,7 @@ function buildExpression(
   // - backgrounds: 背景对象数组（由 background 库填充）
   // - globals: 全局变量对象（用于跨合成访问）
   // - controllers: 控制器配置数组（由 controller 库填充）
-  // - fontMetrics: 字体 metrics 映射表（key: "fontFamily_fontSize", value: {baselineOffsetRatio, ...}）
+  // 注：font/image/table/json 等冷数据仅供 engine 内部使用，不导出到最终 JSON
   expr.push("var _ctx = {");
   expr.push("  version: 1,");
   expr.push("  fps: fps,");
@@ -1034,7 +1034,6 @@ function buildExpression(
   expr.push("  backgrounds: [],");
   expr.push("  globals: {},");
   expr.push("  controllers: [],");
-  // 将 fontMetrics 映射表序列化为 JSON 字符串，然后在表达式中解析
   var fontMetricsJson = JSON.stringify(fontMetricsMap);
   var imageMetadataJson = JSON.stringify(
     imageMetadataParam && typeof imageMetadataParam === "object"
@@ -1047,12 +1046,12 @@ function buildExpression(
   var jsonDataJson = JSON.stringify(
     jsonDataParam && typeof jsonDataParam === "object" ? jsonDataParam : {},
   );
-  expr.push("  fontMetrics: " + fontMetricsJson + ",");
-  expr.push("  imageMetadata: " + imageMetadataJson + ",");
-  expr.push("  tableData: " + tableDataJson + ",");
-  expr.push("  jsonData: " + jsonDataJson + ",");
   expr.push("  _lastComputedFrame: -1  // 帧循环缓存：记录上次计算的帧号");
   expr.push("};");
+  expr.push("var _fm = " + fontMetricsJson + ";");
+  expr.push("var _imd = " + imageMetadataJson + ";");
+  expr.push("var _td = " + tableDataJson + ";");
+  expr.push("var _jd = " + jsonDataJson + ";");
   expr.push("var _shapes = _ctx.shapes;");
   expr.push("var _backgrounds = _ctx.backgrounds;");
 

@@ -1,234 +1,171 @@
 // ----------------------------------------
-// Image - 图像绘制库
-// 包含：
-//   1. getImageLib()        — AE 表达式端：生成 _image / imageMode / tint / image 函数代码
-//   2. createImageFromContext() — AE 脚本端：导入 footage、创建图层、绑定表达式
-//   3. _getUserDirectory()  — 获取 user/ 目录绝对路径
-//   4. _getOrImportFootage() — 查找或导入 footage
+// Image helpers
 // ----------------------------------------
+// 负责两件事：
+// 1. 生成 engine 侧的 image/loadImage/imageMode/tint 运行时
+// 2. 在 AE 侧导入图片素材并创建对应图层
 
 /**
- * 获取图像函数库代码
- * @param {Object} deps - 依赖对象 { image: true }
- * @returns {string} 图像函数库代码
+ * 生成 image 表达式库。
  */
 function getImageLib(deps) {
   if (!deps || !deps.image) return "";
 
-  var lines = [];
-  lines.push("// Image 库");
-  lines.push(
-    "var _momentumImageMetadata = (_ctx && _ctx.imageMetadata) ? _ctx.imageMetadata : {};",
-  );
-  lines.push("function _sanitizeImageSampleKey(path) {");
-  lines.push(
+  return [
+    "// Image runtime",
+    "var _momentumImageMetadata = _imd || {};",
+    "function _sanitizeImageSampleKey(path) {",
     "  return String(path || '').replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\\d)/, '_$1');",
-  );
-  lines.push("}");
-  lines.push("function _getImageSampleCompName() {");
-  lines.push("  return thisComp.name + '_footage';");
-  lines.push("}");
-  lines.push("function _getImageSampleLayer(path) {");
-  lines.push("  var compName = _getImageSampleCompName();");
-  lines.push("  var layerName = '__imgsrc__' + _sanitizeImageSampleKey(path);");
-  lines.push(
+    "}",
+    "function _getImageSampleLayer(path) {",
+    "  var compName = thisComp.name + '_footage';",
+    "  var layerName = '__imgsrc__' + _sanitizeImageSampleKey(path);",
     "  try { return comp(compName).layer(layerName); } catch (e) { return null; }",
-  );
-  lines.push("}");
-  lines.push("function _sampleImagePixel(path, x, y) {");
-  lines.push("  var layer = _getImageSampleLayer(path);");
-  lines.push("  if (!layer) return [0, 0, 0, 0];");
-  lines.push("  var sx = Math.floor(x !== undefined ? x : 0) + 0.5;");
-  lines.push("  var sy = Math.floor(y !== undefined ? y : 0) + 0.5;");
-  lines.push("  var c = layer.sampleImage([sx, sy], [0.5, 0.5], true, time);");
-  lines.push("  return [c[0], c[1], c[2], c[3]];");
-  lines.push("}");
-  lines.push("function _makeImageGet(img) {");
-  lines.push("  return function (x, y, w, h) {");
-  lines.push("    if (arguments.length >= 4) {");
-  lines.push("      return _createImageObject(");
-  lines.push("        img._momentumPath,");
-  lines.push("        Math.max(0, Math.floor(w !== undefined ? w : 0)),");
-  lines.push("        Math.max(0, Math.floor(h !== undefined ? h : 0)),");
-  lines.push("        img._momentumSourceWidth,");
-  lines.push("        img._momentumSourceHeight");
-  lines.push("      );");
-  lines.push("    }");
-  lines.push("    var currentW = img.width || 0;");
-  lines.push("    var currentH = img.height || 0;");
-  lines.push(
-    "    var sourceW = img._momentumSourceWidth !== undefined ? img._momentumSourceWidth : currentW;",
-  );
-  lines.push(
-    "    var sourceH = img._momentumSourceHeight !== undefined ? img._momentumSourceHeight : currentH;",
-  );
-  lines.push(
+    "}",
+    "function _sampleImagePixel(path, x, y) {",
+    "  var layer = _getImageSampleLayer(path);",
+    "  if (!layer) return [0, 0, 0, 0];",
+    "  var sx = Math.floor(x !== undefined ? x : 0) + 0.5;",
+    "  var sy = Math.floor(y !== undefined ? y : 0) + 0.5;",
+    "  var c = layer.sampleImage([sx, sy], [0.5, 0.5], true, time);",
+    "  return [c[0], c[1], c[2], c[3]];",
+    "}",
+    "function _imageSizeValue(value, fallback) {",
+    "  return value !== undefined ? value : fallback;",
+    "}",
+    "function _makeImageGet(img) {",
+    "  return function (x, y, w, h) {",
+    "    if (arguments.length >= 4) {",
+    "      return _createImageObject(",
+    "        img._momentumPath,",
+    "        Math.max(0, Math.floor(w !== undefined ? w : 0)),",
+    "        Math.max(0, Math.floor(h !== undefined ? h : 0)),",
+    "        img._momentumSourceWidth,",
+    "        img._momentumSourceHeight",
+    "      );",
+    "    }",
+    "    var currentW = img.width || 0;",
+    "    var currentH = img.height || 0;",
+    "    var sourceW = _imageSizeValue(img._momentumSourceWidth, currentW);",
+    "    var sourceH = _imageSizeValue(img._momentumSourceHeight, currentH);",
     "    if (currentW <= 0 || currentH <= 0 || sourceW <= 0 || sourceH <= 0) return [0, 0, 0, 0];",
-  );
-  lines.push("    var sampleX = (Number(x) || 0) * sourceW / currentW;");
-  lines.push("    var sampleY = (Number(y) || 0) * sourceH / currentH;");
-  lines.push(
+    "    var sampleX = (Number(x) || 0) * sourceW / currentW;",
+    "    var sampleY = (Number(y) || 0) * sourceH / currentH;",
     "    return _sampleImagePixel(img._momentumPath, sampleX, sampleY);",
-  );
-  lines.push("  };");
-  lines.push("}");
-  lines.push("function _makeImageResize(img) {");
-  lines.push("  return function (w, h) {");
-  lines.push("    var currentW = img.width || 0;");
-  lines.push("    var currentH = img.height || 0;");
-  lines.push(
+    "  };",
+    "}",
+    "function _makeImageResize(img) {",
+    "  return function (w, h) {",
+    "    var currentW = img.width || 0;",
+    "    var currentH = img.height || 0;",
     "    var nextW = (w !== undefined && w !== null) ? Math.round(Number(w)) : null;",
-  );
-  lines.push(
     "    var nextH = (h !== undefined && h !== null) ? Math.round(Number(h)) : null;",
-  );
-  lines.push("    var hasW = nextW !== null && !isNaN(nextW);");
-  lines.push("    var hasH = nextH !== null && !isNaN(nextH);");
-  lines.push("    if (!hasW && !hasH) return;");
-  lines.push("    if (hasW && nextW < 0) nextW = 0;");
-  lines.push("    if (hasH && nextH < 0) nextH = 0;");
-  lines.push("    if (hasW && hasH) {");
-  lines.push("      if (nextW === 0 && nextH === 0) return;");
-  lines.push("      if (nextW === 0) {");
-  lines.push("        if (currentW <= 0 || currentH <= 0) return;");
-  lines.push("        nextW = Math.round(currentW * nextH / currentH);");
-  lines.push("      } else if (nextH === 0) {");
-  lines.push("        if (currentW <= 0 || currentH <= 0) return;");
-  lines.push("        nextH = Math.round(currentH * nextW / currentW);");
-  lines.push("      }");
-  lines.push("    } else if (hasW) {");
-  lines.push("      if (currentW <= 0 || currentH <= 0) return;");
-  lines.push("      nextH = Math.round(currentH * nextW / currentW);");
-  lines.push("    } else {");
-  lines.push("      if (currentW <= 0 || currentH <= 0) return;");
-  lines.push("      nextW = Math.round(currentW * nextH / currentH);");
-  lines.push("    }");
-  lines.push("    img.width = Math.max(0, nextW);");
-  lines.push("    img.height = Math.max(0, nextH);");
-  lines.push("  };");
-  lines.push("}");
-  lines.push(
+    "    var hasW = nextW !== null && !isNaN(nextW);",
+    "    var hasH = nextH !== null && !isNaN(nextH);",
+    "    if (!hasW && !hasH) return;",
+    "    if (hasW && nextW < 0) nextW = 0;",
+    "    if (hasH && nextH < 0) nextH = 0;",
+    "    if (hasW && hasH) {",
+    "      if (nextW === 0 && nextH === 0) return;",
+    "      if (nextW === 0) {",
+    "        if (currentW <= 0 || currentH <= 0) return;",
+    "        nextW = Math.round(currentW * nextH / currentH);",
+    "      } else if (nextH === 0) {",
+    "        if (currentW <= 0 || currentH <= 0) return;",
+    "        nextH = Math.round(currentH * nextW / currentW);",
+    "      }",
+    "    } else if (hasW) {",
+    "      if (currentW <= 0 || currentH <= 0) return;",
+    "      nextH = Math.round(currentH * nextW / currentW);",
+    "    } else {",
+    "      if (currentW <= 0 || currentH <= 0) return;",
+    "      nextW = Math.round(currentW * nextH / currentH);",
+    "    }",
+    "    img.width = Math.max(0, nextW);",
+    "    img.height = Math.max(0, nextH);",
+    "  };",
+    "}",
     "function _createImageObject(path, width, height, sourceWidth, sourceHeight) {",
-  );
-  lines.push("  var img = {");
-  lines.push("    width: width,");
-  lines.push("    height: height,");
-  lines.push("    _momentumPath: path,");
-  lines.push(
-    "    _momentumSourceWidth: sourceWidth !== undefined ? sourceWidth : width,",
-  );
-  lines.push(
-    "    _momentumSourceHeight: sourceHeight !== undefined ? sourceHeight : height",
-  );
-  lines.push("  };");
-  lines.push("  img.get = _makeImageGet(img);");
-  lines.push("  img.resize = _makeImageResize(img);");
-  lines.push("  return img;");
-  lines.push("}");
-  lines.push("function loadImage(path) {");
-  lines.push("  var key = String(path || '');");
-  lines.push(
+    "  var img = {",
+    "    width: width,",
+    "    height: height,",
+    "    _momentumPath: path,",
+    "    _momentumSourceWidth: _imageSizeValue(sourceWidth, width),",
+    "    _momentumSourceHeight: _imageSizeValue(sourceHeight, height)",
+    "  };",
+    "  img.get = _makeImageGet(img);",
+    "  img.resize = _makeImageResize(img);",
+    "  return img;",
+    "}",
+    "function loadImage(path) {",
+    "  var key = String(path || '');",
     "  var meta = _momentumImageMetadata[key] || _momentumImageMetadata[String(key).replace(/\\\\/g, '/')] || null;",
-  );
-  lines.push(
     "  var width = meta && meta.width !== undefined ? meta.width : 0;",
-  );
-  lines.push(
     "  var height = meta && meta.height !== undefined ? meta.height : 0;",
-  );
-  lines.push("  return _createImageObject(key, width, height, width, height);");
-  lines.push("}");
-
-  lines.push("function _resolveImagePlacement(x, y, w, h, iw, ih, mode) {");
-  lines.push("  var drawW, drawH, cx, cy;");
-  lines.push("  if (mode === CORNERS) {");
-  lines.push("    var x2 = (w !== undefined && w !== null) ? w : x + iw;");
-  lines.push("    var y2 = (h !== undefined && h !== null) ? h : y + ih;");
-  lines.push("    drawW = x2 - x;");
-  lines.push("    drawH = y2 - y;");
-  lines.push("    cx = x + drawW / 2;");
-  lines.push("    cy = y + drawH / 2;");
-  lines.push("  } else {");
-  lines.push("    drawW = (w !== undefined && w !== null) ? w : iw;");
-  lines.push("    drawH = (h !== undefined && h !== null) ? h : ih;");
-  lines.push("    if (mode === CENTER) {");
-  lines.push("      cx = x;");
-  lines.push("      cy = y;");
-  lines.push("    } else {");
-  lines.push("      cx = x + drawW / 2;");
-  lines.push("      cy = y + drawH / 2;");
-  lines.push("    }");
-  lines.push("  }");
-  lines.push("  return { cx: cx, cy: cy, drawW: drawW, drawH: drawH };");
-  lines.push("}");
-  lines.push("");
-
-  lines.push("function _recordImage(path, cx, cy, drawW, drawH, iw, ih) {");
-  lines.push("  if (!_render) { return; }");
-  lines.push("  _imageCount++;");
-  lines.push("  var m = _imageCount;");
-  lines.push("  var id = _shapeTypeCode.image * 10000 + m;");
-  lines.push(
+    "  return _createImageObject(key, width, height, width, height);",
+    "}",
+    "function _resolveImagePlacement(x, y, w, h, iw, ih, mode) {",
+    "  var drawW, drawH, cx, cy;",
+    "  if (mode === CORNERS) {",
+    "    var x2 = (w !== undefined && w !== null) ? w : x + iw;",
+    "    var y2 = (h !== undefined && h !== null) ? h : y + ih;",
+    "    drawW = x2 - x;",
+    "    drawH = y2 - y;",
+    "    cx = x + drawW / 2;",
+    "    cy = y + drawH / 2;",
+    "  } else {",
+    "    drawW = (w !== undefined && w !== null) ? w : iw;",
+    "    drawH = (h !== undefined && h !== null) ? h : ih;",
+    "    if (mode === CENTER) {",
+    "      cx = x;",
+    "      cy = y;",
+    "    } else {",
+    "      cx = x + drawW / 2;",
+    "      cy = y + drawH / 2;",
+    "    }",
+    "  }",
+    "  return { cx: cx, cy: cy, drawW: drawW, drawH: drawH };",
+    "}",
+    "function _recordImage(path, cx, cy, drawW, drawH, iw, ih) {",
+    "  if (!_render) return;",
+    "  _imageCount++;",
+    "  var id = _shapeTypeCode.image * 10000 + _imageCount;",
     "  var finalW = (drawW !== undefined && drawW !== null) ? drawW : iw;",
-  );
-  lines.push(
     "  var finalH = (drawH !== undefined && drawH !== null) ? drawH : ih;",
-  );
-  lines.push("  var pos = _applyTransform(cx, cy);");
-  lines.push("  var rot = _rotation * (180 / Math.PI);");
-  lines.push("  _shapes.push({");
-  lines.push("    id: id,");
-  lines.push("    type: 'image',");
-  lines.push("    pos: pos,");
-  lines.push("    size: [finalW * _scaleX, finalH * _scaleY],");
-  lines.push("    drawW: finalW,");
-  lines.push("    drawH: finalH,");
-  lines.push("    natW: iw,");
-  lines.push("    natH: ih,");
-  lines.push("    sx: _scaleX,");
-  lines.push("    sy: _scaleY,");
-  lines.push("    rot: rot,");
-  lines.push("    src: path,");
-  lines.push("    imageMode: _imageMode,");
-  lines.push("    fillOpacity: _fillColor ? _fillColor[3] * 100 : 100,");
-  lines.push("    tintColor: _tintColor,");
-  lines.push("  });");
-  lines.push("}");
-
-  lines.push("var _imageMode = CORNER;");
-  lines.push("function imageMode(mode) { _imageMode = mode; }");
-
-  lines.push("var _tintColor = null;");
-  lines.push("function tint() {");
-  lines.push("  var c = color.apply(null, arguments);");
-  lines.push("  _tintColor = c;");
-  lines.push("}");
-  lines.push("function noTint() { _tintColor = null; }");
-
-  lines.push("function _image(img, x, y, w, h) {");
-  lines.push("  if (!img) return;");
-  lines.push("  var path = img._momentumPath || '';");
-  lines.push("  var iw = img.width || 0;");
-  lines.push("  var ih = img.height || 0;");
-  lines.push(
-    "  var sourceW = img._momentumSourceWidth !== undefined ? img._momentumSourceWidth : iw;",
-  );
-  lines.push(
-    "  var sourceH = img._momentumSourceHeight !== undefined ? img._momentumSourceHeight : ih;",
-  );
-  lines.push(
+    "  _shapes.push({",
+    "    id: id,",
+    "    type: 'image',",
+    "    pos: _applyTransform(cx, cy),",
+    "    size: [finalW * _scaleX, finalH * _scaleY],",
+    "    drawW: finalW,",
+    "    drawH: finalH,",
+    "    natW: iw,",
+    "    natH: ih,",
+    "    sx: _scaleX,",
+    "    sy: _scaleY,",
+    "    rot: _rotation * (180 / Math.PI),",
+    "    src: path,",
+    "    imageMode: _imageMode,",
+    "    fillOpacity: _fillColor ? _fillColor[3] * 100 : 100,",
+    "    tintColor: _tintColor",
+    "  });",
+    "}",
+    "var _imageMode = CORNER;",
+    "function imageMode(mode) { _imageMode = mode; }",
+    "var _tintColor = null;",
+    "function tint() { _tintColor = color.apply(null, arguments); }",
+    "function noTint() { _tintColor = null; }",
+    "function _image(img, x, y, w, h) {",
+    "  if (!img) return;",
+    "  var iw = img.width || 0;",
+    "  var ih = img.height || 0;",
+    "  var sourceW = _imageSizeValue(img._momentumSourceWidth, iw);",
+    "  var sourceH = _imageSizeValue(img._momentumSourceHeight, ih);",
     "  var placement = _resolveImagePlacement(x, y, w, h, iw, ih, _imageMode);",
-  );
-  lines.push(
-    "  _recordImage(path, placement.cx, placement.cy, placement.drawW, placement.drawH, sourceW, sourceH);",
-  );
-  lines.push("}");
-  lines.push("");
-  lines.push("function image(img, x, y, w, h) {");
-  lines.push("  return _image(img, x, y, w, h);");
-  lines.push("}");
-
-  return lines.join("\n");
+    "  _recordImage(img._momentumPath || '', placement.cx, placement.cy, placement.drawW, placement.drawH, sourceW, sourceH);",
+    "}",
+    "function image(img, x, y, w, h) { return _image(img, x, y, w, h); }",
+  ].join("\n");
 }
 
 function _sanitizeFootageSampleLayerName(prefix, path) {
@@ -240,18 +177,10 @@ function _sanitizeFootageSampleLayerName(prefix, path) {
   );
 }
 
-function _sanitizeImageSampleLayerName(path) {
-  return _sanitizeFootageSampleLayerName("__imgsrc__", path);
-}
-
 function _getFootageSampleCompName(targetComp) {
   var baseName =
     targetComp && targetComp.name ? targetComp.name : "Composition";
   return baseName + "_footage";
-}
-
-function _getImageSampleCompName(targetComp) {
-  return _getFootageSampleCompName(targetComp);
 }
 
 function _getOrCreateFootageSampleComp(compFolder, targetComp) {
@@ -288,10 +217,6 @@ function _getOrCreateFootageSampleComp(compFolder, targetComp) {
   }
   setCompBackgroundColor(sampleComp, false);
   return sampleComp;
-}
-
-function _getOrCreateImageSampleComp(compFolder, targetComp) {
-  return _getOrCreateFootageSampleComp(compFolder, targetComp);
 }
 
 function ensureFootageSampleLayer(
@@ -363,12 +288,8 @@ function ensureImageSampleLayers(imageMetadata, compFolder, targetComp) {
   }
 }
 
-// ----------------------------------------
-// AE 脚本端：图片图层创建
-// ----------------------------------------
-
 /**
- * 在当前 engineComp 中为 image shape 创建 footage 图层。
+ * 为 image shape 创建 AE 图层并绑定表达式。
  */
 function createImageFromContext(
   index,
@@ -446,12 +367,7 @@ function createImageFromContext(
   tintEffect.property(3).setValue(100);
 }
 
-/**
- * 获取 user/ 目录的绝对路径
- * 优先从脚本文件位置向上查找含 user/ 子目录的扩展根目录，
- * 找不到时回退到硬编码路径（macOS/Windows 均可用）。
- * @private
- */
+// 获取扩展内 user/ 目录。
 function _getUserDirectory() {
   var scriptFile = new File($.fileName);
   var dir = scriptFile;
@@ -465,15 +381,7 @@ function _getUserDirectory() {
   }
 }
 
-/**
- * 在项目中查找已导入的同名 footage，找不到则重新导入。
- * 避免重复导入同一文件造成项目冗余。
- * 新导入的 footage 直接放入 compFolder（如果提供）。
- * @param {File} file - ExtendScript File 对象
- * @param {FolderItem} compFolder - 合成文件夹（可选）
- * @returns {FootageItem|null}
- * @private
- */
+// 优先按绝对路径复用已导入素材，避免重复导入。
 function _getOrImportFootage(file, compFolder) {
   var name = file.name;
   var targetPath = String(file.fsName || "").replace(/\\/g, "/");

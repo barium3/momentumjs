@@ -14,12 +14,8 @@ function getIOLib(deps) {
 
   var lines = [];
   lines.push("// IO 库");
-  lines.push(
-    "var _momentumTableData = (_ctx && _ctx.tableData) ? _ctx.tableData : {};",
-  );
-  lines.push(
-    "var _momentumJSONData = (_ctx && _ctx.jsonData) ? _ctx.jsonData : {};",
-  );
+  lines.push("var _momentumTableData = _td || {};");
+  lines.push("var _momentumJSONData = _jd || {};");
   lines.push("function _normalizeIOPath(path) {");
   lines.push(
     "  return String(path || '').replace(/\\\\/g, '/').replace(/^\\/+/, '');",
