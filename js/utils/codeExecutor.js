@@ -542,13 +542,25 @@ window.codeExecutor = (function () {
           JSON.stringify(loadedImagesMap) +
           ")";
 
-        const scriptToRun = `try { ${finalCode}; "SUCCESS"; } catch(e) { "ERROR: " + e.message + " at line " + e.line + " stack: " + e.stack; }`;
+        const scriptToRun = `try { m._debugLogs = []; ${finalCode}; "__DEBUG__" + JSON.stringify(m._debugLogs || []); } catch(e) { "ERROR: " + e.message + " at line " + e.line + " stack: " + e.stack; }`;
 
         loadMomentumLibrary()
           .then(() => {
             csInterface.evalScript(scriptToRun, (result) => {
               if (result && result.startsWith && result.startsWith("ERROR:")) {
                 console.error("[CodeExecutor] AE script error:", result);
+              }
+              if (result && result.startsWith && result.indexOf("__DEBUG__") === 0) {
+                try {
+                  const logs = JSON.parse(result.substring("__DEBUG__".length));
+                  if (Array.isArray(logs)) {
+                    for (let i = 0; i < logs.length; i++) {
+                      console.log(logs[i]);
+                    }
+                  }
+                } catch (e) {
+                  console.warn("[CodeExecutor] 解析 AE debug 日志失败:", e.message);
+                }
               }
               if (
                 result &&
