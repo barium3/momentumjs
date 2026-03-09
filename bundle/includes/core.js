@@ -670,7 +670,9 @@ function pushEngineState(
   expr.push("  backgrounds: [],");
   expr.push("  globals: {},");
   expr.push("  controllers: [],");
-  expr.push("  _lastComputedFrame: -1");
+  expr.push("  _lastComputedFrame: -1,");
+  expr.push("  _looping: true,");
+  expr.push("  _redrawRequested: false");
   expr.push("};");
   expr.push("var _fm = " + fontMetricsJson + ";");
   expr.push("var _imd = " + imageMetadataJson + ";");
@@ -713,6 +715,7 @@ function buildExpression(
   var colorDeps = deps && deps.colors ? deps.colors : {};
   var typographyDeps = deps && deps.typography ? deps.typography : {};
   var controllerDeps = deps && deps.controllers ? deps.controllers : {};
+  var dataDeps = deps && deps.data ? deps.data : {};
   var tableDeps = deps && deps.tables ? deps.tables : {};
 
   if (shapeCounts.background > 0) {
@@ -777,6 +780,13 @@ function buildExpression(
     "Math",
     hasKeys(mathDeps)
       ? getMathLib(buildDepsFromRegistry(mathDeps, "math"))
+      : "",
+  );
+  pushLib(
+    expr,
+    "Data",
+    hasKeys(dataDeps)
+      ? getDataLib(buildDepsFromRegistry(dataDeps, "data"))
       : "",
   );
   if (hasShapes) {

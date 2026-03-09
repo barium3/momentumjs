@@ -24,6 +24,7 @@ function _buildAnalyzerCaches() {
         colors: buildCategoryMappings("colors", ["color"]),
         typography: buildCategoryMappings("typography", ["transform", "color"]),
         math: buildCategoryMappings("math", ["math"]),
+        data: buildCategoryMappings("data", []),
         tables: buildCategoryMappings("tables", []),
       };
     } else {
@@ -50,6 +51,7 @@ function _buildAnalyzerCaches() {
     "colors",
     "controllers",
     "typography",
+    "data",
     "images",
     "tables",
   ];
@@ -128,6 +130,7 @@ function analyzeDependenciesAST(code) {
     colors: {},
     typography: {},
     math: {},
+    data: {},
     environment: {},
     controllers: {},
     tables: {},

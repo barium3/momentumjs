@@ -412,6 +412,42 @@ functionRegistry.controllers = {
 };
 
 /**
+ * Data helper functions
+ * 对齐 p5.js Data 类别中的数组辅助函数与转换函数。
+ */
+functionRegistry.data = {
+  append: { internal: "append" },
+  arrayCopy: { internal: "arrayCopy" },
+  "boolean": { internal: "_data_boolean" },
+  "byte": { internal: "_data_byte" },
+  "char": { internal: "_data_char" },
+  concat: { internal: "concat" },
+  "float": { internal: "_data_float" },
+  "hex": { internal: "_data_hex" },
+  "int": { internal: "_data_int" },
+  join: { internal: "join" },
+  match: { internal: "match" },
+  matchAll: { internal: "matchAll" },
+  nf: { internal: "nf" },
+  nfc: { internal: "nfc" },
+  nfp: { internal: "nfp" },
+  nfs: { internal: "nfs" },
+  print: { internal: "print" },
+  reverse: { internal: "reverse" },
+  shorten: { internal: "shorten" },
+  split: { internal: "split" },
+  splitTokens: { internal: "splitTokens" },
+  str: { internal: "str" },
+  shuffle: { internal: "shuffle" },
+  sort: { internal: "sort" },
+  splice: { internal: "splice" },
+  subset: { internal: "subset" },
+  trim: { internal: "trim" },
+  unchar: { internal: "_data_unchar" },
+  unhex: { internal: "_data_unhex" },
+};
+
+/**
  * 图像函数定义
  * loadImage / image / imageMode / tint / noTint
  * image() 是渲染函数（归在 shapes 里），其余是非渲染辅助函数
@@ -632,6 +668,10 @@ functionRegistry.environment = {
   createCanvas: { internal: "createCanvas" },
   frameRate: { internal: "frameRate" },
   duration: { internal: "duration" },
+  isLooping: { internal: "isLooping" },
+  loop: { internal: "loop" },
+  noLoop: { internal: "noLoop" },
+  redraw: { internal: "redraw" },
   // 环境变量（按需注入）
   frameCount: { internal: "frameCount", type: "variable" },
   width: { internal: "width", type: "constant" },
@@ -682,6 +722,9 @@ functionRegistry.getP5Functions = function () {
   // 控制器/交互函数（如 createSlider）
   if (this.controllers) {
     result.push.apply(result, Object.keys(this.controllers));
+  }
+  if (this.data) {
+    result.push.apply(result, Object.keys(this.data));
   }
   // 图像辅助函数（loadImage / imageMode / tint / noTint）
   if (this.images) {

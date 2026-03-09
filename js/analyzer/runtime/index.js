@@ -91,6 +91,17 @@ function clearUserEntryPoints() {
 
 function cleanupGlobals(allFunctions, allVariables) {
   allFunctions.forEach(function (funcName) {
+    if (funcName === "print" && window.__momentumOriginalPrint !== undefined) {
+      try {
+        window.print = window.__momentumOriginalPrint;
+      } catch (e0) {}
+      try {
+        delete window.__momentumOriginalPrint;
+      } catch (e00) {
+        window.__momentumOriginalPrint = undefined;
+      }
+      return;
+    }
     if (window[funcName]) {
       delete window[funcName];
     }
@@ -160,6 +171,7 @@ function createExecutionState(overrides) {
       imageLoadTracker: { pending: [] },
       tableLoadTracker: { pending: [] },
       jsonLoadTracker: { pending: [] },
+      suppressPrint: false,
     },
     overrides || {},
   );
@@ -271,6 +283,7 @@ class P5Runtime {
         imageLoadTracker: state.imageLoadTracker,
         tableLoadTracker: state.tableLoadTracker,
         jsonLoadTracker: state.jsonLoadTracker,
+        suppressPrint: state.suppressPrint,
       },
       "execution",
     );
@@ -360,8 +373,7 @@ class P5Runtime {
     if (this.p5Instance) {
       try {
         this.p5Instance.remove();
-      } catch (e) {
-      }
+      } catch (e) {}
       this.p5Instance = null;
     }
 
@@ -466,11 +478,14 @@ class P5Runtime {
       self.options.timeout * 2,
       "执行超时",
       function (resolve, reject) {
-        var setupState = createExecutionState();
+        var setupState = createExecutionState({
+          suppressPrint: true,
+        });
         var drawState = createExecutionState({
           imageLoadTracker: setupState.imageLoadTracker,
           tableLoadTracker: setupState.tableLoadTracker,
           jsonLoadTracker: setupState.jsonLoadTracker,
+          suppressPrint: true,
         });
 
         self._installExecutionEnvironment(setupState);

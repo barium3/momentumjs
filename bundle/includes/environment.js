@@ -224,6 +224,22 @@ function getEnvironmentLib(deps) {
     lines.push("var frameCount = currentFrame;");
   }
 
+  if (deps.isLooping) {
+    lines.push("function isLooping() { return _ctx._looping !== false; }");
+  }
+
+  if (deps.loop) {
+    lines.push("function loop() { _ctx._looping = true; }");
+  }
+
+  if (deps.noLoop) {
+    lines.push("function noLoop() { _ctx._looping = false; }");
+  }
+
+  if (deps.redraw) {
+    lines.push("function redraw() { _ctx._redrawRequested = true; }");
+  }
+
   return lines.join("\n");
 }
 

@@ -17,6 +17,7 @@ var m = {};
 
   // Processing-style modules (must be before core.js)
   #include "includes/math.js"
+  #include "includes/DATA.js"
   #include "includes/transformation.js"
   #include "includes/color.js"
   #include "includes/typography.js"

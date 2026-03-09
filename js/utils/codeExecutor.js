@@ -6,6 +6,16 @@ window.codeExecutor = (function () {
   let imageAnalyzer = null;
   let p5Analyzer = null;
   let fontAnalyzer = null;
+  const AE_RESERVED_DATA_HELPERS = {
+    boolean: "_data_boolean",
+    byte: "_data_byte",
+    char: "_data_char",
+    float: "_data_float",
+    hex: "_data_hex",
+    int: "_data_int",
+    unchar: "_data_unchar",
+    unhex: "_data_unhex",
+  };
 
   function getImageAnalyzer() {
     if (!imageAnalyzer && typeof window.ImageAnalyzer !== "undefined") {
@@ -286,6 +296,72 @@ window.codeExecutor = (function () {
     return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
+  function rewriteReservedDataHelperCalls(code) {
+    const source = String(code || "");
+    let out = "";
+    let i = 0;
+    let inStr = false;
+    let strChar = "";
+
+    while (i < source.length) {
+      const ch = source[i];
+
+      if (inStr) {
+        out += ch;
+        if (ch === "\\" && i + 1 < source.length) {
+          out += source[i + 1];
+          i += 2;
+          continue;
+        }
+        if (ch === strChar) {
+          inStr = false;
+        }
+        i++;
+        continue;
+      }
+
+      if (ch === '"' || ch === "'" || ch === "`") {
+        inStr = true;
+        strChar = ch;
+        out += ch;
+        i++;
+        continue;
+      }
+
+      if (/[A-Za-z_$]/.test(ch)) {
+        let j = i + 1;
+        while (j < source.length && /[A-Za-z0-9_$]/.test(source[j])) {
+          j++;
+        }
+
+        const word = source.slice(i, j);
+        const alias = AE_RESERVED_DATA_HELPERS[word];
+        const prev = i > 0 ? source[i - 1] : "";
+
+        if (alias && prev !== "." && !/[A-Za-z0-9_$]/.test(prev)) {
+          let k = j;
+          while (k < source.length && /\s/.test(source[k])) {
+            k++;
+          }
+          if (source[k] === "(") {
+            out += alias;
+            i = j;
+            continue;
+          }
+        }
+
+        out += word;
+        i = j;
+        continue;
+      }
+
+      out += ch;
+      i++;
+    }
+
+    return out;
+  }
+
   function getP5Analyzer() {
     if (!p5Analyzer && typeof window.P5Analyzer !== "undefined") {
       p5Analyzer = new window.P5Analyzer({
@@ -419,6 +495,13 @@ window.codeExecutor = (function () {
         code = await translateFontNames(code);
 
         const parsed = parseProcessingCode(code);
+        const aeDrawCode = rewriteReservedDataHelperCalls(parsed.drawCode || "");
+        const aeSetupCode = rewriteReservedDataHelperCalls(
+          parsed.setupCode || "",
+        );
+        const aeGlobalCode = rewriteReservedDataHelperCalls(
+          parsed.globalCode || "",
+        );
 
         const analysisCode =
           (parsed.globalCode || "") +
@@ -469,9 +552,9 @@ window.codeExecutor = (function () {
           }
         }
 
-        const drawArg = JSON.stringify(parsed.drawCode || "");
-        const setupArg = JSON.stringify(parsed.setupCode || "");
-        const globalArg = JSON.stringify(parsed.globalCode || "");
+        const drawArg = JSON.stringify(aeDrawCode);
+        const setupArg = JSON.stringify(aeSetupCode);
+        const globalArg = JSON.stringify(aeGlobalCode);
         const nameArg = JSON.stringify(compName);
 
         const setupRenderLayersArg =
@@ -550,7 +633,11 @@ window.codeExecutor = (function () {
               if (result && result.startsWith && result.startsWith("ERROR:")) {
                 console.error("[CodeExecutor] AE script error:", result);
               }
-              if (result && result.startsWith && result.indexOf("__DEBUG__") === 0) {
+              if (
+                result &&
+                result.startsWith &&
+                result.indexOf("__DEBUG__") === 0
+              ) {
                 try {
                   const logs = JSON.parse(result.substring("__DEBUG__".length));
                   if (Array.isArray(logs)) {
@@ -559,7 +646,10 @@ window.codeExecutor = (function () {
                     }
                   }
                 } catch (e) {
-                  console.warn("[CodeExecutor] 解析 AE debug 日志失败:", e.message);
+                  console.warn(
+                    "[CodeExecutor] 解析 AE debug 日志失败:",
+                    e.message,
+                  );
                 }
               }
               if (

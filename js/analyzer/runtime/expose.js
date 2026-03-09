@@ -165,6 +165,7 @@ function exposeFunctions(context, mode) {
   var imageLoadTracker = context.imageLoadTracker;
   var tableLoadTracker = context.tableLoadTracker;
   var jsonLoadTracker = context.jsonLoadTracker;
+  var suppressPrint = !!context.suppressPrint;
 
   var shapeTypeMap = getShapeTypeMapFn ? getShapeTypeMapFn(context.cache) : {};
   var transformFuncs =
@@ -183,6 +184,17 @@ function exposeFunctions(context, mode) {
   var stateManager = createShapeStateManager();
 
   allFunctions.forEach(function (funcName) {
+    if (funcName === "print") {
+      if (window.__momentumOriginalPrint === undefined) {
+        window.__momentumOriginalPrint = window.print;
+      }
+      window[funcName] = function () {
+        if (suppressPrint) return;
+        return console.log.apply(console, arguments);
+      };
+      return;
+    }
+
     var original = getP5Function(p, funcName);
     var builderInfo = getBuilderInfo(funcName);
 

@@ -121,11 +121,16 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
       expr.push("    frameCount = currentFrame;");
     }
     expr.push("    _render = (f === targetFrame);");
+    expr.push(
+      "    if (_ctx._looping !== false || _ctx._redrawRequested === true) {",
+    );
     if (hasShapes) {
-      expr.push("    resetMatrix(); __user__.draw();");
+      expr.push("      resetMatrix(); __user__.draw();");
     } else {
-      expr.push("    __user__.draw();");
+      expr.push("      __user__.draw();");
     }
+    expr.push("      _ctx._redrawRequested = false;");
+    expr.push("    }");
     expr.push("  }");
     expr.push("  _ctx._lastComputedFrame = currentFrame;");
     expr.push("} else if (currentFrame === _lastComputedFrame) {");
@@ -160,11 +165,16 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
       expr.push("    frameCount = currentFrame;");
     }
     expr.push("    _render = (f === targetFrame);");
+    expr.push(
+      "    if (_ctx._looping !== false || _ctx._redrawRequested === true) {",
+    );
     if (hasShapes) {
-      expr.push("    resetMatrix(); __user__.draw();");
+      expr.push("      resetMatrix(); __user__.draw();");
     } else {
-      expr.push("    __user__.draw();");
+      expr.push("      __user__.draw();");
     }
+    expr.push("      _ctx._redrawRequested = false;");
+    expr.push("    }");
     expr.push("  }");
     expr.push("  _ctx._lastComputedFrame = currentFrame;");
     expr.push("} else if (currentFrame === _lastComputedFrame) {");
