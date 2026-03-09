@@ -1,11 +1,4 @@
-/**
- * IOAnalyzer helpers
- *
- * 职责：
- * 1. 解析 user/ 下数据文件的真实路径
- * 2. 为 runtime.js 提供 loadTable / loadJSON 包装器
- * 3. 在前端尽量复用真实 p5 的加载实现
- */
+// Frontend IO helpers for loadTable/loadJSON wrappers.
 
 function ioState() {
   if (!window.__momentumIO) {

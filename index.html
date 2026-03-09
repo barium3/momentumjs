@@ -65,16 +65,24 @@
     <script src="js/fileSystem/fileManager.js"></script>
     <!-- Registry (must be loaded before Runtime) -->
     <script src="bundle/includes/registry.js"></script>
-    <!-- P5 Analyzer Modules -->
-    <script src="js/analyzer/conditionalAnalyzer.js"></script>
-    <script src="js/analyzer/registryUtils.js"></script>
-    <script src="js/analyzer/dependencyAnalyzer.js"></script>
-    <script src="js/analyzer/momentumStubs.js"></script>
-    <script src="js/analyzer/ioAnalyzer.js"></script>
-    <script src="js/analyzer/runtime.js"></script>
+    <!-- Analyzer: shared -->
+    <script src="js/analyzer/shared/ast.js"></script>
+    <script src="js/analyzer/shared/registry.js"></script>
+    <!-- Analyzer: static analysis -->
+    <script src="js/analyzer/analysis/conditions.js"></script>
+    <script src="js/analyzer/analysis/loops.js"></script>
+    <script src="js/analyzer/analysis/dependencies.js"></script>
+    <!-- Analyzer: runtime -->
+    <script src="js/analyzer/runtime/stubs.js"></script>
+    <script src="js/analyzer/runtime/loaders.js"></script>
+    <script src="js/analyzer/runtime/expose.js"></script>
+    <script src="js/analyzer/runtime/index.js"></script>
+    <!-- Analyzer: assets -->
+    <script src="js/analyzer/assets/io.js"></script>
+    <script src="js/analyzer/assets/fonts.js"></script>
+    <script src="js/analyzer/assets/images.js"></script>
+    <!-- Analyzer facade -->
     <script src="js/analyzer/index.js"></script>
-    <script src="js/analyzer/fontAnalyzer.js"></script>
-    <script src="js/analyzer/imageAnalyzer.js"></script>
     <script src="js/core/editor.js"></script>
     <script src="js/core/init.js"></script>
     <script src="js/main.js"></script>

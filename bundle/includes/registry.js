@@ -631,6 +631,7 @@ functionRegistry.environment = {
   // 配置函数
   createCanvas: { internal: "createCanvas" },
   frameRate: { internal: "frameRate" },
+  duration: { internal: "duration" },
   // 环境变量（按需注入）
   frameCount: { internal: "frameCount", type: "variable" },
   width: { internal: "width", type: "constant" },

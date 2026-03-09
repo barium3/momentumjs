@@ -1,20 +1,9 @@
-/**
- * 条件分支分析器
- * 识别代码中包含渲染函数的条件分支
- * 
- * 新思路：
- * 1. 先找到所有渲染函数调用
- * 2. 对每个渲染函数，向上追溯控制流，找出影响它的 if/return 等
- * 3. 标记需要强制执行的条件
- */
+// Finds control-flow conditions that can block render calls.
 
 class ConditionalAnalyzer {
   constructor() {
-    // 从 registry 获取渲染函数列表
-    if (typeof window !== "undefined" && window.functionRegistry) {
-      this.renderFunctions = window.functionRegistry.getRenderFunctions();
-    } else if (typeof functionRegistry !== "undefined") {
-      this.renderFunctions = functionRegistry.getRenderFunctions();
+    if (typeof getRenderFunctionNames === "function") {
+      this.renderFunctions = getRenderFunctionNames();
     } else {
       throw new Error(
         "[ConditionalAnalyzer] functionRegistry not found. Please ensure registry.js is loaded."
@@ -22,13 +11,7 @@ class ConditionalAnalyzer {
     }
   }
 
-  /**
-   * 查找所有包含渲染函数的条件分支
-   * @param {string} code - 用户代码
-   * @returns {Array} 条件分支数组
-   */
   findBranchesWithRender(code) {
-    // 使用 Acorn 解析代码为 AST
     let ast;
     try {
       ast = acorn.parse(code, { ecmaVersion: 2020, locations: true });
@@ -37,20 +20,10 @@ class ConditionalAnalyzer {
       return [];
     }
 
-    // 阶段1：建立父子节点关系
-    this.addParentLinks(ast);
-
-    // 阶段2：收集所有渲染函数调用
+    addAstParentLinks(ast, null);
     const renderCalls = this.collectRenderFunctions(ast);
-
-    // 阶段2.5：构建「函数定义 ↔ 调用点」的简单调用图
-    // 之后我们会从渲染所在函数一路沿着调用链向外追溯到 setup/draw
     const callGraph = this.buildFunctionCallGraph(ast);
-
-    // 阶段3：对每个渲染函数，找出影响它的条件
-    // 这里用「条件表达式在源码中的起止位置」作为 key，避免仅依赖字符串表达式导致匹配失败
-    // key 形式："start:end"
-    const conditionMap = new Map(); // key: "start:end", value: condition info
+    const conditionMap = new Map();
 
     for (const renderCall of renderCalls) {
       const affectingConditions = this.findAffectingBranches(
@@ -60,12 +33,7 @@ class ConditionalAnalyzer {
       );
       
       for (const cond of affectingConditions) {
-        // 对于正常的 IfStatement，一定会有 cond.node.test
-        // 如果没有（极端情况），退回用 condition 字符串以保持兼容
-        let key = cond.condition;
-        if (cond.node && cond.node.test && typeof cond.node.test.start === "number" && typeof cond.node.test.end === "number") {
-          key = `${cond.node.test.start}:${cond.node.test.end}`;
-        }
+        let key = this.getConditionKey(cond.node && cond.node.test, cond.condition);
         if (!conditionMap.has(key)) {
           conditionMap.set(key, {
             condition: cond.condition,
@@ -84,58 +52,20 @@ class ConditionalAnalyzer {
       }
     }
 
-    // 阶段4：转换为数组并添加 hasRender 标记（向后兼容）
     const conditions = Array.from(conditionMap.values()).map((c) => ({
       ...c,
-      hasRender: true, // 所有返回的条件都包含渲染函数
+      hasRender: true,
     }));
     
     return conditions;
   }
 
-  /**
-   * 建立 AST 节点的父子关系
-   */
-  addParentLinks(node, parent = null) {
-    if (!node) return;
-
-    node.parent = parent;
-
-    for (const key in node) {
-      if (
-        key === "type" ||
-        key === "loc" ||
-        key === "start" ||
-        key === "end" ||
-        key === "parent"
-      )
-        continue;
-
-      const child = node[key];
-      if (Array.isArray(child)) {
-        child.forEach((childNode) => {
-          if (childNode && typeof childNode === "object") {
-            this.addParentLinks(childNode, node);
-          }
-        });
-      } else if (child && typeof child === "object") {
-        this.addParentLinks(child, node);
-      }
-    }
-  }
-
-  /**
-   * 收集所有渲染函数调用
-   * @returns {Array} 渲染函数调用数组，每个元素包含 { node, funcName, functionScope, callChain }
-   */
   collectRenderFunctions(ast) {
     const renderCalls = [];
 
-    this.walkAST(ast, (node) => {
+    walkAst(ast, (node) => {
       if (node.type === "CallExpression") {
-        const funcName =
-          node.callee.name ||
-          (node.callee.property && node.callee.property.name);
+        const funcName = getAstCalleeName(node.callee);
         if (funcName && this.renderFunctions.includes(funcName)) {
           const functionScope = this.findFunctionScope(node);
           renderCalls.push({
@@ -150,10 +80,6 @@ class ConditionalAnalyzer {
     return renderCalls;
   }
 
-  /**
-   * 找到节点所在的函数作用域
-   * @returns {Node|null} 函数节点（FunctionDeclaration/FunctionExpression/ArrowFunctionExpression）
-   */
   findFunctionScope(node) {
     let current = node;
     while (current) {
@@ -166,19 +92,9 @@ class ConditionalAnalyzer {
       }
       current = current.parent;
     }
-    return null; // 在全局作用域
+    return null;
   }
 
-  /**
-   * 获取函数节点的“名字”
-   * - FunctionDeclaration: 直接使用 id.name
-   * - FunctionExpression / ArrowFunctionExpression:
-   *   - 如果被赋值给变量：const foo = () => {} -> "foo"
-   *   - 如果是对象属性：obj.foo = function() {} 或 { foo: function() {} } -> "foo"
-   *   - 其他匿名情况返回 null
-   * @param {Object|null} fnNode
-   * @returns {string|null}
-   */
   getFunctionName(fnNode) {
     if (!fnNode) return null;
 
@@ -193,7 +109,6 @@ class ConditionalAnalyzer {
       const parent = fnNode.parent;
       if (!parent) return null;
 
-      // 变量赋值：const foo = () => {}
       if (
         parent.type === "VariableDeclarator" &&
         parent.id &&
@@ -202,7 +117,6 @@ class ConditionalAnalyzer {
         return parent.id.name;
       }
 
-      // 直接赋值：foo = () => {}
       if (
         parent.type === "AssignmentExpression" &&
         parent.left &&
@@ -211,7 +125,6 @@ class ConditionalAnalyzer {
         return parent.left.name;
       }
 
-      // 对象属性：{ foo: function() {} } 或 obj.foo = function() {}
       if (parent.type === "Property" && parent.key) {
         return parent.key.name || parent.key.value || null;
       }
@@ -220,37 +133,17 @@ class ConditionalAnalyzer {
     return null;
   }
 
-  /**
-   * 构建一个非常简单的「函数调用图」
-   * - 只关心：某个名字的函数（包括方法名）在什么函数里、以什么调用表达式被调用
-   * - 不做类实例分析，也不区分 obj.foo() / foo()，统一按名字 foo 归类
-   *
-   * 返回：
-   * - callSitesByName: Map<calleeName, Array<{ callNode, callerFunction }>>
-   */
   buildFunctionCallGraph(ast) {
     const callSitesByName = new Map();
 
-    this.walkAST(ast, (node) => {
+    walkAst(ast, (node) => {
       if (node.type === "CallExpression") {
-        let calleeName = null;
-
-        if (node.callee.type === "Identifier") {
-          calleeName = node.callee.name;
-        } else if (
-          node.callee.type === "MemberExpression" &&
-          node.callee.property &&
-          node.callee.property.type === "Identifier"
-        ) {
-          // 对于 obj.foo() / arr[i].foo()，统一把方法名视为 "foo"
-          calleeName = node.callee.property.name;
-        }
+        let calleeName = getAstCalleeName(node.callee);
 
         if (!calleeName) return false;
 
         const callerFunction = this.findFunctionScope(node);
         if (!callerFunction) {
-          // 顶层调用（直接在全局），目前不继续往上追，可以忽略
           return false;
         }
 
@@ -269,55 +162,27 @@ class ConditionalAnalyzer {
     return { callSitesByName };
   }
 
-  /**
-   * 判断一个节点代表的“执行点”（可以是渲染调用，也可以是普通函数调用）
-   * 在某个函数作用域内，会受到哪些 if/return 的影响。
-   *
-   * 这是一份「局部视角」：只在给定的 functionScope 里，从 node 向外看。
-   * 用于：
-   * - 渲染所在函数内部的条件分析
-   * - 调用链上一层层「调用点」所在函数内部的条件分析
-   *
-   * @param {Object} execNode - 执行点节点（CallExpression）
-   * @param {Object|null} functionScope - 函数作用域，null 表示全局
-   * @param {Object} ast - AST 根
-   * @returns {Array} 条件分支数组
-   */
   collectConditionsForNode(execNode, functionScope, ast) {
     const conditions = [];
     const renderNode = execNode;
-
-    // 确定搜索边界：在函数作用域内查找
     const searchBoundary = functionScope || ast;
-
-    // 从执行点节点向上遍历到函数作用域边界
     let currentNode = renderNode;
-    const visitedIfs = new Set(); // 避免重复处理同一个 if
+    const visitedIfs = new Set();
 
     while (currentNode && currentNode !== searchBoundary) {
       const parent = currentNode.parent;
       if (!parent) break;
-
-      // 如果到达了函数作用域边界，停止
       if (currentNode === functionScope) break;
-
-      // 直接检查父节点是否是 IfStatement
-      // 这样即使执行点在 else 分支中，也能找到包含它的 if 语句
       if (parent.type === "IfStatement" && !visitedIfs.has(parent)) {
         const stmt = parent;
 
-        // 确保 if 语句和执行点在同一函数作用域内
         if (this.isInSameFunctionScope(stmt, renderNode, functionScope)) {
           visitedIfs.add(stmt);
-
-          // 判断执行点是否在 if 的某个分支中
           const inThen = this.isNodeDescendant(renderNode, stmt.consequent);
           const inElse =
             stmt.alternate && this.isNodeDescendant(renderNode, stmt.alternate);
 
           if (inThen) {
-            // 执行点在 then 分支中，需要强制执行 then 分支
-            // 但也要检查 then 分支中是否有嵌套的 if return 会阻止执行点之后的代码执行
             this.processNestedIfsWithReturnInBranch(
               renderNode,
               stmt.consequent,
@@ -326,7 +191,6 @@ class ConditionalAnalyzer {
               conditions
             );
 
-            // 强制执行外层 if 的 then 分支
             const conditionStr = this.extractConditionExpression(stmt.test);
             conditions.push({
               condition: conditionStr,
@@ -335,7 +199,6 @@ class ConditionalAnalyzer {
               node: stmt,
             });
           } else if (inElse) {
-            // 执行点在 else 分支中，需要强制执行 else 分支
             this.processNestedIfsWithReturnInBranch(
               renderNode,
               stmt.alternate,
@@ -355,35 +218,24 @@ class ConditionalAnalyzer {
         }
       }
 
-      // 检查父节点是否是 BlockStatement 或 Program，查找其中的 if 语句
-      // 这些 if 语句可能在执行点之前，且可能包含 return 会阻止执行点执行
       if (parent.type === "BlockStatement" || parent.type === "Program") {
         const statements = parent.body || [];
 
-        // 检查该 BlockStatement 中所有在执行点之前的语句
         for (const stmt of statements) {
-          // 只检查在执行点之前的语句
           if (stmt.end > renderNode.start) break;
-
-          // 检查是否是 IfStatement
           if (stmt.type === "IfStatement" && !visitedIfs.has(stmt)) {
-            // 确保 if 语句和执行点在同一函数作用域内
             if (!this.isInSameFunctionScope(stmt, renderNode, functionScope)) {
               continue;
             }
 
-            // 如果执行点在这个 if 的分支中，已经在上面处理过了，跳过
             const inThen = this.isNodeDescendant(renderNode, stmt.consequent);
             const inElse =
               stmt.alternate && this.isNodeDescendant(renderNode, stmt.alternate);
             if (inThen || inElse) {
-              continue; // 已经在上面处理过了
+              continue;
             }
 
             visitedIfs.add(stmt);
-
-            // 执行点不在 if 的分支中，检查 if 分支中是否有 return 会阻止执行点执行
-            // 这里需要递归检查所有嵌套层级的 if return
             const nestedIfsInThen = this.findNestedIfsWithReturn(
               renderNode,
               stmt.consequent,
@@ -399,13 +251,12 @@ class ConditionalAnalyzer {
                 )
               : [];
 
-            // 添加所有嵌套的 if return
             for (const nestedIf of nestedIfsInThen) {
               if (!visitedIfs.has(nestedIf)) {
                 visitedIfs.add(nestedIf);
                 conditions.push({
                   condition: this.extractConditionExpression(nestedIf.test),
-                  hasThen: false, // 强制条件为 false，让 return 不执行
+                  hasThen: false,
                   hasElse: true,
                   node: nestedIf,
                 });
@@ -416,14 +267,13 @@ class ConditionalAnalyzer {
                 visitedIfs.add(nestedIf);
                 conditions.push({
                   condition: this.extractConditionExpression(nestedIf.test),
-                  hasThen: true, // 强制条件为 true，让 return 不执行（因为 return 在 else 分支）
+                  hasThen: true,
                   hasElse: false,
                   node: nestedIf,
                 });
               }
             }
 
-            // 检查当前 if 的分支中是否有直接的 return（不在嵌套 if 中）
             const hasDirectReturnInThen = this.hasDirectReturn(
               renderNode,
               stmt.consequent,
@@ -439,14 +289,12 @@ class ConditionalAnalyzer {
               nestedIfsInThen.length > 0 ||
               nestedIfsInElse.length > 0
             ) {
-              // 如果 then 分支有 return（直接或嵌套），需要强制条件为 false（让 return 不执行）
-              // 如果 else 分支有 return（直接或嵌套），需要强制条件为 true（让 return 不执行）
               conditions.push({
                 condition: this.extractConditionExpression(stmt.test),
                 hasThen:
-                  !hasDirectReturnInThen && nestedIfsInThen.length === 0, // then 有 return 时，hasThen=false
+                  !hasDirectReturnInThen && nestedIfsInThen.length === 0,
                 hasElse:
-                  hasDirectReturnInThen || nestedIfsInThen.length > 0, // then 有 return 时，hasElse=true
+                  hasDirectReturnInThen || nestedIfsInThen.length > 0,
                 node: stmt,
               });
             }
@@ -454,32 +302,19 @@ class ConditionalAnalyzer {
         }
       }
 
-      // 继续向上遍历
       currentNode = parent;
     }
 
     return conditions;
   }
 
-  /**
-   * 找出影响渲染函数执行的条件分支（包含调用链向上的所有层级）
-   * @param {Object} renderCall - 渲染函数调用信息 { node, funcName, functionScope }
-   * @param {Object} ast - AST 根节点
-   * @param {Object} callGraph - 由 buildFunctionCallGraph 构建的调用图
-   * @returns {Array} 条件分支数组
-   *
-   * 新逻辑：
-   * 1. 先在渲染所在函数内部分析一次（局部）
-   * 2. 再通过调用图，沿调用链一路向外追到 setup/draw（或顶层），在每一层函数内部用同样的逻辑分析
-   */
   findAffectingBranches(renderCall, ast, callGraph) {
     const allConditions = [];
-    const visitedFunctions = new Set(); // 避免递归调用链时重复
+    const visitedFunctions = new Set();
 
     const startFunction = renderCall.functionScope;
     const renderNode = renderCall.node;
 
-    // 1. 当前函数内部的条件
     const localConditions = this.collectConditionsForNode(
       renderNode,
       startFunction,
@@ -487,11 +322,9 @@ class ConditionalAnalyzer {
     );
     allConditions.push(...localConditions);
 
-    // 2. 通过调用图，沿调用链向外一层层查找调用点，并在各层函数内部收集条件
     const functionName = this.getFunctionName(startFunction);
 
     if (!functionName) {
-      // 渲染在匿名函数或全局中，无法通过名字往上追调用链，只返回局部结果
       return allConditions;
     }
 
@@ -507,7 +340,6 @@ class ConditionalAnalyzer {
 
       const callSites = callSitesByName.get(calleeName) || [];
       for (const { callNode, callerFunction } of callSites) {
-        // 2.1 在调用点所在函数内部收集条件
         const callerConds = this.collectConditionsForNode(
           callNode,
           callerFunction,
@@ -515,7 +347,6 @@ class ConditionalAnalyzer {
         );
         allConditions.push(...callerConds);
 
-        // 2.2 如果调用方本身也有名字，继续向它的上层调用者追溯
         const callerName = this.getFunctionName(callerFunction);
         if (callerName) {
           collectFromCallers(callerName);
@@ -540,14 +371,12 @@ class ConditionalAnalyzer {
     if (!branchNode) return [];
 
     const nestedIfs = [];
-    const localVisited = new Set(); // 本地已访问集合，避免在同一分支中重复处理
+    const localVisited = new Set();
 
-    // 遍历分支节点，查找所有 if 语句
     this.walkNode(branchNode, (node) => {
       if (node.type === "IfStatement" && !localVisited.has(node) && !visitedIfs.has(node)) {
         localVisited.add(node);
 
-        // 检查这个 if 的分支中是否有 return
         const hasReturnInThen = this.hasDirectReturn(
           renderNode,
           node.consequent,
@@ -557,7 +386,6 @@ class ConditionalAnalyzer {
           ? this.hasDirectReturn(renderNode, node.alternate, functionScope)
           : false;
 
-        // 递归检查嵌套的 if（使用本地集合避免重复）
         const deeperNestedInThen = this.findNestedIfsWithReturn(
           renderNode,
           node.consequent,
@@ -570,7 +398,6 @@ class ConditionalAnalyzer {
 
         if (hasReturnInThen || hasReturnInElse || deeperNestedInThen.length > 0 || deeperNestedInElse.length > 0) {
           nestedIfs.push(node);
-          // 也添加更深层的嵌套 if
           nestedIfs.push(...deeperNestedInThen);
           nestedIfs.push(...deeperNestedInElse);
         }
@@ -592,14 +419,12 @@ class ConditionalAnalyzer {
   processNestedIfsWithReturnInBranch(renderNode, branchNode, functionScope, visitedIfs, conditions) {
     if (!branchNode) return;
 
-    const localVisited = new Set(); // 本地已访问集合，避免在同一分支中重复处理
+    const localVisited = new Set();
 
-    // 遍历分支节点，查找所有 if 语句
     this.walkNode(branchNode, (node) => {
       if (node.type === "IfStatement" && !localVisited.has(node) && !visitedIfs.has(node)) {
         localVisited.add(node);
 
-        // 检查这个 if 的分支中是否有 return
         const hasReturnInThen = this.hasDirectReturn(
           renderNode,
           node.consequent,
@@ -609,7 +434,6 @@ class ConditionalAnalyzer {
           ? this.hasDirectReturn(renderNode, node.alternate, functionScope)
           : false;
 
-        // 递归检查嵌套的 if
         const deeperNestedInThen = this.findNestedIfsWithReturn(
           renderNode,
           node.consequent,
@@ -620,24 +444,22 @@ class ConditionalAnalyzer {
           ? this.findNestedIfsWithReturn(renderNode, node.alternate, functionScope, visitedIfs)
           : [];
 
-        // 如果 then 分支有 return（直接或嵌套），需要强制条件为 false（让 return 不执行）
         if (hasReturnInThen || deeperNestedInThen.length > 0) {
           if (!visitedIfs.has(node)) {
             visitedIfs.add(node);
             conditions.push({
               condition: this.extractConditionExpression(node.test),
-              hasThen: false, // 强制条件为 false，让 return 不执行
+              hasThen: false,
               hasElse: true,
               node: node,
             });
           }
-          // 处理更深层的嵌套 if
           for (const nestedIf of deeperNestedInThen) {
             if (!visitedIfs.has(nestedIf)) {
               visitedIfs.add(nestedIf);
               conditions.push({
                 condition: this.extractConditionExpression(nestedIf.test),
-                hasThen: false, // 强制条件为 false，让 return 不执行
+                hasThen: false,
                 hasElse: true,
                 node: nestedIf,
               });
@@ -651,18 +473,17 @@ class ConditionalAnalyzer {
             visitedIfs.add(node);
             conditions.push({
               condition: this.extractConditionExpression(node.test),
-              hasThen: true, // 强制条件为 true，让 return 不执行（因为 return 在 else 分支）
+              hasThen: true,
               hasElse: false,
               node: node,
             });
           }
-          // 处理更深层的嵌套 if
           for (const nestedIf of deeperNestedInElse) {
             if (!visitedIfs.has(nestedIf)) {
               visitedIfs.add(nestedIf);
               conditions.push({
                 condition: this.extractConditionExpression(nestedIf.test),
-                hasThen: true, // 强制条件为 true，让 return 不执行
+                hasThen: true,
                 hasElse: false,
                 node: nestedIf,
               });
@@ -674,17 +495,9 @@ class ConditionalAnalyzer {
     });
   }
 
-  /**
-   * 检查分支中是否有直接的 return（在当前分支的直接语句中，不在嵌套 if 中）
-   * @param {Object} renderNode - 渲染函数节点
-   * @param {Object} branchNode - 要检查的分支节点
-   * @param {Object} functionScope - 函数作用域
-   * @returns {boolean} 是否有直接的 return
-   */
   hasDirectReturn(renderNode, branchNode, functionScope) {
     if (!branchNode) return false;
 
-    // 如果分支是 BlockStatement，检查其直接子语句
     if (branchNode.type === "BlockStatement") {
       const statements = branchNode.body || [];
       for (const stmt of statements) {
@@ -698,7 +511,6 @@ class ConditionalAnalyzer {
         }
       }
     } else if (branchNode.type === "ReturnStatement" || branchNode.type === "ThrowStatement") {
-      // 如果分支本身就是 return 语句
       if (
         branchNode.start < renderNode.start &&
         this.isInSameFunctionScope(branchNode, renderNode, functionScope)
@@ -710,9 +522,6 @@ class ConditionalAnalyzer {
     return false;
   }
 
-  /**
-   * 判断 node1 是否是 node2 的后代节点
-   */
   isNodeDescendant(node1, node2) {
     if (!node1 || !node2) return false;
     if (node1 === node2) return true;
@@ -725,51 +534,15 @@ class ConditionalAnalyzer {
     return false;
   }
 
-  /**
-   * 判断两个节点是否在同一函数作用域内
-   */
   isInSameFunctionScope(node1, node2, functionScope) {
     if (!functionScope) {
-      // 都在全局作用域
       return true;
     }
 
-    // 检查两个节点是否都在 functionScope 内
     const node1InScope = this.isNodeDescendant(node1, functionScope) || node1 === functionScope;
     const node2InScope = this.isNodeDescendant(node2, functionScope) || node2 === functionScope;
 
     return node1InScope && node2InScope;
-  }
-
-  /**
-   * 遍历 AST（通用方法）
-   */
-  walkAST(node, callback) {
-    if (!node) return;
-
-    if (callback(node)) return; // 如果 callback 返回 true，停止遍历
-
-    for (const key in node) {
-      if (
-        key === "type" ||
-        key === "loc" ||
-        key === "start" ||
-        key === "end" ||
-        key === "parent"
-      )
-        continue;
-
-      const child = node[key];
-      if (Array.isArray(child)) {
-        child.forEach((childNode) => {
-          if (childNode && typeof childNode === "object") {
-            this.walkAST(childNode, callback);
-          }
-        });
-      } else if (child && typeof child === "object") {
-        this.walkAST(child, callback);
-      }
-    }
   }
 
   /**
@@ -792,7 +565,6 @@ class ConditionalAnalyzer {
       case "MemberExpression":
         return this.extractMemberExpression(node);
       case "CallExpression":
-        // 处理函数调用，如 abs(cA.r-cB.r)
         const callee = this.extractConditionExpression(node.callee);
         const args = node.arguments.map(arg => this.extractConditionExpression(arg)).join(", ");
         return `${callee}(${args})`;
@@ -801,9 +573,6 @@ class ConditionalAnalyzer {
     }
   }
 
-  /**
-   * 提取成员表达式
-   */
   extractMemberExpression(node) {
     let obj = "";
     if (node.object.type === "Identifier") {
@@ -816,9 +585,6 @@ class ConditionalAnalyzer {
     return `${obj}.${prop}`;
   }
 
-  /**
-   * 遍历节点
-   */
   walkNode(node, callback) {
     if (!node) return false;
 
@@ -843,19 +609,11 @@ class ConditionalAnalyzer {
     return false;
   }
 
-  /**
-   * 将 else/else if 转换为独立 if，并强制所有条件为 true
-   * 这样可以让所有分支都在单次执行中运行
-   * @param {string} code - 原始代码
-   * @param {Array} conditions - 条件分支数组（从 findBranchesWithRender 获取）
-   * @returns {string} 修改后的代码
-   */
   convertElseToIndependentIf(code, conditions) {
     if (!conditions || conditions.length === 0) {
       return code;
     }
 
-    // 解析代码为 AST
     let ast;
     try {
       ast = acorn.parse(code, { ecmaVersion: 2020, locations: true, sourceType: "script" });
@@ -864,38 +622,24 @@ class ConditionalAnalyzer {
       return code;
     }
 
-    // 建立父子节点关系
-    this.addParentLinks(ast);
+    addAstParentLinks(ast, null);
 
-    // 收集所有需要处理的 IfStatement 节点
     const ifNodesToProcess = [];
-    // 这里同样用 "start:end" 作为 key，和 findBranchesWithRender 中保持一致
-    const conditionMap = new Map(); // key: "start:end", value: condition info
+    const conditionMap = new Map();
 
-    // 建立条件字符串到条件信息的映射
     for (const cond of conditions) {
-      let key = cond.condition;
-      if (cond.node && cond.node.test && typeof cond.node.test.start === "number" && typeof cond.node.test.end === "number") {
-        key = `${cond.node.test.start}:${cond.node.test.end}`;
-      }
+      let key = this.getConditionKey(cond.node && cond.node.test, cond.condition);
       if (!conditionMap.has(key)) {
         conditionMap.set(key, cond);
       }
     }
 
-    // 遍历 AST，找到所有 IfStatement 节点
     const self = this;
     function traverse(node) {
       if (!node) return;
       
       if (node.type === "IfStatement") {
-        // 优先使用 test 的源码位置信息进行匹配，避免仅依赖字符串表达式
-        let key = null;
-        if (node.test && typeof node.test.start === "number" && typeof node.test.end === "number") {
-          key = `${node.test.start}:${node.test.end}`;
-        } else {
-          key = self.extractConditionExpression(node.test);
-        }
+        let key = self.getConditionKey(node.test, self.extractConditionExpression(node.test));
         if (conditionMap.has(key)) {
           ifNodesToProcess.push({
             node: node,
@@ -904,7 +648,6 @@ class ConditionalAnalyzer {
         }
       }
 
-      // 递归遍历子节点
       for (const key in node) {
         if (key === "parent") continue;
         const child = node[key];
@@ -926,7 +669,6 @@ class ConditionalAnalyzer {
       return code;
     }
 
-    // 按照位置从后往前排序，避免修改时位置偏移
     ifNodesToProcess.sort((a, b) => {
       const startA = a.node.test ? a.node.test.start : a.node.start;
       const startB = b.node.test ? b.node.test.start : b.node.start;
@@ -934,18 +676,11 @@ class ConditionalAnalyzer {
     });
 
     let modifiedCode = code;
-    let modifications = []; // 存储所有修改操作
+    let modifications = [];
 
-    // 收集所有需要进行的修改
     for (const { node, condition } of ifNodesToProcess) {
-      // 根据条件信息决定如何修改
-      // hasThen: true 表示需要执行 then 分支
-      // hasElse: true 表示需要执行 else 分支
-      
-      // 1. 处理条件表达式
       if (node.test) {
         if (condition.hasThen && !condition.hasElse) {
-          // 只需要执行 then 分支，强制条件为 true
           modifications.push({
             type: "forceCondition",
             start: node.test.start,
@@ -953,9 +688,7 @@ class ConditionalAnalyzer {
             value: "true",
           });
         } else if (!condition.hasThen && condition.hasElse) {
-          // 只需要执行 else 分支
           if (node.alternate) {
-            // 有 else 分支，强制条件为 false（不执行 then，执行 else）
             modifications.push({
               type: "forceCondition",
               start: node.test.start,
@@ -963,7 +696,6 @@ class ConditionalAnalyzer {
               value: "false",
             });
           } else {
-            // 没有 else 分支，强制条件为 false（不执行 then 中的 return）
             modifications.push({
               type: "forceCondition",
               start: node.test.start,
@@ -972,15 +704,13 @@ class ConditionalAnalyzer {
             });
           }
         } else if (condition.hasThen && condition.hasElse) {
-          // 两个分支都需要执行，强制条件为 true，并将 else 转换为独立 if
           modifications.push({
             type: "forceCondition",
             start: node.test.start,
             end: node.test.end,
-            value: "true",
-          });
+              value: "true",
+            });
         } else {
-          // 默认情况：强制条件为 true
           modifications.push({
             type: "forceCondition",
             start: node.test.start,
@@ -990,41 +720,27 @@ class ConditionalAnalyzer {
         }
       }
 
-      // 2. 如果有 else/else if，需要执行 else 分支，或者存在 else if 结构本身，就转换为独立 if
-      // 说明：
-      // - 原逻辑只在 condition.hasElse 为 true 时才处理 else/else if
-      // - 这会导致某些只有 then 分支包含渲染、但 else if 分支也需要被统一强制执行的情况遗漏
-      // - 为了更好地支持 `else if`，当 alternate 是 IfStatement（即 else if）时也一并转换为独立 if
       if (node.alternate && (condition.hasElse || node.alternate.type === "IfStatement")) {
-        // 找到 else 的位置（consequent 的结束位置）
         let elseStart = node.consequent.end;
         
-        // 跳过空格和换行
         while (elseStart < code.length && 
                (code[elseStart] === " " || code[elseStart] === "\n" || code[elseStart] === "\t" || code[elseStart] === "\r")) {
           elseStart++;
         }
         
-        // 检查是否是 else
         if (code.substring(elseStart, elseStart + 4) === "else") {
           let elseContentStart = elseStart + 4;
-          // 跳过空格
           while (elseContentStart < code.length && 
                  (code[elseContentStart] === " " || code[elseContentStart] === "\n" || code[elseContentStart] === "\t" || code[elseContentStart] === "\r")) {
             elseContentStart++;
           }
 
-          // 检查是否是 else if
           const isElseIf = code.substring(elseContentStart, elseContentStart + 2) === "if";
           
           if (isElseIf) {
-            // else if -> 转换为独立 if
-            // 这里不要再手动解析括号，直接依赖 AST 位置信息，避免换行/空格格式导致语法截断
-            // parent `node` 的 alternate 一定是 IfStatement，本身的 `consequent.start` 是条件后面第一个语句的位置
-            // 因此从 elseStart 一直到 alternate.consequent.start 之间的源码就是 "else if (condition)" 这一段
             let elseIfEnd = node.alternate && node.alternate.consequent
               ? node.alternate.consequent.start
-              : elseContentStart + 2; // 兜底：至少吃掉 "else if"
+              : elseContentStart + 2;
 
             modifications.push({
               type: "convertElseIf",
@@ -1032,8 +748,6 @@ class ConditionalAnalyzer {
               elseIfEnd: elseIfEnd,
             });
           } else {
-            // else -> 转换为独立 if (true)
-            // 记录修改：将 "else" 替换为 "if (true /* forced */)"
             modifications.push({
               type: "convertElse",
               elseStart: elseStart,
@@ -1044,14 +758,6 @@ class ConditionalAnalyzer {
       }
     }
 
-    // 在应用修改前，先移除会与 else/else if 头部改写产生冲突的条件强制修改
-    // 场景说明：
-    // - 对于 `else if (cond)`，我们会：
-    //   1) 对 cond 做一次 `forceCondition`（把 cond 改成 true/false）
-    //   2) 再用 `convertElseIf` 把整段 `else if (cond)` 头部替换成 `if (true /* forced */)`
-    // - 如果两个修改都生效，会导致头部被部分覆盖，出现诸如 `if (true /* forced */)rced */)` 之类的语法残片
-    // 解决方案：
-    // - 对所有 `convertElseIf` / `convertElse` 的覆盖区间，删除落在这些区间内的 `forceCondition`
     if (modifications.length > 0) {
       const headerRanges = [];
       for (const mod of modifications) {
@@ -1077,14 +783,12 @@ class ConditionalAnalyzer {
       }
     }
 
-    // 按照位置从后往前应用修改
     modifications.sort((a, b) => {
       const posA = a.start || a.elseStart || 0;
       const posB = b.start || b.elseStart || 0;
       return posB - posA;
     });
 
-    // 应用所有修改
     for (const mod of modifications) {
       if (mod.type === "forceCondition") {
         const value = mod.value || "true";
@@ -1106,6 +810,17 @@ class ConditionalAnalyzer {
     }
 
     return modifiedCode;
+  }
+
+  getConditionKey(node, fallback) {
+    if (
+      node &&
+      typeof node.start === "number" &&
+      typeof node.end === "number"
+    ) {
+      return `${node.start}:${node.end}`;
+    }
+    return fallback || "";
   }
 }
 

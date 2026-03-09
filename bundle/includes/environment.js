@@ -1,6 +1,6 @@
 // ----------------------------------------
 // Environment Configuration
-// 处理 Processing 风格的环境配置 (size, frameRate)
+// 处理 createCanvas / frameRate / duration 这类工程级配置
 // ----------------------------------------
 
 /**
@@ -31,6 +31,74 @@ function extractFrameRateParam(code) {
     return parseInt(match[1]);
   }
   return null;
+}
+
+function _parseDurationTimecode(value, fps) {
+  var parts = String(value || "").split(":");
+  if (parts.length !== 3 && parts.length !== 4) return null;
+
+  var nums = [];
+  for (var i = 0; i < parts.length; i++) {
+    if (!/^\d+$/.test(parts[i])) return null;
+    nums.push(parseInt(parts[i], 10));
+  }
+
+  var hh = 0;
+  var mm = 0;
+  var ss = 0;
+  var ff = 0;
+
+  if (nums.length === 3) {
+    mm = nums[0];
+    ss = nums[1];
+    ff = nums[2];
+  } else {
+    hh = nums[0];
+    mm = nums[1];
+    ss = nums[2];
+    ff = nums[3];
+  }
+
+  if (ss >= 60 || mm >= 60 || ff >= fps) return null;
+  return hh * 3600 + mm * 60 + ss + ff / fps;
+}
+
+function _parseDurationCall(match, fps) {
+  if (!match || !match[1]) return null;
+
+  var rawArgs = match[1].replace(/^\s+|\s+$/g, "");
+  if (!rawArgs) return null;
+
+  if (
+    (rawArgs.charAt(0) === '"' && rawArgs.charAt(rawArgs.length - 1) === '"') ||
+    (rawArgs.charAt(0) === "'" && rawArgs.charAt(rawArgs.length - 1) === "'")
+  ) {
+    return _parseDurationTimecode(rawArgs.slice(1, -1), fps);
+  }
+
+  var parts = rawArgs.split(",");
+  var nums = [];
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].replace(/^\s+|\s+$/g, "");
+    if (!/^\d+(?:\.\d+)?$/.test(part)) return null;
+    nums.push(Number(part));
+  }
+
+  if (nums.length === 1) return nums[0];
+  if (nums.length === 2) return nums[0] + nums[1] / fps;
+  if (nums.length === 3) return nums[0] * 60 + nums[1] + nums[2] / fps;
+  if (nums.length === 4)
+    return nums[0] * 3600 + nums[1] * 60 + nums[2] + nums[3] / fps;
+
+  return null;
+}
+
+function extractDurationParam(code, fps) {
+  var durationPattern = /duration\s*\(\s*([^)]*?)\s*\)/;
+  var match = code.match(durationPattern);
+  if (!match) return null;
+  var seconds = _parseDurationCall(match, fps || 30);
+  return seconds && seconds > 0 ? seconds : null;
 }
 
 /**
@@ -66,15 +134,18 @@ function extractEnvironmentConfig(
 ) {
   var sizeParams = extractSizeParams(setupCode || "");
   var frameRateValue = extractFrameRateParam(setupCode || "");
+  var resolvedFrameRate = frameRateValue || defaultFrameRate || 30;
+  var durationValue = extractDurationParam(setupCode || "", resolvedFrameRate);
 
   return {
     name: compName || "New Composition",
     width: sizeParams ? sizeParams.width : defaultWidth || 100,
     height: sizeParams ? sizeParams.height : defaultHeight || 100,
-    frameRate: frameRateValue || defaultFrameRate || 30,
-    // 原始参数（用于调试或传递）
+    frameRate: resolvedFrameRate,
+    duration: durationValue || 10,
     sizeParams: sizeParams,
     frameRateValue: frameRateValue,
+    durationValue: durationValue,
   };
 }
 
@@ -87,6 +158,7 @@ function extractEnvironmentConfig(
 function removeConfigFunctions(code) {
   code = code.replace(/createCanvas\s*\([^)]*\)\s*;?/g, "");
   code = code.replace(/frameRate\s*\([^)]*\)\s*;?/g, "");
+  code = code.replace(/duration\s*\([^)]*\)\s*;?/g, "");
   return code;
 }
 

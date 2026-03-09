@@ -1,8 +1,4 @@
-// ----------------------------------------
-// Core
-// 负责主合成 / 预合成创建、engine 表达式生成与图层装配
-// ----------------------------------------
-
+// Core composition and engine assembly for Momentum sketches.
 function isArray(arg) {
   return Object.prototype.toString.call(arg) === "[object Array]";
 }
@@ -16,48 +12,39 @@ var setupShapeQueue = [];
 var drawShapeQueue = [];
 var mainCompName = null;
 var _globalRenderIndex = null;
-
 var DEFAULT_COMP_DURATION = 10;
 
-function _findProjectItemByName(name, predicate) {
+function hasProjectItemNamed(name, itemClass) {
   for (var i = 1; i <= app.project.items.length; i++) {
     var item = app.project.items[i];
     if (!item || item.name !== name) continue;
-    if (!predicate || predicate(item)) return item;
+    if (!itemClass || item instanceof itemClass) return true;
   }
-  return null;
+  return false;
 }
 
-function _uniqueProjectItemName(baseName, fallbackName, predicate) {
+function getUniqueProjectItemName(baseName, fallbackName, itemClass) {
   var name = baseName && baseName.length ? baseName : fallbackName;
-  if (!_findProjectItemByName(name, predicate)) {
-    return name;
+  if (!hasProjectItemNamed(name, itemClass)) return name;
+
+  for (var counter = 1; counter < 10000; counter++) {
+    var nextName = name + " " + counter;
+    if (!hasProjectItemNamed(nextName, itemClass)) return nextName;
   }
-
-  var counter = 1;
-  do {
-    var newName = name + " " + counter;
-    if (!_findProjectItemByName(newName, predicate)) {
-      return newName;
-    }
-    counter++;
-  } while (counter < 10000);
-
   return name + " " + new Date().getTime();
 }
 
 function getUniqueCompName(baseName) {
-  return _uniqueProjectItemName(baseName, "New Composition");
+  return getUniqueProjectItemName(baseName, "New Composition", null);
 }
 
 function getUniqueFolderName(baseName) {
-  return _uniqueProjectItemName(baseName, "New Folder", function (item) {
-    return item instanceof FolderItem;
-  });
+  return getUniqueProjectItemName(baseName, "New Folder", FolderItem);
 }
 
 function createCompFolder(folderName) {
-  return app.project.items.addFolder(getUniqueFolderName(folderName));
+  var uniqueFolderName = getUniqueFolderName(folderName);
+  return app.project.items.addFolder(uniqueFolderName);
 }
 
 function isRegistryAvailable() {
@@ -72,24 +59,50 @@ function setCompBackgroundColor(comp, hasSetupOrDraw) {
   }
 }
 
-function _parseJSONArg(arg) {
-  if (arg === undefined || arg === null || arg === "null") return null;
-  try {
-    return typeof arg === "string" ? JSON.parse(arg) : arg;
-  } catch (e) {
-    return null;
-  }
+function createManagedComp(
+  name,
+  width,
+  height,
+  duration,
+  frameRate,
+  folder,
+  hasSetupOrDraw,
+) {
+  var comp = app.project.items.addComp(
+    name,
+    width,
+    height,
+    1,
+    duration,
+    frameRate,
+  );
+  setCompBackgroundColor(comp, hasSetupOrDraw);
+  if (folder) comp.parentFolder = folder;
+  return comp;
 }
 
-function _parseRenderLayersArg(arg) {
-  var parsed = _parseJSONArg(arg);
+function parseMaybeJSONArg(value) {
+  try {
+    if (typeof value === "string" && value !== "null") {
+      return JSON.parse(value);
+    }
+    if (typeof value === "object" && value !== null) {
+      return value;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function parseRenderLayersArg(value) {
+  var parsed = parseMaybeJSONArg(value);
   return isArray(parsed) ? parsed : null;
 }
 
-function _mergeShapeCounts(queue) {
+function countShapesByType(queue) {
   var counts = {};
-  for (var i = 0; i < queue.length; i++) {
-    var item = queue[i];
+  var items = queue || [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
     if (!item || !item.type) continue;
     if (!counts[item.type]) counts[item.type] = 0;
     counts[item.type]++;
@@ -97,16 +110,25 @@ function _mergeShapeCounts(queue) {
   return counts;
 }
 
-function _countBackgroundItems(renderLayers) {
+function resolveDrawBackgroundCount(drawBackgroundCountArg, renderLayers) {
+  if (
+    typeof drawBackgroundCountArg === "number" &&
+    !isNaN(drawBackgroundCountArg)
+  ) {
+    return Math.max(0, drawBackgroundCountArg);
+  }
+
   var count = 0;
-  if (!renderLayers || !isArray(renderLayers)) return count;
-  for (var i = 0; i < renderLayers.length; i++) {
-    var item = renderLayers[i];
+  var items = isArray(renderLayers) ? renderLayers : [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
     if (!item) continue;
+
     if (typeof item === "string") {
       if (item === "background") count++;
       continue;
     }
+
     if (item.type === "background") {
       count += typeof item.count === "number" ? item.count : 1;
     }
@@ -139,21 +161,29 @@ pub.runParsed = function (
     drawComp = null;
     _globalRenderIndex = {};
 
-    var parsedSetupRenderLayers = _parseRenderLayersArg(setupRenderLayersArg);
-    var parsedDrawRenderLayers = _parseRenderLayersArg(drawRenderLayersArg);
+    var parsedSetupRenderLayers = parseRenderLayersArg(setupRenderLayersArg);
+    var parsedDrawRenderLayers = parseRenderLayersArg(drawRenderLayersArg);
 
     if (parsedSetupRenderLayers || parsedDrawRenderLayers) {
-      if (parsedSetupRenderLayers && parsedSetupRenderLayers.length > 0) {
+      if (
+        parsedSetupRenderLayers &&
+        isArray(parsedSetupRenderLayers) &&
+        parsedSetupRenderLayers.length > 0
+      ) {
         setupShapeQueue = processRenderLayers(parsedSetupRenderLayers);
       }
-      if (parsedDrawRenderLayers && parsedDrawRenderLayers.length > 0) {
+      if (
+        parsedDrawRenderLayers &&
+        isArray(parsedDrawRenderLayers) &&
+        parsedDrawRenderLayers.length > 0
+      ) {
         drawShapeQueue = processRenderLayers(parsedDrawRenderLayers);
       }
       shapeQueue = setupShapeQueue.concat(drawShapeQueue);
     }
 
-    var parsedFontMetrics = _parseJSONArg(fontMetricsArg);
-    var parsedImageMetadata = _parseJSONArg(imageMetadataArg);
+    var parsedFontMetrics = parseMaybeJSONArg(fontMetricsArg);
+    var parsedImageMetadata = parseMaybeJSONArg(imageMetadataArg);
 
     var combinedCodeForTables =
       String(globalCode || "") +
@@ -164,20 +194,22 @@ pub.runParsed = function (
     var parsedTableData = collectTableDataFromCode(combinedCodeForTables);
     var parsedJSONData = collectJSONDataFromCode(combinedCodeForTables);
 
+    var configCode = String(globalCode || "") + "\n" + String(setupCode || "");
     var env = extractEnvironmentConfig(
-      setupCode,
+      configCode,
       compName,
       compWidth,
       compHeight,
       compFrameRate,
     );
+    var compDuration = env.duration || DEFAULT_COMP_DURATION;
     var uniqueMainCompName = getUniqueCompName(env.name);
     engineComp = m.composition(
       uniqueMainCompName,
       env.width,
       env.height,
       1,
-      DEFAULT_COMP_DURATION,
+      compDuration,
       env.frameRate,
     );
     var hasSetupOrDraw =
@@ -207,7 +239,15 @@ pub.runParsed = function (
       throw new Error("No code provided");
     }
 
-    var deps = _parseJSONArg(dependenciesArg);
+    var deps = null;
+    try {
+      deps =
+        typeof dependenciesArg === "string"
+          ? JSON.parse(dependenciesArg)
+          : dependenciesArg;
+    } catch (e) {
+      deps = null;
+    }
     var useSeparatedComps =
       setupShapeQueue.length > 0 || drawShapeQueue.length > 0;
 
@@ -216,17 +256,15 @@ pub.runParsed = function (
 
       if (setupShapeQueue.length > 0 && hasSetup) {
         var setupCompName = getUniqueCompName(uniqueMainCompName + "_Setup");
-        setupComp = app.project.items.addComp(
+        setupComp = createManagedComp(
           setupCompName,
           env.width,
           env.height,
-          1,
-          DEFAULT_COMP_DURATION, // setup合成时长与主合成一致
+          compDuration,
           env.frameRate,
+          compFolder,
+          hasSetupOrDraw,
         );
-        setCompBackgroundColor(setupComp, hasSetupOrDraw);
-
-        setupComp.parentFolder = compFolder;
 
         var originalEngineComp = engineComp;
         engineComp = setupComp;
@@ -238,17 +276,15 @@ pub.runParsed = function (
 
       if (drawShapeQueue.length > 0 && hasDraw) {
         var drawCompName = getUniqueCompName(uniqueMainCompName + "_Draw");
-        drawComp = app.project.items.addComp(
+        drawComp = createManagedComp(
           drawCompName,
           env.width,
           env.height,
-          1,
-          DEFAULT_COMP_DURATION,
+          compDuration,
           env.frameRate,
+          compFolder,
+          hasSetupOrDraw,
         );
-        setCompBackgroundColor(drawComp, hasSetupOrDraw);
-
-        drawComp.parentFolder = compFolder;
 
         var originalEngineComp2 = engineComp;
         engineComp = drawComp;
@@ -260,7 +296,7 @@ pub.runParsed = function (
       }
 
       var allShapesQueue = setupShapeQueue.concat(drawShapeQueue);
-      var mergedShapeCounts = _mergeShapeCounts(allShapesQueue);
+      var mergedShapeCounts = countShapesByType(allShapesQueue);
       var originalShapeQueue = shapeQueue;
       shapeQueue = [];
       createEngineLayer(
@@ -288,17 +324,10 @@ pub.runParsed = function (
         var drawLayer = engineComp.layers.add(drawComp);
         drawLayer.name = "__draw__";
         drawLayer.startTime = 0;
-
-        var drawBackgroundCount = 0;
-        if (
-          typeof drawBackgroundCountArg === "number" &&
-          !isNaN(drawBackgroundCountArg)
-        ) {
-          drawBackgroundCount = Math.max(0, drawBackgroundCountArg);
-        } else if (parsedDrawRenderLayers) {
-          drawBackgroundCount = _countBackgroundItems(parsedDrawRenderLayers);
-        }
-
+        var drawBackgroundCount = resolveDrawBackgroundCount(
+          drawBackgroundCountArg,
+          parsedDrawRenderLayers,
+        );
         var drawNeedsEcho =
           drawNeedsEchoArg !== undefined && drawNeedsEchoArg !== null
             ? !!drawNeedsEchoArg
@@ -318,9 +347,7 @@ pub.runParsed = function (
       engineComp.openInViewer();
     } else {
       mainCompName = uniqueMainCompName;
-
-      var mergedShapeCounts = _mergeShapeCounts(shapeQueue);
-
+      var mergedShapeCounts = countShapesByType(shapeQueue);
       createEngineLayer(
         drawCode || "",
         setupCode || "",
@@ -335,9 +362,7 @@ pub.runParsed = function (
         parsedJSONData,
       );
       ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
-
       createShapeLayers(mainCompName, compFolder);
-
       controllerSliderCount = setupControllersFromConfigs(engineComp, null);
       engineComp.openInViewer();
     }
@@ -439,19 +464,7 @@ function createEngineLayer(
     drawCode && drawCode.length > 0 && !drawCode.match(/^\/\/\s*Empty/);
   var hasSetup = setupCode && setupCode.length > 0;
 
-  var shapeCounts = {};
-  if (shapeCountsParam) {
-    shapeCounts = shapeCountsParam;
-  } else {
-    for (var i = 0; i < shapeQueue.length; i++) {
-      var item = shapeQueue[i];
-      if (!shapeCounts[item.type]) {
-        shapeCounts[item.type] = 0;
-      }
-      shapeCounts[item.type]++;
-    }
-  }
-
+  var shapeCounts = shapeCountsParam || countShapesByType(shapeQueue);
   var expr = buildExpression(
     processedDraw,
     processedSetup,
@@ -485,7 +498,6 @@ function cleanupEngineLayer() {
   }
 }
 
-// renderLayers 使用基础类型的全局递增索引，保证 setup / draw 共用稳定 id。
 function processRenderLayers(renderLayersArg) {
   var queue = [];
   if (
@@ -494,6 +506,7 @@ function processRenderLayers(renderLayersArg) {
     renderLayersArg.length > 0
   ) {
     var renderIndex = _globalRenderIndex || {};
+
     for (var i = 0; i < renderLayersArg.length; i++) {
       var item = renderLayersArg[i];
       var type = null;
@@ -547,6 +560,7 @@ function processRenderLayers(renderLayersArg) {
           }
         }
       }
+
       queue.push(entry);
     }
     _globalRenderIndex = renderIndex;
@@ -564,6 +578,7 @@ function hasKeys(obj) {
 
 function buildDepsFromRegistry(categoryDeps, registryKey) {
   var result = {};
+
   if (isRegistryAvailable() && functionRegistry[registryKey]) {
     var category = functionRegistry[registryKey];
     for (var funcName in category) {
@@ -578,6 +593,7 @@ function buildDepsFromRegistry(categoryDeps, registryKey) {
 
 function buildShapeDepsFromRegistry(shapeCounts) {
   var result = {};
+
   if (isRegistryAvailable() && functionRegistry.shapes) {
     var shapes = functionRegistry.shapes;
     for (var shapeName in shapes) {
@@ -594,6 +610,87 @@ function detectUsage(code, name) {
   if (!code) return false;
   var pattern = new RegExp("\\b" + name + "\\b");
   return pattern.test(code);
+}
+
+function pushLib(expr, label, code) {
+  if (!code) return;
+  expr.push("// " + label);
+  expr.push(code);
+}
+
+function pushCounterDecls(expr, shapeCounts) {
+  for (var shapeType in shapeCounts) {
+    if (!(shapeCounts[shapeType] > 0)) continue;
+    var shapeInfo = null;
+    if (isRegistryAvailable() && functionRegistry.getShapeInfo) {
+      shapeInfo = functionRegistry.getShapeInfo(shapeType);
+    }
+    if (!shapeInfo) {
+      throw new Error(
+        "functionRegistry.getShapeInfo is not available for type: " + shapeType,
+      );
+    }
+    expr.push("var " + shapeInfo.internal + "Count = 0;");
+  }
+}
+
+function pushEngineState(
+  expr,
+  fontMetricsParam,
+  imageMetadataParam,
+  tableDataParam,
+  jsonDataParam,
+) {
+  var fontMetricsJson = JSON.stringify(
+    fontMetricsParam && typeof fontMetricsParam === "object"
+      ? fontMetricsParam
+      : {},
+  );
+  var imageMetadataJson = JSON.stringify(
+    imageMetadataParam && typeof imageMetadataParam === "object"
+      ? imageMetadataParam
+      : {},
+  );
+  var tableDataJson = JSON.stringify(
+    tableDataParam && typeof tableDataParam === "object" ? tableDataParam : {},
+  );
+  var jsonDataJson = JSON.stringify(
+    jsonDataParam && typeof jsonDataParam === "object" ? jsonDataParam : {},
+  );
+
+  expr.push("var _ctx = {");
+  expr.push("  version: 1,");
+  expr.push("  fps: fps,");
+  expr.push("  frame: currentFrame,");
+  expr.push("  time: currentTime,");
+  expr.push(
+    "  env: { frameCount: currentFrame, width: thisComp.width, height: thisComp.height },",
+  );
+  expr.push("  shapes: [],");
+  expr.push("  backgrounds: [],");
+  expr.push("  globals: {},");
+  expr.push("  controllers: [],");
+  expr.push("  _lastComputedFrame: -1");
+  expr.push("};");
+  expr.push("var _fm = " + fontMetricsJson + ";");
+  expr.push("var _imd = " + imageMetadataJson + ";");
+  expr.push("var _td = " + tableDataJson + ";");
+  expr.push("var _jd = " + jsonDataJson + ";");
+  expr.push("var _shapes = _ctx.shapes;");
+  expr.push("var _backgrounds = _ctx.backgrounds;");
+}
+
+function extractGlobalVarNames(code) {
+  var names = [];
+  var lines = String(code || "").split("\n");
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (!line || typeof line !== "string") continue;
+    line = line.replace(/^\s+|\s+$/g, "");
+    var varMatch = line.match(/^(?:var|let)\s+(\w+)\s*(?:=\s*(.+))?;?$/);
+    if (varMatch) names.push(varMatch[1]);
+  }
+  return names;
 }
 
 function buildExpression(
@@ -614,7 +711,6 @@ function buildExpression(
   var mathDeps = deps && deps.math ? deps.math : {};
   var transformDeps = deps && deps.transforms ? deps.transforms : {};
   var colorDeps = deps && deps.colors ? deps.colors : {};
-  var shapeDeps = deps && deps.shapes ? deps.shapes : {};
   var typographyDeps = deps && deps.typography ? deps.typography : {};
   var controllerDeps = deps && deps.controllers ? deps.controllers : {};
   var tableDeps = deps && deps.tables ? deps.tables : {};
@@ -643,7 +739,6 @@ function buildExpression(
   }
 
   var envDeps = deps && deps.environment ? deps.environment : {};
-
   var hasShapes = false;
   for (var key in shapeCounts) {
     if (shapeCounts[key] > 0) {
@@ -652,132 +747,81 @@ function buildExpression(
     }
   }
 
-  var expr = [
-    "// =======================================",
-    "// 动态索引分配模式 - 按需加载",
-    "// =======================================",
-    "// 初始化各类型图形的计数器（仅当需要时）",
-  ];
+  var expr = [];
+  pushCounterDecls(expr, shapeCounts);
+  expr.push("var fps = 1 / thisComp.frameDuration;");
+  expr.push("var currentFrame = timeToFrames(time);");
+  expr.push("var currentTime = time;");
+  pushLib(
+    expr,
+    "Environment",
+    hasKeys(envDeps) ? getEnvironmentLib(envDeps) : "",
+  );
+  pushEngineState(
+    expr,
+    fontMetricsParam,
+    imageMetadataParam,
+    tableDataParam,
+    jsonDataParam,
+  );
 
-  for (var shapeType in shapeCounts) {
-    if (shapeCounts[shapeType] > 0) {
-      var shapeInfo = null;
-      if (isRegistryAvailable() && functionRegistry.getShapeInfo) {
-        shapeInfo = functionRegistry.getShapeInfo(shapeType);
-      }
-      if (!shapeInfo) {
-        throw new Error(
-          "functionRegistry.getShapeInfo is not available for type: " +
-            shapeType,
-        );
-      }
-      var internalName = shapeInfo.internal;
-      var counterName = internalName + "Count";
-      expr.push("var " + counterName + " = 0;");
-    }
+  pushLib(
+    expr,
+    "Controllers",
+    hasKeys(controllerDeps)
+      ? getControllerLib(buildDepsFromRegistry(controllerDeps, "controllers"))
+      : "",
+  );
+  pushLib(
+    expr,
+    "Math",
+    hasKeys(mathDeps)
+      ? getMathLib(buildDepsFromRegistry(mathDeps, "math"))
+      : "",
+  );
+  if (hasShapes) {
+    pushLib(expr, "Transform State", getTransformationLib({ state: true }));
   }
-
-  expr.push(
-    "// ========================================",
-    "// 环境变量（内部系统）",
-    "// ========================================",
-    "var fps = 1 / thisComp.frameDuration;",
-    "var currentFrame = timeToFrames(time);",
-    "var currentTime = time;",
+  pushLib(
+    expr,
+    "Transforms",
+    hasKeys(transformDeps)
+      ? getTransformationLib(buildDepsFromRegistry(transformDeps, "transforms"))
+      : "",
   );
 
-  if (hasKeys(envDeps)) {
-    expr.push("// 环境变量库（按需加载）");
-    expr.push(getEnvironmentLib(envDeps));
+  if (hasShapes) {
+    pushLib(expr, "Color State", getColorLib({ state: true }));
   }
+  pushLib(
+    expr,
+    "Colors",
+    hasKeys(colorDeps)
+      ? getColorLib(buildDepsFromRegistry(colorDeps, "colors"))
+      : "",
+  );
 
-  var fontMetricsMap = {};
-  if (fontMetricsParam && typeof fontMetricsParam === "object") {
-    fontMetricsMap = fontMetricsParam;
-  }
-
-  // 冷数据只供 engine 内部使用，不导出到最终 JSON。
-  expr.push("var _ctx = {");
-  expr.push("  version: 1,");
-  expr.push("  fps: fps,");
-  expr.push("  frame: currentFrame,");
-  expr.push("  time: currentTime,");
-  expr.push(
-    "  env: { frameCount: currentFrame, width: thisComp.width, height: thisComp.height },",
-  );
-  expr.push("  shapes: [],");
-  expr.push("  backgrounds: [],");
-  expr.push("  globals: {},");
-  expr.push("  controllers: [],");
-  var fontMetricsJson = JSON.stringify(fontMetricsMap);
-  var imageMetadataJson = JSON.stringify(
-    imageMetadataParam && typeof imageMetadataParam === "object"
-      ? imageMetadataParam
-      : {},
-  );
-  var tableDataJson = JSON.stringify(
-    tableDataParam && typeof tableDataParam === "object" ? tableDataParam : {},
-  );
-  var jsonDataJson = JSON.stringify(
-    jsonDataParam && typeof jsonDataParam === "object" ? jsonDataParam : {},
-  );
-  expr.push("  _lastComputedFrame: -1");
-  expr.push("};");
-  expr.push("var _fm = " + fontMetricsJson + ";");
-  expr.push("var _imd = " + imageMetadataJson + ";");
-  expr.push("var _td = " + tableDataJson + ";");
-  expr.push("var _jd = " + jsonDataJson + ";");
-  expr.push("var _shapes = _ctx.shapes;");
-  expr.push("var _backgrounds = _ctx.backgrounds;");
-
-  if (hasKeys(controllerDeps)) {
-    expr.push("// 控制器库（按需加载）");
-    expr.push(
-      getControllerLib(buildDepsFromRegistry(controllerDeps, "controllers")),
+  if (hasShapes) {
+    pushLib(
+      expr,
+      "Shapes",
+      getShapeLib(buildShapeDepsFromRegistry(shapeCounts)),
     );
-  }
-
-  if (hasKeys(mathDeps)) {
-    expr.push("// 数学库（按需加载）");
-    expr.push(getMathLib(buildDepsFromRegistry(mathDeps, "math")));
-  }
-
-  if (hasShapes) {
-    expr.push("// 变换库（内部函数）");
-    expr.push(getTransformationLib({ state: true }));
-  }
-  if (hasKeys(transformDeps)) {
-    expr.push("// 变换库（用户函数）");
-    expr.push(
-      getTransformationLib(buildDepsFromRegistry(transformDeps, "transforms")),
-    );
-  }
-
-  if (hasShapes) {
-    expr.push("// 颜色库（内部函数）");
-    expr.push(getColorLib({ state: true }));
-  }
-  if (hasKeys(colorDeps)) {
-    expr.push("// 颜色库（用户函数）");
-    expr.push(getColorLib(buildDepsFromRegistry(colorDeps, "colors")));
-  }
-
-  if (hasShapes) {
-    expr.push("// 形状函数库（按需加载）");
-    expr.push(getShapeLib(buildShapeDepsFromRegistry(shapeCounts)));
   }
 
   if (shapeCounts && shapeCounts.image > 0) {
     if (!colorDeps.color) colorDeps = colorDeps || {};
     colorDeps.color = true;
-    expr.push("// 图像库（按需加载）");
-    expr.push(getImageLib({ image: true }));
+    pushLib(expr, "Images", getImageLib({ image: true }));
   }
 
-  if (hasKeys(tableDeps)) {
-    expr.push("// IO 库（按需加载）");
-    expr.push(getIOLib(buildDepsFromRegistry(tableDeps, "tables")));
-  }
+  pushLib(
+    expr,
+    "IO",
+    hasKeys(tableDeps)
+      ? getIOLib(buildDepsFromRegistry(tableDeps, "tables"))
+      : "",
+  );
 
   var needsTextShape = shapeCounts && shapeCounts.text > 0;
   var hasTypographyFuncs = hasKeys(typographyDeps);
@@ -803,14 +847,11 @@ function buildExpression(
       BOTTOM: !!typographyDeps.BOTTOM,
       BASELINE: !!typographyDeps.BASELINE,
     };
-    expr.push("// 排版 / 文本库（按需加载）");
-    expr.push(getTypographyLib(typoDepsForLib));
+    pushLib(expr, "Typography", getTypographyLib(typoDepsForLib));
   }
 
   if (mainCompNameParam) {
-    expr.push("// ========================================");
-    expr.push("// 跨合成全局变量访问（仅子合成需要）");
-    expr.push("// ========================================");
+    expr.push("// Main comp globals bridge");
     expr.push("function _getMainCompGlobalVar(varName) {");
     expr.push("  try {");
     expr.push('    var mainComp = comp("' + mainCompNameParam + '");');
@@ -828,53 +869,19 @@ function buildExpression(
     expr.push("");
   }
 
-  if (processedGlobal) {
-    expr.push("// Global (变量声明)");
-    expr.push(processedGlobal);
-
-    if (mainCompNameParam) {
-      var globalVarNames = [];
-      var globalLines = processedGlobal.split("\n");
-      for (var i = 0; i < globalLines.length; i++) {
-        var line = globalLines[i];
-        if (line && typeof line === "string") {
-          line = line.replace(/^\s+|\s+$/g, "");
-          var varMatch = line.match(/^var\s+(\w+)\s*(?:=\s*(.+))?;?$/);
-          if (varMatch) {
-            globalVarNames.push(varMatch[1]);
-          }
-        }
-      }
-      if (globalVarNames.length > 0) {
-        expr.push("// 从主合成读取全局变量（仅子合成需要）");
-        for (var j = 0; j < globalVarNames.length; j++) {
-          var varName = globalVarNames[j];
-          expr.push("{");
-          expr.push(
-            "  var " +
-              varName +
-              '_main = _getMainCompGlobalVar("' +
-              varName +
-              '");',
-          );
-          expr.push(
-            "  if (" +
-              varName +
-              "_main !== undefined) " +
-              varName +
-              " = " +
-              varName +
-              "_main;",
-          );
-          expr.push("}");
-        }
-      }
-    }
-  }
+  var globalVarNames = extractGlobalVarNames(processedGlobal);
 
   expr.push.apply(
     expr,
-    buildFunctionDefinitions(processedSetup, processedDraw, hasSetup, hasDraw),
+    buildUserScope(
+      processedGlobal,
+      processedSetup,
+      processedDraw,
+      hasSetup,
+      hasDraw,
+      globalVarNames,
+      !!mainCompNameParam,
+    ),
   );
 
   expr.push.apply(

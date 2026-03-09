@@ -4,6 +4,12 @@ var m = {};
 (function(pub, app, undef) {
 
   pub.VERSION = "1.0.0";
+  pub._debugLogs = [];
+  pub._debug = function(msg) {
+    try {
+      pub._debugLogs.push(String(msg));
+    } catch (e) {}
+  };
 
   // Core includes
 
