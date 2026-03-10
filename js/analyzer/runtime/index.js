@@ -168,6 +168,7 @@ function createExecutionState(overrides) {
       renderOrder: [],
       loopExecutions: { value: 0 },
       backgroundInfo: { hasAlpha: false },
+      slotCounters: {},
       imageLoadTracker: { pending: [] },
       tableLoadTracker: { pending: [] },
       jsonLoadTracker: { pending: [] },
@@ -276,6 +277,7 @@ class P5Runtime {
         renderFunctions: this.renderFunctions,
         renderOrder: state.renderOrder,
         backgroundInfo: state.backgroundInfo,
+        slotCounters: state.slotCounters,
         getShapeTypeMap: getShapeTypeMap,
         cache: this,
         loopExecutions: state.loopExecutions,
@@ -311,6 +313,18 @@ class P5Runtime {
       window.preload();
     } catch (preloadErr) {
       console.warn("[Runtime] preload() 调用失败", preloadErr);
+    }
+  }
+
+  _setRuntimePhase(phase) {
+    window.__momentumRuntimePhase = phase || "global";
+  }
+
+  _clearRuntimePhase() {
+    try {
+      delete window.__momentumRuntimePhase;
+    } catch (e) {
+      window.__momentumRuntimePhase = "global";
     }
   }
 
@@ -416,19 +430,25 @@ class P5Runtime {
           .then(function () {
             if (shouldRunSetup && typeof window.setup === "function") {
               try {
+                self._setRuntimePhase("setup");
                 window.setup();
               } catch (setupErr) {
                 console.error("[Runtime] setup() 调用失败", setupErr);
                 throw setupErr;
+              } finally {
+                self._clearRuntimePhase();
               }
             }
 
             if (shouldRunDraw && typeof window.draw === "function") {
               try {
+                self._setRuntimePhase("draw");
                 window.draw();
               } catch (drawErr) {
                 console.error("[Runtime] draw() 调用失败", drawErr);
                 throw drawErr;
+              } finally {
+                self._clearRuntimePhase();
               }
             }
 
@@ -452,18 +472,32 @@ class P5Runtime {
     });
   }
 
-  async executeSetupAndDraw(setupCode, drawCode, globalCode) {
-    const functionDefs = [];
-    if (setupCode && setupCode.trim()) {
-      functionDefs.push(`function setup() { ${setupCode} }`);
+  async executeSetupAndDraw(
+    setupCode,
+    drawCode,
+    globalCode,
+    setupFullCode,
+    drawFullCode,
+    preloadFullCode,
+  ) {
+    const fullDefs = [];
+    if (preloadFullCode && preloadFullCode.trim()) {
+      fullDefs.push(preloadFullCode);
     }
-    if (drawCode && drawCode.trim()) {
-      functionDefs.push(`function draw() { ${drawCode} }`);
+    if (setupFullCode && setupFullCode.trim()) {
+      fullDefs.push(setupFullCode);
+    } else if (setupCode && setupCode.trim()) {
+      fullDefs.push(`function setup() { ${setupCode} }`);
+    }
+    if (drawFullCode && drawFullCode.trim()) {
+      fullDefs.push(drawFullCode);
+    } else if (drawCode && drawCode.trim()) {
+      fullDefs.push(`function draw() { ${drawCode} }`);
     }
 
     const fullCode = globalCode
-      ? globalCode + "\n" + functionDefs.join("\n")
-      : functionDefs.join("\n");
+      ? globalCode + "\n" + fullDefs.join("\n")
+      : fullDefs.join("\n");
     let analysisCode = this._buildAnalysisCode(fullCode);
 
     const { setupResult, drawResult } =
@@ -496,20 +530,26 @@ class P5Runtime {
           .then(function () {
             if (typeof window.setup === "function") {
               try {
+                self._setRuntimePhase("setup");
                 window.setup();
               } catch (setupErr) {
                 console.error("[Runtime] setup() 调用失败", setupErr);
                 throw setupErr;
+              } finally {
+                self._clearRuntimePhase();
               }
             }
 
             self._installExecutionEnvironment(drawState);
             if (typeof window.draw === "function") {
               try {
+                self._setRuntimePhase("draw");
                 window.draw();
               } catch (drawErr) {
                 console.error("[Runtime] draw() 调用失败", drawErr);
                 throw drawErr;
+              } finally {
+                self._clearRuntimePhase();
               }
             }
 

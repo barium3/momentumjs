@@ -297,7 +297,7 @@ function getTextStateLib() {
     "",
     "function textDescent() {",
     "  return _textDescentFor(_textFontFamily, _textSize);",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -306,16 +306,19 @@ function getTextStateLib() {
  */
 function getTextShapeLib() {
   return [
-    "var _textCount = 0;",
-    "",
-    "function _text(str, x, y) {",
+    "function _text() {",
     "  if(!_render){return;}",
+    "  var __shapeArgs = _consumeShapeArgs(arguments);",
+    "  var __vals = __shapeArgs.values;",
+    "  var callsiteId = __shapeArgs.callsiteId;",
+    "  var str = __vals[0];",
+    "  var x = __vals[1];",
+    "  var y = __vals[2];",
     "  if (str === undefined || str === null) { return; }",
-    "  var maxWidth = arguments.length > 3 ? arguments[3] : undefined;",
-    "  var maxHeight = arguments.length > 4 ? arguments[4] : undefined;",
-    "  _textCount++;",
-    "  var m = _textCount;",
-    "  var id = _shapeTypeCode.text * 10000 + m;",
+    "  var maxWidth = __vals.length > 3 ? __vals[3] : undefined;",
+    "  var maxHeight = __vals.length > 4 ? __vals[4] : undefined;",
+    "  var ref = _nextShapeRef('text', callsiteId);",
+    "  var slotKey = ref.slotKey;",
     "  ",
     "  // 统一转成左上角 + 盒子尺寸，供 engine 侧换行/裁剪使用",
     "  var finalX = x;",
@@ -398,7 +401,7 @@ function getTextShapeLib() {
     "  var fauxItalic = (fontStyle === 'ITALIC' || fontStyle === 'BOLDITALIC');",
     "  var layout = _layoutText(String(str), fontSize, leading, wrap, finalWH, _textAlignV, fontFamily);",
     "  _shapes.push({",
-    '    id:id, type:"text",',
+    '    slotKey:slotKey, type:"text",',
     "    pos:p,",
     "    originalPos:originalPos,",
     "    text:layout.text,",
@@ -420,6 +423,7 @@ function getTextShapeLib() {
     "    alignment:{h:_textAlignH, v:_textAlignV}",
     "  });",
     "}",
+    "function text(){ return _text.apply(this, arguments); }"
   ].join("\n");
 }
 
@@ -459,7 +463,7 @@ function _getTextPositionExpr(indexFind) {
     "      [p1[0], p1[1]]",
     "    }",
     "  }",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -485,7 +489,7 @@ function _getAnchorPointExpr(indexFind) {
     "  }",
     "} else {",
     "  value",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -498,8 +502,7 @@ function _getAnchorPointExpr(indexFind) {
  *   - _text 渲染函数（向 _shapes 推入 text 语义对象）
  *
  * 依赖：
- * - 需要在 getShapeLib 之前或之后执行均可，但要求 _shapeTypeCode 已定义，
- *   以便 _text 使用 _shapeTypeCode.text 生成稳定 id。
+ * - 需要在 getShapeLib 之后执行，以便复用其中的 slotKey 绑定辅助函数。
  *
  * @param {Object} deps - 依赖对象：
  *   - deps.text: 是否使用了 text() 形状
@@ -545,7 +548,7 @@ function getTypographyLib(deps) {
 /**
  * 创建 AE 文本图层，并绑定内容、位置和样式表达式。
  */
-function createTextLayerFromContext(index, shapeId, mainCompName) {
+function createTextLayerFromContext(index, slotKey, mainCompName) {
   if (typeof engineComp === "undefined" || !engineComp || !engineComp.layers) {
     return null;
   }
@@ -609,7 +612,7 @@ function createTextLayerFromContext(index, shapeId, mainCompName) {
     // 某些环境不支持这些字段，忽略即可。
   }
 
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
 
   // 文本内容和排版已在 engine 侧预计算，这里只消费最终结果。
   textProp.expression = [
@@ -648,15 +651,15 @@ function createTextLayerFromContext(index, shapeId, mainCompName) {
     "    textStyle = textStyle.setJustification('alignLeft');",
     "  }",
     "} catch (e) {}",
-    "textStyle;",
+    "textStyle;"
   ].join("\n");
 
-  transform.property("Position").expression = _getPositionExpr(indexFind, shapeId);
+  transform.property("Position").expression = _getPositionExpr(indexFind);
   transform.property("Anchor Point").expression =
     _getAnchorPointExpr(indexFind);
 
   // 样式（填充/描边）
-  attachTextStyleExpressions(layer, shapeId, mainCompName);
+  attachTextStyleExpressions(layer, slotKey, mainCompName);
 
   return layer;
 }
@@ -664,7 +667,7 @@ function createTextLayerFromContext(index, shapeId, mainCompName) {
 /**
  * text 数据结构：
  * {
- *   id,
+ *   slotKey,
  *   type: "text",
  *   pos,                // [x, y] 根据 rectMode 计算后的位置（用于 CORNER 模式）
  *   originalPos,        // [x, y] 原始位置（用于 CENTER 模式）
@@ -685,16 +688,16 @@ function createTextLayerFromContext(index, shapeId, mainCompName) {
  *
  * 作为 shape.js 的统一入口函数，被 shapeCreators.text 调用。
  */
-function createTextFromContext(index, shapeId, mainCompName) {
+function createTextFromContext(index, slotKey, mainCompName) {
   if (typeof createTextLayerFromContext === "function") {
-    return createTextLayerFromContext(index, shapeId, mainCompName);
+    return createTextLayerFromContext(index, slotKey, mainCompName);
   }
 }
 
 /**
  * 为文本图层挂载填充与描边表达式。
  */
-function attachTextStyleExpressions(layer, shapeId, mainCompName) {
+function attachTextStyleExpressions(layer, slotKey, mainCompName) {
   if (!layer || !layer.property) {
     return;
   }
@@ -704,7 +707,7 @@ function attachTextStyleExpressions(layer, shapeId, mainCompName) {
     return;
   }
 
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
 
   var animatorsGroup = textGroup.property("ADBE Text Animators");
   if (!animatorsGroup) {

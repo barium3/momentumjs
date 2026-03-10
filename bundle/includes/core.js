@@ -11,7 +11,6 @@ var drawComp = null;
 var setupShapeQueue = [];
 var drawShapeQueue = [];
 var mainCompName = null;
-var _globalRenderIndex = null;
 var DEFAULT_COMP_DURATION = 10;
 
 function hasProjectItemNamed(name, itemClass) {
@@ -66,7 +65,7 @@ function createManagedComp(
   duration,
   frameRate,
   folder,
-  hasSetupOrDraw,
+  hasSetupOrDraw
 ) {
   var comp = app.project.items.addComp(
     name,
@@ -74,7 +73,7 @@ function createManagedComp(
     height,
     1,
     duration,
-    frameRate,
+    frameRate
   );
   setCompBackgroundColor(comp, hasSetupOrDraw);
   if (folder) comp.parentFolder = folder;
@@ -122,18 +121,63 @@ function resolveDrawBackgroundCount(drawBackgroundCountArg, renderLayers) {
   var items = isArray(renderLayers) ? renderLayers : [];
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
-    if (!item) continue;
-
-    if (typeof item === "string") {
-      if (item === "background") count++;
-      continue;
-    }
+    if (!item || typeof item !== "object") continue;
 
     if (item.type === "background") {
       count += typeof item.count === "number" ? item.count : 1;
     }
   }
   return count;
+}
+
+function joinIOCode(
+  globalCode,
+  preloadFullCodeArg,
+  setupCode,
+  drawCode
+) {
+  return (
+    String(globalCode || "") +
+    "\n" +
+    String(preloadFullCodeArg || "") +
+    "\n" +
+    String(setupCode || "") +
+    "\n" +
+    String(drawCode || "")
+  );
+}
+
+function createEngineTextLayer(
+  drawCode,
+  setupCode,
+  globalCode,
+  drawFullCodeArg,
+  setupFullCodeArg,
+  preloadFullCodeArg,
+  deps,
+  shapeCounts,
+  parsedFontMetrics,
+  parsedImageMetadata,
+  parsedTableData,
+  parsedJSONData,
+  parsedGlobalVarNames
+) {
+  createEngineLayer(
+    drawCode || "",
+    setupCode || "",
+    globalCode || "",
+    drawFullCodeArg || "",
+    setupFullCodeArg || "",
+    preloadFullCodeArg || "",
+    deps,
+    null,
+    shapeCounts,
+    parsedFontMetrics,
+    parsedImageMetadata,
+    parsedTableData,
+    parsedJSONData,
+    parsedGlobalVarNames
+  );
 }
 
 pub.runParsed = function (
@@ -152,6 +196,10 @@ pub.runParsed = function (
   drawNeedsEchoArg,
   fontMetricsArg,
   imageMetadataArg,
+  setupFullCodeArg,
+  drawFullCodeArg,
+  preloadFullCodeArg,
+  globalVarNamesArg
 ) {
   try {
     shapeQueue = [];
@@ -159,7 +207,6 @@ pub.runParsed = function (
     drawShapeQueue = [];
     setupComp = null;
     drawComp = null;
-    _globalRenderIndex = {};
 
     var parsedSetupRenderLayers = parseRenderLayersArg(setupRenderLayersArg);
     var parsedDrawRenderLayers = parseRenderLayersArg(drawRenderLayersArg);
@@ -184,13 +231,14 @@ pub.runParsed = function (
 
     var parsedFontMetrics = parseMaybeJSONArg(fontMetricsArg);
     var parsedImageMetadata = parseMaybeJSONArg(imageMetadataArg);
+    var parsedGlobalVarNames = parseMaybeJSONArg(globalVarNamesArg);
 
-    var combinedCodeForTables =
-      String(globalCode || "") +
-      "\n" +
-      String(setupCode || "") +
-      "\n" +
-      String(drawCode || "");
+    var combinedCodeForTables = joinIOCode(
+      globalCode,
+      preloadFullCodeArg,
+      setupCode,
+      drawCode
+    );
     var parsedTableData = collectTableDataFromCode(combinedCodeForTables);
     var parsedJSONData = collectJSONDataFromCode(combinedCodeForTables);
 
@@ -200,7 +248,7 @@ pub.runParsed = function (
       compName,
       compWidth,
       compHeight,
-      compFrameRate,
+      compFrameRate
     );
     var compDuration = env.duration || DEFAULT_COMP_DURATION;
     var uniqueMainCompName = getUniqueCompName(env.name);
@@ -210,7 +258,7 @@ pub.runParsed = function (
       env.height,
       1,
       compDuration,
-      env.frameRate,
+      env.frameRate
     );
     var hasSetupOrDraw =
       hasSetupOrDrawArg !== undefined && hasSetupOrDrawArg !== null
@@ -263,15 +311,8 @@ pub.runParsed = function (
           compDuration,
           env.frameRate,
           compFolder,
-          hasSetupOrDraw,
+          hasSetupOrDraw
         );
-
-        var originalEngineComp = engineComp;
-        engineComp = setupComp;
-        shapeQueue = setupShapeQueue;
-        createShapeLayers(mainCompName, compFolder);
-        engineComp = originalEngineComp;
-        shapeQueue = [];
       }
 
       if (drawShapeQueue.length > 0 && hasDraw) {
@@ -283,14 +324,24 @@ pub.runParsed = function (
           compDuration,
           env.frameRate,
           compFolder,
-          hasSetupOrDraw,
+          hasSetupOrDraw
         );
+      }
 
+      if (setupComp && setupShapeQueue.length > 0 && hasSetup) {
+        var originalEngineComp = engineComp;
+        engineComp = setupComp;
+        shapeQueue = setupShapeQueue;
+        createShapeLayers(mainCompName, compFolder);
+        engineComp = originalEngineComp;
+        shapeQueue = [];
+      }
+
+      if (drawComp && drawShapeQueue.length > 0 && hasDraw) {
         var originalEngineComp2 = engineComp;
         engineComp = drawComp;
         shapeQueue = drawShapeQueue;
         createShapeLayers(mainCompName, compFolder);
-
         engineComp = originalEngineComp2;
         shapeQueue = [];
       }
@@ -299,18 +350,20 @@ pub.runParsed = function (
       var mergedShapeCounts = countShapesByType(allShapesQueue);
       var originalShapeQueue = shapeQueue;
       shapeQueue = [];
-      createEngineLayer(
-        drawCode || "",
-        setupCode || "",
-        globalCode || "",
+      createEngineTextLayer(
+        drawCode,
+        setupCode,
+        globalCode,
+        drawFullCodeArg,
+        setupFullCodeArg,
+        preloadFullCodeArg,
         deps,
-        null,
         mergedShapeCounts,
-        allShapesQueue,
         parsedFontMetrics,
         parsedImageMetadata,
         parsedTableData,
         parsedJSONData,
+        parsedGlobalVarNames
       );
       ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
       shapeQueue = originalShapeQueue;
@@ -326,7 +379,7 @@ pub.runParsed = function (
         drawLayer.startTime = 0;
         var drawBackgroundCount = resolveDrawBackgroundCount(
           drawBackgroundCountArg,
-          parsedDrawRenderLayers,
+          parsedDrawRenderLayers
         );
         var drawNeedsEcho =
           drawNeedsEchoArg !== undefined && drawNeedsEchoArg !== null
@@ -338,7 +391,7 @@ pub.runParsed = function (
             drawLayer,
             engineComp,
             uniqueMainCompName,
-            drawBackgroundCount,
+            drawBackgroundCount
           );
         }
       }
@@ -348,18 +401,20 @@ pub.runParsed = function (
     } else {
       mainCompName = uniqueMainCompName;
       var mergedShapeCounts = countShapesByType(shapeQueue);
-      createEngineLayer(
-        drawCode || "",
-        setupCode || "",
-        globalCode || "",
+      createEngineTextLayer(
+        drawCode,
+        setupCode,
+        globalCode,
+        drawFullCodeArg,
+        setupFullCodeArg,
+        preloadFullCodeArg,
         deps,
-        null,
         mergedShapeCounts,
-        shapeQueue,
         parsedFontMetrics,
         parsedImageMetadata,
         parsedTableData,
         parsedJSONData,
+        parsedGlobalVarNames
       );
       ensureImageSampleLayers(parsedImageMetadata, compFolder, engineComp);
       createShapeLayers(mainCompName, compFolder);
@@ -392,7 +447,7 @@ pub.composition = function (
   height,
   pixelAspect,
   duration,
-  frameRate,
+  frameRate
 ) {
   var defaults = {
     name: "New Composition",
@@ -400,7 +455,7 @@ pub.composition = function (
     height: 100,
     pixelAspect: 1,
     duration: 10,
-    frameRate: 30,
+    frameRate: 30
   };
 
   var args = arguments;
@@ -420,7 +475,7 @@ pub.composition = function (
     defaults.height,
     defaults.pixelAspect,
     defaults.duration,
-    defaults.frameRate,
+    defaults.frameRate
   );
   setCompBackgroundColor(comp, false);
   comp.openInViewer();
@@ -435,29 +490,34 @@ function createEngineLayer(
   drawCode,
   setupCode,
   globalVars,
+  drawFullCode,
+  setupFullCode,
+  preloadFullCode,
   deps,
   mainCompNameParam,
   shapeCountsParam,
-  shapeQueueParam,
   fontMetricsParam,
   imageMetadataParam,
   tableDataParam,
   jsonDataParam,
+  globalVarNamesParam
 ) {
   cleanupEngineLayer();
 
   var ctxLayer = engineComp.layers.addText("");
   ctxLayer.name = "__engine__";
   var textProp = ctxLayer.property("Source Text");
-
-  var processedDraw = drawCode
-    ? replaceShapeFunctions(removeConfigFunctions(drawCode))
-    : "";
-  var processedSetup = setupCode
-    ? replaceShapeFunctions(removeConfigFunctions(setupCode))
-    : "";
   var processedGlobal = globalVars
-    ? replaceShapeFunctions(removeConfigFunctions(globalVars))
+    ? removeConfigFunctions(globalVars)
+    : "";
+  var processedDrawFull = drawFullCode
+    ? removeConfigFunctions(drawFullCode)
+    : "";
+  var processedSetupFull = setupFullCode
+    ? removeConfigFunctions(setupFullCode)
+    : "";
+  var processedPreloadFull = preloadFullCode
+    ? removeConfigFunctions(preloadFullCode)
     : "";
 
   var hasDraw =
@@ -466,19 +526,20 @@ function createEngineLayer(
 
   var shapeCounts = shapeCountsParam || countShapesByType(shapeQueue);
   var expr = buildExpression(
-    processedDraw,
-    processedSetup,
     processedGlobal,
+    processedDrawFull,
+    processedSetupFull,
+    processedPreloadFull,
     hasDraw,
     hasSetup,
     shapeCounts,
     deps,
     mainCompNameParam,
-    shapeQueueParam,
     fontMetricsParam,
     imageMetadataParam,
     tableDataParam,
     jsonDataParam,
+    globalVarNamesParam
   );
 
   textProp.expression = expr.join("\n");
@@ -505,22 +566,29 @@ function processRenderLayers(renderLayersArg) {
     isArray(renderLayersArg) &&
     renderLayersArg.length > 0
   ) {
-    var renderIndex = _globalRenderIndex || {};
-
     for (var i = 0; i < renderLayersArg.length; i++) {
       var item = renderLayersArg[i];
       var type = null;
+      var slotKey = null;
 
       if (item && typeof item === "object") {
         if (item.type) {
           type = item.type;
         }
-      } else if (typeof item === "string") {
-        type = item;
+        if (item.slotKey) {
+          slotKey = String(item.slotKey);
+        }
       }
 
       if (!type) {
         continue;
+      }
+
+      if (!slotKey) {
+        throw new Error(
+          "[processRenderLayers] Missing slotKey for render layer type: " +
+            type
+        );
       }
 
       if (isRegistryAvailable() && functionRegistry.getShapeInfo) {
@@ -530,40 +598,19 @@ function processRenderLayers(renderLayersArg) {
         }
       }
 
-      if (!renderIndex[type]) {
-        renderIndex[type] = 0;
-      }
-      renderIndex[type]++;
-
-      var typeCode = 0;
-      if (
-        typeof functionRegistry !== "undefined" &&
-        functionRegistry.shapeTypeCode
-      ) {
-        var map = functionRegistry.shapeTypeCode;
-        if (map.hasOwnProperty(type)) {
-          typeCode = map[type];
-        }
-      }
-
-      var id = typeCode * 10000 + renderIndex[type];
-
       var entry = {
         type: type,
-        id: id,
+        slotKey: slotKey
       };
 
-      if (item && typeof item === "object") {
-        for (var key in item) {
-          if (item.hasOwnProperty(key) && key !== "type") {
-            entry[key] = item[key];
-          }
-        }
+      for (var key in item) {
+        if (!Object.prototype.hasOwnProperty.call(item, key)) continue;
+        if (key === "type" || key === "slotKey") continue;
+        entry[key] = item[key];
       }
 
       queue.push(entry);
     }
-    _globalRenderIndex = renderIndex;
   }
   return queue;
 }
@@ -606,32 +653,10 @@ function buildShapeDepsFromRegistry(shapeCounts) {
   return result;
 }
 
-function detectUsage(code, name) {
-  if (!code) return false;
-  var pattern = new RegExp("\\b" + name + "\\b");
-  return pattern.test(code);
-}
-
 function pushLib(expr, label, code) {
   if (!code) return;
   expr.push("// " + label);
   expr.push(code);
-}
-
-function pushCounterDecls(expr, shapeCounts) {
-  for (var shapeType in shapeCounts) {
-    if (!(shapeCounts[shapeType] > 0)) continue;
-    var shapeInfo = null;
-    if (isRegistryAvailable() && functionRegistry.getShapeInfo) {
-      shapeInfo = functionRegistry.getShapeInfo(shapeType);
-    }
-    if (!shapeInfo) {
-      throw new Error(
-        "functionRegistry.getShapeInfo is not available for type: " + shapeType,
-      );
-    }
-    expr.push("var " + shapeInfo.internal + "Count = 0;");
-  }
 }
 
 function pushEngineState(
@@ -639,23 +664,23 @@ function pushEngineState(
   fontMetricsParam,
   imageMetadataParam,
   tableDataParam,
-  jsonDataParam,
+  jsonDataParam
 ) {
   var fontMetricsJson = JSON.stringify(
     fontMetricsParam && typeof fontMetricsParam === "object"
       ? fontMetricsParam
-      : {},
+      : {}
   );
   var imageMetadataJson = JSON.stringify(
     imageMetadataParam && typeof imageMetadataParam === "object"
       ? imageMetadataParam
-      : {},
+      : {}
   );
   var tableDataJson = JSON.stringify(
-    tableDataParam && typeof tableDataParam === "object" ? tableDataParam : {},
+    tableDataParam && typeof tableDataParam === "object" ? tableDataParam : {}
   );
   var jsonDataJson = JSON.stringify(
-    jsonDataParam && typeof jsonDataParam === "object" ? jsonDataParam : {},
+    jsonDataParam && typeof jsonDataParam === "object" ? jsonDataParam : {}
   );
 
   expr.push("var _ctx = {");
@@ -664,7 +689,7 @@ function pushEngineState(
   expr.push("  frame: currentFrame,");
   expr.push("  time: currentTime,");
   expr.push(
-    "  env: { frameCount: currentFrame, width: thisComp.width, height: thisComp.height },",
+    "  env: { frameCount: currentFrame, width: thisComp.width, height: thisComp.height },"
   );
   expr.push("  shapes: [],");
   expr.push("  backgrounds: [],");
@@ -678,37 +703,26 @@ function pushEngineState(
   expr.push("var _imd = " + imageMetadataJson + ";");
   expr.push("var _td = " + tableDataJson + ";");
   expr.push("var _jd = " + jsonDataJson + ";");
+  expr.push("var __momentumPhase = 'global';");
   expr.push("var _shapes = _ctx.shapes;");
   expr.push("var _backgrounds = _ctx.backgrounds;");
 }
 
-function extractGlobalVarNames(code) {
-  var names = [];
-  var lines = String(code || "").split("\n");
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i];
-    if (!line || typeof line !== "string") continue;
-    line = line.replace(/^\s+|\s+$/g, "");
-    var varMatch = line.match(/^(?:var|let)\s+(\w+)\s*(?:=\s*(.+))?;?$/);
-    if (varMatch) names.push(varMatch[1]);
-  }
-  return names;
-}
-
 function buildExpression(
-  processedDraw,
-  processedSetup,
   processedGlobal,
+  processedDrawFull,
+  processedSetupFull,
+  processedPreloadFull,
   hasDraw,
   hasSetup,
   shapeCounts,
   deps,
   mainCompNameParam,
-  shapeQueueParam,
   fontMetricsParam,
   imageMetadataParam,
   tableDataParam,
   jsonDataParam,
+  globalVarNamesParam
 ) {
   var mathDeps = deps && deps.math ? deps.math : {};
   var transformDeps = deps && deps.transforms ? deps.transforms : {};
@@ -751,21 +765,20 @@ function buildExpression(
   }
 
   var expr = [];
-  pushCounterDecls(expr, shapeCounts);
   expr.push("var fps = 1 / thisComp.frameDuration;");
   expr.push("var currentFrame = timeToFrames(time);");
   expr.push("var currentTime = time;");
   pushLib(
     expr,
     "Environment",
-    hasKeys(envDeps) ? getEnvironmentLib(envDeps) : "",
+    hasKeys(envDeps) ? getEnvironmentLib(envDeps) : ""
   );
   pushEngineState(
     expr,
     fontMetricsParam,
     imageMetadataParam,
     tableDataParam,
-    jsonDataParam,
+    jsonDataParam
   );
 
   pushLib(
@@ -773,21 +786,21 @@ function buildExpression(
     "Controllers",
     hasKeys(controllerDeps)
       ? getControllerLib(buildDepsFromRegistry(controllerDeps, "controllers"))
-      : "",
+      : ""
   );
   pushLib(
     expr,
     "Math",
     hasKeys(mathDeps)
       ? getMathLib(buildDepsFromRegistry(mathDeps, "math"))
-      : "",
+      : ""
   );
   pushLib(
     expr,
     "Data",
     hasKeys(dataDeps)
       ? getDataLib(buildDepsFromRegistry(dataDeps, "data"))
-      : "",
+      : ""
   );
   if (hasShapes) {
     pushLib(expr, "Transform State", getTransformationLib({ state: true }));
@@ -797,7 +810,7 @@ function buildExpression(
     "Transforms",
     hasKeys(transformDeps)
       ? getTransformationLib(buildDepsFromRegistry(transformDeps, "transforms"))
-      : "",
+      : ""
   );
 
   if (hasShapes) {
@@ -808,14 +821,14 @@ function buildExpression(
     "Colors",
     hasKeys(colorDeps)
       ? getColorLib(buildDepsFromRegistry(colorDeps, "colors"))
-      : "",
+      : ""
   );
 
   if (hasShapes) {
     pushLib(
       expr,
       "Shapes",
-      getShapeLib(buildShapeDepsFromRegistry(shapeCounts)),
+      getShapeLib(buildShapeDepsFromRegistry(shapeCounts))
     );
   }
 
@@ -830,7 +843,7 @@ function buildExpression(
     "IO",
     hasKeys(tableDeps)
       ? getIOLib(buildDepsFromRegistry(tableDeps, "tables"))
-      : "",
+      : ""
   );
 
   var needsTextShape = shapeCounts && shapeCounts.text > 0;
@@ -855,7 +868,7 @@ function buildExpression(
       RIGHT: !!typographyDeps.RIGHT,
       TOP: !!typographyDeps.TOP,
       BOTTOM: !!typographyDeps.BOTTOM,
-      BASELINE: !!typographyDeps.BASELINE,
+      BASELINE: !!typographyDeps.BASELINE
     };
     pushLib(expr, "Typography", getTypographyLib(typoDepsForLib));
   }
@@ -879,87 +892,31 @@ function buildExpression(
     expr.push("");
   }
 
-  var globalVarNames = extractGlobalVarNames(processedGlobal);
+  var globalVarNames =
+    globalVarNamesParam && isArray(globalVarNamesParam)
+      ? globalVarNamesParam
+      : [];
 
   expr.push.apply(
     expr,
     buildUserScope(
       processedGlobal,
-      processedSetup,
-      processedDraw,
+      processedPreloadFull,
+      processedSetupFull,
+      processedDrawFull,
       hasSetup,
       hasDraw,
       globalVarNames,
-      !!mainCompNameParam,
-    ),
+      !!mainCompNameParam
+    )
   );
 
   expr.push.apply(
     expr,
-    buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps),
+    buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps)
   );
 
-  expr.push(buildPathCreation(hasShapes));
+  expr.push(buildPathCreation());
 
   return expr;
-}
-
-function replaceShapeFunctions(code) {
-  var funcMap = {};
-
-  if (isRegistryAvailable() && functionRegistry.shapes) {
-    for (var name in functionRegistry.shapes) {
-      if (functionRegistry.shapes.hasOwnProperty(name)) {
-        var info = functionRegistry.shapes[name];
-        var target = info.internal.replace(/^_/, "");
-        funcMap[name] = target;
-      }
-    }
-  } else {
-    throw new Error("functionRegistry.shapes is not available");
-  }
-
-  for (var f in funcMap) {
-    code = replaceFunctionCalls(code, f, "_" + funcMap[f]);
-  }
-  return code;
-}
-
-function isIdentifierChar(c) {
-  return (
-    (c >= "a" && c <= "z") ||
-    (c >= "A" && c <= "Z") ||
-    (c >= "0" && c <= "9") ||
-    c === "_"
-  );
-}
-
-function isInComment(code, pos) {
-  for (var i = pos - 1; i >= 0; i--) {
-    if (code.charAt(i) === "\n") {
-      return code.substring(i + 1, pos).indexOf("//") !== -1;
-    }
-  }
-  return code.substring(0, pos).indexOf("//") !== -1;
-}
-
-function replaceFunctionCalls(code, oldName, newName) {
-  var result = "";
-  var idx = 0;
-  var lastIdx = 0;
-  var searchStr = oldName + "(";
-
-  while ((idx = code.indexOf(searchStr, lastIdx)) !== -1) {
-    var prevChar = idx > 0 ? code.charAt(idx - 1) : "";
-
-    if (!isIdentifierChar(prevChar) && !isInComment(code, idx)) {
-      result += code.substring(lastIdx, idx) + newName + "(";
-      lastIdx = idx + oldName.length + 1;
-    } else {
-      result += code.substring(lastIdx, idx + 1);
-      lastIdx = idx + 1;
-    }
-  }
-
-  return result + code.substring(lastIdx);
 }

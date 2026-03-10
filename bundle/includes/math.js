@@ -92,7 +92,7 @@ function getNoiseLib() {
     "    f *= 2;",
     "  }",
     "  return norm > 0 ? sum / norm : 0;",
-    "};",
+    "};"
   ].join("\n");
 }
 
@@ -135,7 +135,7 @@ function getRandomLib() {
     "  if (mean === undefined) mean = 0;",
     "  if (sd === undefined) sd = 1;",
     "  return mean + z * sd;",
-    "};",
+    "};"
   ].join("\n");
 }
 
@@ -575,7 +575,7 @@ function getVectorLib() {
     "// 创建向量函数（p5.js 风格）",
     "var createVector = function(x, y, z) {",
     "  return new p5.Vector(x, y, z);",
-    "};",
+    "};"
   ].join("\n");
 }
 
@@ -648,7 +648,7 @@ function getMathLib(deps) {
     lines.push(
       "var DEGREES = 'DEG', RADIANS = 'RAD';",
       "var _angleMode = 'RAD';",
-      "var angleMode = function(m) { _angleMode = m; };",
+      "var angleMode = function(m) { _angleMode = m; };"
     );
   }
 
@@ -677,7 +677,7 @@ function getMathLib(deps) {
       "var mag = function(x, y, z) {",
       "  if (z !== undefined) return Math.sqrt(x*x + y*y + z*z);",
       "  return Math.sqrt(x*x + y*y);",
-      "};",
+      "};"
     );
   }
 
@@ -687,12 +687,12 @@ function getMathLib(deps) {
   }
   if (deps.map) {
     lines.push(
-      "var map = function(v, a, b, c, d) { return c + (v - a) / (b - a) * (d - c); };",
+      "var map = function(v, a, b, c, d) { return c + (v - a) / (b - a) * (d - c); };"
     );
   }
   if (deps.constrain) {
     lines.push(
-      "var constrain = function(v, lo, hi) { return Math.min(Math.max(v, lo), hi); };",
+      "var constrain = function(v, lo, hi) { return Math.min(Math.max(v, lo), hi); };"
     );
   }
   if (deps.lerp) {
@@ -700,7 +700,7 @@ function getMathLib(deps) {
   }
   if (deps.dist) {
     lines.push(
-      "var dist = function(x1, y1, x2, y2) { return Math.sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1)); };",
+      "var dist = function(x1, y1, x2, y2) { return Math.sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1)); };"
     );
   }
 
@@ -715,7 +715,7 @@ function getMathLib(deps) {
       "var bezierPoint = function(a, b, c, d, t) {",
       "  var it = 1 - t;",
       "  return it*it*it*a + 3*it*it*t*b + 3*it*t*t*c + t*t*t*d;",
-      "};",
+      "};"
     );
   }
   if (deps.bezierTangent) {
@@ -723,7 +723,7 @@ function getMathLib(deps) {
       "var bezierTangent = function(a, b, c, d, t) {",
       "  var it = 1 - t;",
       "  return 3*it*it*(b-a) + 6*it*t*(c-b) + 3*t*t*(d-c);",
-      "};",
+      "};"
     );
   }
   // curvePoint, curveTangent, curveTightness 共享 _curveTightness 变量
@@ -751,7 +751,7 @@ function getMathLib(deps) {
       "  var h3 = -2*t3 + 3*t2;",
       "  var h4 = t3 - t2;",
       "  return h1*b + h2*s*(c-a) + h3*c + h4*s*(d-b);",
-      "};",
+      "};"
     );
   }
   if (deps.curveTangent) {
@@ -768,7 +768,7 @@ function getMathLib(deps) {
       "  var dh3 = -6*t2 + 6*t;",
       "  var dh4 = 3*t2 - 2*t;",
       "  return dh1*b + dh2*s*(c-a) + dh3*c + dh4*s*(d-b);",
-      "};",
+      "};"
     );
   }
   if (deps.curveTightness) {
@@ -779,7 +779,7 @@ function getMathLib(deps) {
       "    _curveTightness = Math.max(-2, Math.min(3, s));",
       "  }",
       "  return _curveTightness;",
-      "};",
+      "};"
     );
   }
 

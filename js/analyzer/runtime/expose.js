@@ -21,7 +21,68 @@ function createShapeStateManager() {
   };
 }
 
-function recordShapeExecution(context, baseType, funcName) {
+function extractShapeCallsiteArgs(argsLike) {
+  var args = Array.prototype.slice.call(argsLike || []);
+  var callsiteId = null;
+
+  if (
+    args.length > 0 &&
+    typeof args[0] === "string" &&
+    args[0].indexOf("__mcs_") === 0
+  ) {
+    callsiteId = args.shift();
+  }
+
+  return {
+    callsiteId: callsiteId,
+    args: args,
+  };
+}
+
+function getRuntimePhase() {
+  return window.__momentumRuntimePhase || "global";
+}
+
+function requireCallsiteId(baseType, callsiteId) {
+  if (callsiteId) {
+    return callsiteId;
+  }
+
+  throw new Error(
+    "[Runtime] Missing callsiteId for render function: " +
+      String(baseType || "shape") +
+      ". Please ensure codePreprocessor.instrumentShapeCallsites ran before execution.",
+  );
+}
+
+function buildRenderSlotEntry(context, baseType, callsiteId, extra) {
+  var phase = getRuntimePhase();
+  var callsiteKey = requireCallsiteId(baseType, callsiteId);
+  var counterKey = phase + ":" + callsiteKey;
+  var counters = context.slotCounters || {};
+  var ordinal = (counters[counterKey] || 0) + 1;
+  counters[counterKey] = ordinal;
+  context.slotCounters = counters;
+
+  var entry = {
+    type: baseType,
+    phase: phase,
+    callsiteId: callsiteId,
+    slotKey: counterKey + ":" + ordinal,
+  };
+
+  if (extra) {
+    for (var key in extra) {
+      if (Object.prototype.hasOwnProperty.call(extra, key)) {
+        entry[key] = extra[key];
+      }
+    }
+  }
+
+  return entry;
+}
+
+function recordShapeExecution(context, baseType, funcName, callsiteId, extra) {
   if (typeof context.collectShape === "function") {
     context.collectShape(baseType);
   }
@@ -36,7 +97,9 @@ function recordShapeExecution(context, baseType, funcName) {
     }
   }
   if (context.renderOrder) {
-    context.renderOrder.push(baseType);
+    context.renderOrder.push(
+      buildRenderSlotEntry(context, baseType, callsiteId, extra),
+    );
   }
 }
 
@@ -55,32 +118,42 @@ function createShapeBuilderWrapper(options) {
   if (role === "begin") {
     return function () {
       state.hasVertexInCurrentShape = false;
-      return original.apply(p, arguments);
+      var callInfo = extractShapeCallsiteArgs(arguments);
+      return original.apply(p, callInfo.args);
     };
   }
 
   if (role === "add") {
     return function () {
+      var callInfo = extractShapeCallsiteArgs(arguments);
       state.hasVertexInCurrentShape = true;
       if (typeof context.collectDeps === "function") {
         context.collectDeps("shapes", funcName);
       }
-      return original.apply(p, arguments);
+      return original.apply(p, callInfo.args);
     };
   }
 
   if (role === "end") {
     return function () {
+      var callInfo = extractShapeCallsiteArgs(arguments);
       if (state.hasVertexInCurrentShape) {
-        recordShapeExecution(context, baseType, baseType);
+        recordShapeExecution(
+          context,
+          baseType,
+          baseType,
+          callInfo.callsiteId,
+          null,
+        );
         state.hasVertexInCurrentShape = false;
       }
-      return original.apply(p, arguments);
+      return original.apply(p, callInfo.args);
     };
   }
 
   return function () {
-    return original.apply(p, arguments);
+    var callInfo = extractShapeCallsiteArgs(arguments);
+    return original.apply(p, callInfo.args);
   };
 }
 
@@ -93,14 +166,17 @@ function createShapeWrapper(options) {
   var backgroundInfo = options.backgroundInfo;
 
   return function () {
+    var callInfo = extractShapeCallsiteArgs(arguments);
+    var shapeArgs = callInfo.args;
+
     if (baseType === "background" && backgroundInfo) {
       var hasAlpha = false;
-      var len = arguments.length;
+      var len = shapeArgs.length;
 
       if (len === 2 || len === 4) {
         hasAlpha = true;
       } else if (len === 1) {
-        var arg0 = arguments[0];
+        var arg0 = shapeArgs[0];
         if (arg0 && typeof arg0 === "object") {
           if (arg0.levels && arg0.levels.length >= 4) {
             hasAlpha = true;
@@ -123,25 +199,32 @@ function createShapeWrapper(options) {
     }
 
     if (context.renderOrder) {
+      var renderExtra = null;
       if (funcName === "image") {
-        var imgArg = arguments[0];
+        var imgArg = shapeArgs[0];
         var srcPath =
           imgArg && imgArg._momentumPath ? imgArg._momentumPath : null;
-        context.renderOrder.push(
-          srcPath ? { type: "image", src: srcPath } : baseType,
-        );
-      } else {
-        context.renderOrder.push(baseType);
+        if (srcPath) {
+          renderExtra = { src: srcPath };
+        }
       }
+      context.renderOrder.push(
+        buildRenderSlotEntry(
+          context,
+          baseType,
+          callInfo.callsiteId,
+          renderExtra,
+        ),
+      );
     }
 
     if (funcName === "image") {
-      var imgObj = arguments[0];
+      var imgObj = shapeArgs[0];
       if (!imgObj) return;
-      return original.apply(p, arguments);
+      return original.apply(p, shapeArgs);
     }
 
-    return original.apply(p, arguments);
+    return original.apply(p, shapeArgs);
   };
 }
 
@@ -165,6 +248,7 @@ function exposeFunctions(context, mode) {
   var imageLoadTracker = context.imageLoadTracker;
   var tableLoadTracker = context.tableLoadTracker;
   var jsonLoadTracker = context.jsonLoadTracker;
+  var slotCounters = context.slotCounters;
   var suppressPrint = !!context.suppressPrint;
 
   var shapeTypeMap = getShapeTypeMapFn ? getShapeTypeMapFn(context.cache) : {};
@@ -230,6 +314,7 @@ function exposeFunctions(context, mode) {
               renderOrder: renderOrder,
               loopExecutions: loopExecutions,
               maxLoopCount: maxLoopCount,
+              slotCounters: slotCounters,
             }
           : {
               collectShape: collectShape,
@@ -260,11 +345,13 @@ function exposeFunctions(context, mode) {
             renderOrder: renderOrder,
             loopExecutions: loopExecutions,
             maxLoopCount: maxLoopCount,
+            slotCounters: slotCounters,
           },
           backgroundInfo: backgroundInfo,
         });
       } else {
         window[funcName] = function () {
+          var callInfo = extractShapeCallsiteArgs(arguments);
           var baseType = shapeTypeMap[funcName] || funcName;
           if (typeof collectShape === "function") {
             collectShape(baseType);
@@ -272,7 +359,7 @@ function exposeFunctions(context, mode) {
           if (typeof collectDeps === "function") {
             collectDeps("shapes", funcName);
           }
-          return original.apply(p, arguments);
+          return original.apply(p, callInfo.args);
         };
       }
       return;

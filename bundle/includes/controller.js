@@ -168,7 +168,7 @@ function _buildSliderClampExpr(min, max, step) {
     "  if (v < min) v = min;",
     "  if (v > max) v = max;",
     "}",
-    "v;",
+    "v;"
   ].join("\n");
 }
 
@@ -177,7 +177,7 @@ function _defaultPathPoints(comp) {
   var h = comp && comp.height ? Number(comp.height) : 1080;
   return [
     [w / 3, h / 2],
-    [(w * 2) / 3, h / 2],
+    [(w * 2) / 3, h / 2]
   ];
 }
 
@@ -335,7 +335,7 @@ function setupControllersFromConfigs(comp, controllerConfigs) {
       var sliderEffect = _addNamedEffect(
         effectsGroup,
         "ADBE Slider Control",
-        cfg.label || cfg.id || "Slider " + (idx + 1),
+        cfg.label || cfg.id || "Slider " + (idx + 1)
       );
       if (!sliderEffect) continue;
 
@@ -348,7 +348,7 @@ function setupControllersFromConfigs(comp, controllerConfigs) {
         var valueProp = _setEffectValue(
           sliderEffect,
           "ADBE Slider Control-0001",
-          val,
+          val
         );
         if (valueProp) {
           try {
@@ -367,7 +367,7 @@ function setupControllersFromConfigs(comp, controllerConfigs) {
       var colorEffect = _addNamedEffect(
         effectsGroup,
         "ADBE Color Control",
-        cfg.label || cfg.id || "Color " + (idx + 1),
+        cfg.label || cfg.id || "Color " + (idx + 1)
       );
       if (!colorEffect) continue;
 
@@ -385,7 +385,7 @@ function setupControllersFromConfigs(comp, controllerConfigs) {
       var checkboxEffect = _addNamedEffect(
         effectsGroup,
         "ADBE Checkbox Control",
-        cfg.label || cfg.id || "Checkbox " + (idx + 1),
+        cfg.label || cfg.id || "Checkbox " + (idx + 1)
       );
       if (!checkboxEffect) continue;
 
@@ -394,14 +394,14 @@ function setupControllersFromConfigs(comp, controllerConfigs) {
         _setEffectValue(
           checkboxEffect,
           "ADBE Checkbox Control-0001",
-          cbVal ? 1 : 0,
+          cbVal ? 1 : 0
         );
       } catch (eCb) {}
     } else if (type === "select") {
       var selectEffect = _addNamedEffect(
         effectsGroup,
         "ADBE Dropdown Control",
-        cfg.label || cfg.id || "Select " + (idx + 1),
+        cfg.label || cfg.id || "Select " + (idx + 1)
       );
       if (!selectEffect) continue;
 
@@ -429,7 +429,7 @@ function setupControllersFromConfigs(comp, controllerConfigs) {
       var angleEffect = _addNamedEffect(
         effectsGroup,
         "ADBE Angle Control",
-        cfg.label || cfg.id || "Angle " + (idx + 1),
+        cfg.label || cfg.id || "Angle " + (idx + 1)
       );
       if (!angleEffect) continue;
 
@@ -441,7 +441,7 @@ function setupControllersFromConfigs(comp, controllerConfigs) {
       var pointEffect = _addNamedEffect(
         effectsGroup,
         "ADBE Point Control",
-        cfg.label || cfg.id || "Point " + (idx + 1),
+        cfg.label || cfg.id || "Point " + (idx + 1)
       );
       if (!pointEffect) continue;
 
@@ -453,7 +453,7 @@ function setupControllersFromConfigs(comp, controllerConfigs) {
       try {
         _setEffectValue(pointEffect, "ADBE Point Control-0001", [
           Number(ptVal[0]),
-          Number(ptVal[1]),
+          Number(ptVal[1])
         ]);
       } catch (ePt) {}
     } else if (type === "path") {
@@ -551,7 +551,7 @@ function getControllerLib(deps) {
       "    }",
       "  } catch (ePush) {}",
       "  return -1;",
-      "}",
+      "}"
     ]);
   }
 
@@ -563,7 +563,7 @@ function getControllerLib(deps) {
     lib.push("// ========================================");
     lib.push("// 控制器 Slider - createSlider() 辅助函数");
     lib.push(
-      "// 每次调用 createSlider() 使用主合成中 __controller__ 图层上的 Slider N",
+      "// 每次调用 createSlider() 使用主合成中 __controller__ 图层上的 Slider N"
     );
     lib.push("// ========================================");
     lib.push("function createSlider(min, max, value, step) {");
@@ -579,7 +579,7 @@ function getControllerLib(deps) {
     lib.push("    if (v > max) v = max;");
     lib.push("    if (step && step > 0) {");
     lib.push(
-      "      // 以 min 为基准向下取整到最近的步长（不强行取到 max），例如 max=255, step=20 时最大为 240",
+      "      // 以 min 为基准向下取整到最近的步长（不强行取到 max），例如 max=255, step=20 时最大为 240"
     );
     lib.push("      v = Math.floor((v - min) / step) * step + min;");
     lib.push("      // 再做一次安全 clamp，防止数值精度导致越界");
@@ -594,7 +594,7 @@ function getControllerLib(deps) {
     lib.push("      if (ctrl) {");
     lib.push("        try {");
     lib.push(
-      '          var prop = ctrl.effect(index)(\"ADBE Slider Control-0001\");',
+      '          var prop = ctrl.effect(index)(\"ADBE Slider Control-0001\");'
     );
     lib.push("          if (prop !== undefined && prop.value !== undefined) {");
     lib.push("            raw = prop.value;");
@@ -607,7 +607,7 @@ function getControllerLib(deps) {
     lib.push("        mapped = _clampAndSnap(raw);");
     lib.push("      } else {");
     lib.push(
-      "        // 没有 __controller__ 图层时，将传入的 value 视为业务值",
+      "        // 没有 __controller__ 图层时，将传入的 value 视为业务值"
     );
     lib.push("        mapped = _clampAndSnap(value);");
     lib.push("        raw = mapped;");
@@ -639,7 +639,7 @@ function getControllerLib(deps) {
     lib.push("// ========================================");
     lib.push("function createAngle(defaultDegrees) {");
     lib.push(
-      "  var def = (defaultDegrees === undefined) ? 0 : defaultDegrees;",
+      "  var def = (defaultDegrees === undefined) ? 0 : defaultDegrees;"
     );
     lib.push("  var index = _nextControllerIndex();");
     lib.push("  var ctrl = _getControllerLayer();");
@@ -648,7 +648,7 @@ function getControllerLib(deps) {
     lib.push("    if (ctrl) {");
     lib.push("      try {");
     lib.push(
-      '        var prop = ctrl.effect(index)(\"ADBE Angle Control-0001\");',
+      '        var prop = ctrl.effect(index)(\"ADBE Angle Control-0001\");'
     );
     lib.push("        if (prop !== undefined && prop.value !== undefined) {");
     lib.push("          raw = prop.value;");
@@ -710,7 +710,7 @@ function getControllerLib(deps) {
     lib.push("        var gHex = s.charAt(1) + s.charAt(1);");
     lib.push("        var bHex = s.charAt(2) + s.charAt(2);");
     lib.push(
-      '        var aHex = s.length === 4 ? (s.charAt(3) + s.charAt(3)) : "ff";',
+      '        var aHex = s.length === 4 ? (s.charAt(3) + s.charAt(3)) : "ff";'
     );
     lib.push("        var rv = parseInt(rHex, 16) / 255;");
     lib.push("        var gv = parseInt(gHex, 16) / 255;");
@@ -736,7 +736,7 @@ function getControllerLib(deps) {
     lib.push("    }");
     lib.push("  } else if (arguments.length >= 3) {");
     lib.push(
-      "    // 2）支持直接传入 r, g, b, a 四个参数，约定统一为 0-255 取值范围",
+      "    // 2）支持直接传入 r, g, b, a 四个参数，约定统一为 0-255 取值范围"
     );
     lib.push("    //    例如：createColorPicker(0, 0, 255);");
     lib.push("    var rr = (r === undefined) ? 255 : r;");
@@ -762,7 +762,7 @@ function getControllerLib(deps) {
     lib.push("    var g = Math.round(Math.max(0, Math.min(1, arr[1])) * 255);");
     lib.push("    var b = Math.round(Math.max(0, Math.min(1, arr[2])) * 255);");
     lib.push(
-      "    var a = arr[3] !== undefined ? Math.round(Math.max(0, Math.min(1, arr[3])) * 255) : 255;",
+      "    var a = arr[3] !== undefined ? Math.round(Math.max(0, Math.min(1, arr[3])) * 255) : 255;"
     );
     lib.push('    var hex = "#" + (r < 16 ? "0" : "") + r.toString(16) +');
     lib.push('                (g < 16 ? "0" : "") + g.toString(16) +');
@@ -779,7 +779,7 @@ function getControllerLib(deps) {
     lib.push("      if (ctrl) {");
     lib.push("        try {");
     lib.push(
-      '          var prop = ctrl.effect(index)(\"ADBE Color Control-0001\");',
+      '          var prop = ctrl.effect(index)(\"ADBE Color Control-0001\");'
     );
     lib.push("          if (prop && prop.value && prop.value.length) {");
     lib.push("            raw = prop.value;");
@@ -822,7 +822,7 @@ function getControllerLib(deps) {
     lib.push("      if (ctrl) {");
     lib.push("        try {");
     lib.push(
-      '          var prop = ctrl.effect(index)(\"ADBE Checkbox Control-0001\");',
+      '          var prop = ctrl.effect(index)(\"ADBE Checkbox Control-0001\");'
     );
     lib.push("          if (prop !== undefined && prop.value !== undefined) {");
     lib.push("            raw = !!prop.value;");
@@ -865,7 +865,7 @@ function getControllerLib(deps) {
     lib.push("// ========================================");
     lib.push("// 控制器 Select - createSelect() 辅助函数");
     lib.push(
-      "// 使用主合成中 __controller__ 图层上的 Dropdown Menu Control N 作为枚举索引",
+      "// 使用主合成中 __controller__ 图层上的 Dropdown Menu Control N 作为枚举索引"
     );
     lib.push("// ========================================");
     lib.push("function createSelect() {");
@@ -901,7 +901,7 @@ function getControllerLib(deps) {
     lib.push("      if (ctrl) {");
     lib.push("        try {");
     lib.push(
-      '          var prop = ctrl.effect(index)(\"ADBE Dropdown Control-0001\");',
+      '          var prop = ctrl.effect(index)(\"ADBE Dropdown Control-0001\");'
     );
     lib.push("          if (prop !== undefined && prop.value !== undefined) {");
     lib.push("            // AE Dropdown 的值是 1 基索引，这里转换为 0 基");
@@ -928,7 +928,7 @@ function getControllerLib(deps) {
     lib.push("      return idx;");
     lib.push("    },");
     lib.push(
-      "    // getter：返回当前选中项对应的“值”（与 p5 的 value() 类似）",
+      "    // getter：返回当前选中项对应的“值”（与 p5 的 value() 类似）"
     );
     lib.push("    value: function() {");
     lib.push("      var len = _len();");
@@ -936,7 +936,7 @@ function getControllerLib(deps) {
     lib.push("      var idx = this.index();");
     lib.push("      if (idx < 0 || idx >= options.length) {");
     lib.push(
-      "        // 如果 AE 侧长度更大，以 AE 长度为准做 clamp，但没有对应值时返回 null",
+      "        // 如果 AE 侧长度更大，以 AE 长度为准做 clamp，但没有对应值时返回 null"
     );
     lib.push("        return null;");
     lib.push("      }");
@@ -995,10 +995,10 @@ function getControllerLib(deps) {
     lib.push("    if (ctrl) {");
     lib.push("      try {");
     lib.push(
-      '        var prop = ctrl.effect(index)(\"ADBE Point Control-0001\");',
+      '        var prop = ctrl.effect(index)(\"ADBE Point Control-0001\");'
     );
     lib.push(
-      "        if (prop !== undefined && prop.value !== undefined && prop.value.length >= 2) {",
+      "        if (prop !== undefined && prop.value !== undefined && prop.value.length >= 2) {"
     );
     lib.push("          raw = [prop.value[0], prop.value[1]];");
     lib.push("        }");
@@ -1116,7 +1116,7 @@ function getControllerLib(deps) {
       "      return out;",
       "    }",
       "  };",
-      "}",
+      "}"
     ]);
   }
 

@@ -18,7 +18,7 @@ function getIOLib(deps) {
   lines.push("var _momentumJSONData = _jd || {};");
   lines.push("function _normalizeIOPath(path) {");
   lines.push(
-    "  return String(path || '').replace(/\\\\/g, '/').replace(/^\\/+/, '');",
+    "  return String(path || '').replace(/\\\\/g, '/').replace(/^\\/+/, '');"
   );
   lines.push("}");
   lines.push("function _rows(rows) {");
@@ -28,18 +28,18 @@ function getIOLib(deps) {
   lines.push("  if (value === null || value === undefined) return value;");
   lines.push("  if (typeof value !== 'object') return value;");
   lines.push(
-    "  if (value.length !== undefined && typeof value !== 'string') {",
+    "  if (value.length !== undefined && typeof value !== 'string') {"
   );
   lines.push("    var out = [];");
   lines.push(
-    "    for (var i = 0; i < value.length; i++) out.push(_clone(value[i]));",
+    "    for (var i = 0; i < value.length; i++) out.push(_clone(value[i]));"
   );
   lines.push("    return out;");
   lines.push("  }");
   lines.push("  var obj = {};");
   lines.push("  for (var key in value) {");
   lines.push(
-    "    if (value.hasOwnProperty && value.hasOwnProperty(key)) obj[key] = _clone(value[key]);",
+    "    if (value.hasOwnProperty && value.hasOwnProperty(key)) obj[key] = _clone(value[key]);"
   );
   lines.push("  }");
   lines.push("  return obj;");
@@ -47,11 +47,11 @@ function getIOLib(deps) {
   lines.push("function _cols(columns, rows) {");
   lines.push("  if (columns && columns.length) return columns;");
   lines.push(
-    "  if (rows && rows.length && rows[0] && rows[0].length !== undefined) {",
+    "  if (rows && rows.length && rows[0] && rows[0].length !== undefined) {"
   );
   lines.push("    var result = [];");
   lines.push(
-    "    for (var i = 0; i < rows[0].length; i++) result.push(String(i));",
+    "    for (var i = 0; i < rows[0].length; i++) result.push(String(i));"
   );
   lines.push("    return result;");
   lines.push("  }");
@@ -67,7 +67,7 @@ function getIOLib(deps) {
   lines.push("}");
   lines.push("function _esc(source) {");
   lines.push(
-    "  return String(source || '').replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');",
+    "  return String(source || '').replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');"
   );
   lines.push("}");
   lines.push("function _rowsOf(table) {");
@@ -83,7 +83,7 @@ function getIOLib(deps) {
   lines.push("  var rows = _rowsOf(table);");
   lines.push("  if (!rows[rowIndex]) return null;");
   lines.push(
-    "  return rows[rowIndex][colIndex] !== undefined ? rows[rowIndex][colIndex] : null;",
+    "  return rows[rowIndex][colIndex] !== undefined ? rows[rowIndex][colIndex] : null;"
   );
   lines.push("}");
   lines.push("function _sync(table) {");
@@ -100,7 +100,7 @@ function getIOLib(deps) {
   lines.push("function _emptyRow(table) {");
   lines.push("  var row = [];");
   lines.push(
-    "  var count = table && table.columns ? table.columns.length : 0;",
+    "  var count = table && table.columns ? table.columns.length : 0;"
   );
   lines.push("  for (var i = 0; i < count; i++) row.push(null);");
   lines.push("  return row;");
@@ -114,7 +114,7 @@ function getIOLib(deps) {
   lines.push("    for (var r = 0; r < rows.length; r++) rows[r].push(null);");
   lines.push("  }");
   lines.push(
-    "  while (rows[rowIndex].length < table.columns.length) rows[rowIndex].push(null);",
+    "  while (rows[rowIndex].length < table.columns.length) rows[rowIndex].push(null);"
   );
   lines.push("  rows[rowIndex][colIndex] = value;");
   lines.push("  table.rows = rows;");
@@ -125,13 +125,13 @@ function getIOLib(deps) {
   lines.push("  var row = _emptyRow(table);");
   lines.push("  if (source === null || source === undefined) return row;");
   lines.push(
-    "  if (source.table && source.index !== undefined && typeof source.arr === 'function') return source.arr();",
+    "  if (source.table && source.index !== undefined && typeof source.arr === 'function') return source.arr();"
   );
   lines.push(
-    "  if (source.length !== undefined && typeof source !== 'string') {",
+    "  if (source.length !== undefined && typeof source !== 'string') {"
   );
   lines.push(
-    "    for (var i = 0; i < row.length && i < source.length; i++) row[i] = source[i];",
+    "    for (var i = 0; i < row.length && i < source.length; i++) row[i] = source[i];"
   );
   lines.push("    return row;");
   lines.push("  }");
@@ -139,7 +139,7 @@ function getIOLib(deps) {
   lines.push("    for (var c = 0; c < table.columns.length; c++) {");
   lines.push("      var key = String(table.columns[c]);");
   lines.push(
-    "      if (source.hasOwnProperty && source.hasOwnProperty(key)) row[c] = source[key];",
+    "      if (source.hasOwnProperty && source.hasOwnProperty(key)) row[c] = source[key];"
   );
   lines.push("    }");
   lines.push("  }");
@@ -147,17 +147,17 @@ function getIOLib(deps) {
   lines.push("}");
   lines.push("function _objAt(table, rowIndex) {");
   lines.push(
-    "  if (rowIndex < 0 || rowIndex >= table.getRowCount()) return null;",
+    "  if (rowIndex < 0 || rowIndex >= table.getRowCount()) return null;"
   );
   lines.push("  var obj = {};");
   lines.push(
-    "  for (var i = 0; i < table.columns.length; i++) obj[String(table.columns[i])] = _readTableCell(table, rowIndex, i);",
+    "  for (var i = 0; i < table.columns.length; i++) obj[String(table.columns[i])] = _readTableCell(table, rowIndex, i);"
   );
   lines.push("  return obj;");
   lines.push("}");
   lines.push("function _row(table, rowIndex) {");
   lines.push(
-    "  if (!table || rowIndex < 0 || rowIndex >= table.getRowCount()) return null;",
+    "  if (!table || rowIndex < 0 || rowIndex >= table.getRowCount()) return null;"
   );
   lines.push("  var row = { table: table, index: rowIndex };");
   lines.push("  var rowMethods = {");
@@ -167,27 +167,27 @@ function getIOLib(deps) {
   lines.push("    },");
   lines.push("    obj: function() { return _objAt(table, rowIndex); },");
   lines.push(
-    "    get: function(column) { return table.get(rowIndex, column); },",
+    "    get: function(column) { return table.get(rowIndex, column); },"
   );
   lines.push(
-    "    getString: function(column) { return table.getString(rowIndex, column); },",
+    "    getString: function(column) { return table.getString(rowIndex, column); },"
   );
   lines.push(
-    "    getNum: function(column) { return table.getNum(rowIndex, column); },",
+    "    getNum: function(column) { return table.getNum(rowIndex, column); },"
   );
   lines.push(
-    "    set: function(column, value) { return table.set(rowIndex, column, value); },",
+    "    set: function(column, value) { return table.set(rowIndex, column, value); },"
   );
   lines.push(
-    "    setString: function(column, value) { return table.setString(rowIndex, column, value); },",
+    "    setString: function(column, value) { return table.setString(rowIndex, column, value); },"
   );
   lines.push(
-    "    setNum: function(column, value) { return table.setNum(rowIndex, column, value); }",
+    "    setNum: function(column, value) { return table.setNum(rowIndex, column, value); }"
   );
   lines.push("  };");
   lines.push("  for (var methodName in rowMethods) {");
   lines.push(
-    "    if (rowMethods.hasOwnProperty(methodName)) row[methodName] = rowMethods[methodName];",
+    "    if (rowMethods.hasOwnProperty(methodName)) row[methodName] = rowMethods[methodName];"
   );
   lines.push("  }");
   lines.push("  return row;");
@@ -200,7 +200,7 @@ function getIOLib(deps) {
   lines.push("  if (useRegex) {");
   lines.push("    try {");
   lines.push(
-    "      regex = matcher && matcher.test ? matcher : new RegExp(String(matcher || ''));",
+    "      regex = matcher && matcher.test ? matcher : new RegExp(String(matcher || ''));"
   );
   lines.push("    } catch (e) {");
   lines.push("      regex = new RegExp(_esc(String(matcher || '')));");
@@ -209,7 +209,7 @@ function getIOLib(deps) {
   lines.push("  for (var i = 0; i < table.getRowCount(); i++) {");
   lines.push("    var value = table.getString(i, colIndex);");
   lines.push(
-    "    if (useRegex ? regex.test(value) : value === String(matcher)) {",
+    "    if (useRegex ? regex.test(value) : value === String(matcher)) {"
   );
   lines.push("      results.push(_row(table, i));");
   lines.push("    }");
@@ -219,11 +219,11 @@ function getIOLib(deps) {
   lines.push("function _createTableObject(record) {");
   lines.push("  var rows = _rows(record && record.rows);");
   lines.push(
-    "  var rowCount = record && record.rowCount !== undefined ? record.rowCount : rows.length;",
+    "  var rowCount = record && record.rowCount !== undefined ? record.rowCount : rows.length;"
   );
   lines.push("  var columns = _cols(record && record.columns, rows);");
   lines.push(
-    "  var columnCount = record && record.columnCount !== undefined ? record.columnCount : columns.length;",
+    "  var columnCount = record && record.columnCount !== undefined ? record.columnCount : columns.length;"
   );
   lines.push("  var table = {");
   lines.push("    columns: columns.slice(0),");
@@ -232,7 +232,7 @@ function getIOLib(deps) {
   lines.push("    fileName: record && record.fileName ? record.fileName : '',");
   lines.push("    _momentumPath: record && record.path ? record.path : '',");
   lines.push(
-    "    _momentumOptions: record && record.options ? record.options : {}",
+    "    _momentumOptions: record && record.options ? record.options : {}"
   );
   lines.push("  };");
   lines.push("  table._momentumRecord = record || null;");
@@ -245,33 +245,33 @@ function getIOLib(deps) {
   lines.push("      var rows = _rowsOf(table);");
   lines.push("      var out = [];");
   lines.push(
-    "      for (var i = 0; i < rows.length; i++) out.push(rows[i].slice(0));",
+    "      for (var i = 0; i < rows.length; i++) out.push(rows[i].slice(0));"
   );
   lines.push("      return out;");
   lines.push("    },");
   lines.push(
-    "    getObject: function(rowIndex) { return _objAt(table, rowIndex); },",
+    "    getObject: function(rowIndex) { return _objAt(table, rowIndex); },"
   );
   lines.push("    get: function(rowIndex, column) {");
   lines.push("      var colIndex = _col(table, column);");
   lines.push(
-    "      if (colIndex < 0 || rowIndex < 0 || rowIndex >= table.getRowCount()) return null;",
+    "      if (colIndex < 0 || rowIndex < 0 || rowIndex >= table.getRowCount()) return null;"
   );
   lines.push("      return _readTableCell(table, rowIndex, colIndex);");
   lines.push("    },");
   lines.push(
-    "    getRow: function(rowIndex) { return _row(table, rowIndex); },",
+    "    getRow: function(rowIndex) { return _row(table, rowIndex); },"
   );
   lines.push("    getString: function(rowIndex, column) {");
   lines.push("      var value = table.get(rowIndex, column);");
   lines.push(
-    "      return value === null || value === undefined ? '' : String(value);",
+    "      return value === null || value === undefined ? '' : String(value);"
   );
   lines.push("    },");
   lines.push("    getNum: function(rowIndex, column) {");
   lines.push("      var raw = table.get(rowIndex, column);");
   lines.push(
-    "      if (raw === null || raw === undefined || raw === '') return NaN;",
+    "      if (raw === null || raw === undefined || raw === '') return NaN;"
   );
   lines.push("      var value = Number(raw);");
   lines.push("      return isNaN(value) ? NaN : value;");
@@ -281,7 +281,7 @@ function getIOLib(deps) {
   lines.push("      var out = [];");
   lines.push("      if (colIndex < 0) return out;");
   lines.push(
-    "      for (var i = 0; i < table.getRowCount(); i++) out.push(_readTableCell(table, i, colIndex));",
+    "      for (var i = 0; i < table.getRowCount(); i++) out.push(_readTableCell(table, i, colIndex));"
   );
   lines.push("      return out;");
   lines.push("    },");
@@ -290,14 +290,14 @@ function getIOLib(deps) {
   lines.push("      return results.length > 0 ? results[0] : null;");
   lines.push("    },");
   lines.push(
-    "    findRows: function(value, column) { return _find(table, value, column, false); },",
+    "    findRows: function(value, column) { return _find(table, value, column, false); },"
   );
   lines.push("    matchRow: function(pattern, column) {");
   lines.push("      var results = _find(table, pattern, column, true);");
   lines.push("      return results.length > 0 ? results[0] : null;");
   lines.push("    },");
   lines.push(
-    "    matchRows: function(pattern, column) { return _find(table, pattern, column, true); },",
+    "    matchRows: function(pattern, column) { return _find(table, pattern, column, true); },"
   );
   lines.push("    set: function(rowIndex, column, value) {");
   lines.push("      var colIndex = _col(table, column);");
@@ -307,13 +307,13 @@ function getIOLib(deps) {
   lines.push("    },");
   lines.push("    setString: function(rowIndex, column, value) {");
   lines.push(
-    "      return table.set(rowIndex, column, value === null || value === undefined ? '' : String(value));",
+    "      return table.set(rowIndex, column, value === null || value === undefined ? '' : String(value));"
   );
   lines.push("    },");
   lines.push("    setNum: function(rowIndex, column, value) {");
   lines.push("      var num = Number(value);");
   lines.push(
-    "      return table.set(rowIndex, column, isNaN(num) ? NaN : num);",
+    "      return table.set(rowIndex, column, isNaN(num) ? NaN : num);"
   );
   lines.push("    },");
   lines.push("    addRow: function(sourceRow) {");
@@ -338,7 +338,7 @@ function getIOLib(deps) {
   lines.push("    },");
   lines.push("    addColumn: function(title) {");
   lines.push(
-    "      var name = title === undefined || title === null ? String(table.columns.length) : String(title);",
+    "      var name = title === undefined || title === null ? String(table.columns.length) : String(title);"
   );
   lines.push("      table.columns.push(name);");
   lines.push("      var rows = _rowsOf(table);");
@@ -354,7 +354,7 @@ function getIOLib(deps) {
   lines.push("      var rows = _rowsOf(table);");
   lines.push("      for (var i = 0; i < rows.length; i++) {");
   lines.push(
-    "        if (rows[i] && rows[i].length > colIndex) rows[i].splice(colIndex, 1);",
+    "        if (rows[i] && rows[i].length > colIndex) rows[i].splice(colIndex, 1);"
   );
   lines.push("      }");
   lines.push("      table.rows = rows;");
@@ -364,7 +364,7 @@ function getIOLib(deps) {
   lines.push("  };");
   lines.push("  for (var methodName in tableMethods) {");
   lines.push(
-    "    if (tableMethods.hasOwnProperty(methodName)) table[methodName] = tableMethods[methodName];",
+    "    if (tableMethods.hasOwnProperty(methodName)) table[methodName] = tableMethods[methodName];"
   );
   lines.push("  }");
   lines.push("  return table;");
@@ -372,10 +372,10 @@ function getIOLib(deps) {
   lines.push("function loadTable(path) {");
   lines.push("  var key = _normalizeIOPath(path);");
   lines.push(
-    "  var record = _momentumTableData[key] || _momentumTableData[String(path || '')] || null;",
+    "  var record = _momentumTableData[key] || _momentumTableData[String(path || '')] || null;"
   );
   lines.push(
-    "  if (!record) record = { path: key, columns: [], rows: [], options: {} };",
+    "  if (!record) record = { path: key, columns: [], rows: [], options: {} };"
   );
   lines.push("  if (!record.path) record.path = key;");
   lines.push("  if (!record.rows) record.rows = [];");
@@ -385,7 +385,7 @@ function getIOLib(deps) {
   lines.push("  var key = _normalizeIOPath(path);");
   lines.push("  var data = _momentumJSONData[key];");
   lines.push(
-    "  if (data === undefined) data = _momentumJSONData[String(path || '')];",
+    "  if (data === undefined) data = _momentumJSONData[String(path || '')];"
   );
   lines.push("  return _clone(data);");
   lines.push("}");
@@ -409,7 +409,7 @@ function _rel(path) {
 function _parseLoadTableCallArgs(argString) {
   var result = {
     format: "csv",
-    header: false,
+    header: false
   };
   var source = String(argString || "");
   var tokenRegex = /["']([^"']+)["']/g;
@@ -442,7 +442,7 @@ function _collectTableRequestsFromCode(code) {
       requests[relativePath] = {
         path: relativePath,
         format: options.format,
-        header: options.header,
+        header: options.header
       };
     } else if (options.header) {
       requests[relativePath].header = true;
@@ -491,7 +491,7 @@ function _parseDelimitedTableText(text, delimiter, hasHeader) {
 
   return {
     columns: columns,
-    rows: rows,
+    rows: rows
   };
 }
 
@@ -524,8 +524,8 @@ function collectTableDataFromCode(code) {
       columnCount: parsed.columns.length,
       options: {
         format: request.format,
-        header: request.header,
-      },
+        header: request.header
+      }
     };
   }
 
@@ -542,7 +542,7 @@ function _collectJSONRequestsFromCode(code) {
     var relativePath = _rel(match[2]);
     if (!relativePath) continue;
     requests[relativePath] = {
-      path: relativePath,
+      path: relativePath
     };
   }
 

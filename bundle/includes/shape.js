@@ -22,7 +22,7 @@ function createShapeLayers(mainCompName, compFolder) {
     background: createBackgroundFromContext,
     bezier: createBezierFromContext,
     curve: createCurveFromContext,
-    image: createImageFromContext,
+    image: createImageFromContext
   };
 
   var batchItems = [];
@@ -35,7 +35,7 @@ function createShapeLayers(mainCompName, compFolder) {
       var item = batchItems[j];
       var batchCreator = shapeCreators[item.shape.type];
       if (batchCreator) {
-        batchCreator(item.index, item.shape.id, mainCompName, batchLayer);
+        batchCreator(item.index, item.shape.slotKey, mainCompName, batchLayer);
       }
     }
     batchItems = [];
@@ -43,7 +43,7 @@ function createShapeLayers(mainCompName, compFolder) {
 
   for (var i = 0; i < shapeQueue.length; i++) {
     var shape = shapeQueue[i];
-    var id = shape.id;
+    var slotKey = shape.slotKey;
     var creator = shapeCreators[shape.type];
     if (creator) {
       if (
@@ -53,16 +53,18 @@ function createShapeLayers(mainCompName, compFolder) {
       ) {
         batchItems.push({
           index: i,
-          shape: shape,
+          shape: shape
         });
         continue;
       }
 
       flushBatch();
       if (shape.type === "image") {
-        creator(i, id, mainCompName, shape, compFolder);
+        creator(i, slotKey, mainCompName, shape, compFolder);
+      } else if (shape.type === "background") {
+        creator(i, slotKey, mainCompName);
       } else {
-        creator(i, id, mainCompName);
+        creator(i, slotKey, mainCompName);
       }
     }
   }
@@ -74,7 +76,7 @@ function _joinExpr(lines) {
   return lines.join("\n");
 }
 
-function _getIdFindExpr(shapeId, mainCompName) {
+function _getSlotFindExpr(slotKey, mainCompName) {
   var engineLayerExpr;
   if (mainCompName) {
     var escapedName = mainCompName.replace(/"/g, '\\"');
@@ -89,9 +91,9 @@ function _getIdFindExpr(shapeId, mainCompName) {
     "var json = (raw && raw.text !== undefined) ? raw.text : (raw && raw.toString ? raw.toString() : raw);",
     "var data = JSON.parse(json);",
     "var shapes = data.shapes || [];",
-    "var idx = data.shapeIndex;",
-    "var targetId = " + shapeId + ";",
-    "var shape = (idx && idx[targetId] !== undefined) ? shapes[idx[targetId]] : null;",
+    "var idx = data.slotIndex || {};",
+    "var targetKey = " + JSON.stringify(slotKey) + ";",
+    "var shape = (idx && idx[targetKey] !== undefined) ? shapes[idx[targetKey]] : null;"
   ]);
 }
 
@@ -131,16 +133,16 @@ function _addPathGroup(shapeGroup) {
   return _contents(shapeGroup).addProperty("ADBE Vector Shape - Group");
 }
 
-function _bindBasicTransform(transform, indexFind, shapeId) {
-  transform.property("Position").expression = _getPositionExpr(indexFind, shapeId);
-  transform.property("Rotation").expression = _getRotationExpr(indexFind, shapeId);
+function _bindBasicTransform(transform, indexFind) {
+  transform.property("Position").expression = _getPositionExpr(indexFind);
+  transform.property("Rotation").expression = _getRotationExpr(indexFind);
 }
 
 function _getFillColorExpr(indexFind) {
   return _joinExpr([
     indexFind,
     "var fc = shape && shape.fillColor;",
-    "!fc ? [0,0,0,0] : [fc[0], fc[1], fc[2], 1]",
+    "!fc ? [0,0,0,0] : [fc[0], fc[1], fc[2], 1]"
   ]);
 }
 
@@ -148,7 +150,7 @@ function _getFillOpacityExpr(indexFind) {
   return _joinExpr([
     indexFind,
     "var o = shape && shape.fillOpacity;",
-    "o === undefined ? 100 : o",
+    "o === undefined ? 100 : o"
   ]);
 }
 
@@ -156,7 +158,7 @@ function _getStrokeColorExpr(indexFind) {
   return _joinExpr([
     indexFind,
     "var sc = shape && shape.strokeColor;",
-    "!sc ? [0,0,0,0] : [sc[0], sc[1], sc[2], 1]",
+    "!sc ? [0,0,0,0] : [sc[0], sc[1], sc[2], 1]"
   ]);
 }
 
@@ -164,7 +166,7 @@ function _getStrokeOpacityExpr(indexFind) {
   return _joinExpr([
     indexFind,
     "var o = shape && shape.strokeOpacity;",
-    "o === undefined ? 100 : o",
+    "o === undefined ? 100 : o"
   ]);
 }
 
@@ -173,23 +175,23 @@ function _getStrokeWidthExpr(indexFind, defaultValue) {
   return _joinExpr([
     indexFind,
     "var w = shape && shape.strokeWeight;",
-    "w === undefined ? " + defaultValue + " : w",
+    "w === undefined ? " + defaultValue + " : w"
   ]);
 }
 
-function _getPositionExpr(indexFind, shapeId) {
+function _getPositionExpr(indexFind) {
   return _joinExpr([
     indexFind,
     "var p = shape && shape.pos;",
-    "!p ? [-9999, -9999] : [p[0], p[1]]",
+    "!p ? [-9999, -9999] : [p[0], p[1]]"
   ]);
 }
 
-function _getRotationExpr(indexFind, shapeId) {
+function _getRotationExpr(indexFind) {
   return _joinExpr([
     indexFind,
     "var r = shape && shape.rot;",
-    "r === undefined ? 0 : r",
+    "r === undefined ? 0 : r"
   ]);
 }
 
@@ -202,13 +204,13 @@ function _addFillProperties(shapeGroup, indexFind) {
 
 function _addStrokeProperties(shapeGroup, indexFind, defaultWidth) {
   var stroke = _contents(shapeGroup).addProperty(
-    "ADBE Vector Graphic - Stroke",
+    "ADBE Vector Graphic - Stroke"
   );
   stroke.property("Color").expression = _getStrokeColorExpr(indexFind);
   stroke.property("Opacity").expression = _getStrokeOpacityExpr(indexFind);
   stroke.property("Stroke Width").expression = _getStrokeWidthExpr(
     indexFind,
-    defaultWidth,
+    defaultWidth
   );
   return stroke;
 }
@@ -300,23 +302,23 @@ function _getArcPathExpr(indexFind, defaultMode) {
     "      }",
     "    }",
     "  }",
-    "}",
+    "}"
   ]);
 }
 
-function createEllipseFromContext(index, shapeId, mainCompName, targetLayer) {
+function createEllipseFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var ellipse = _contents(shapeGroup).addProperty(
-    "ADBE Vector Shape - Ellipse",
+    "ADBE Vector Shape - Ellipse"
   );
   var transform = shapeGroup.property("Transform");
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
-  _bindBasicTransform(transform, indexFind, shapeId);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
+  _bindBasicTransform(transform, indexFind);
   ellipse.property("Size").expression = _joinExpr([
     indexFind,
     "var s = shape && shape.size;",
-    "!s ? [0, 0] : [s[0], s[1]]",
+    "!s ? [0, 0] : [s[0], s[1]]"
   ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
@@ -325,7 +327,7 @@ function createEllipseFromContext(index, shapeId, mainCompName, targetLayer) {
 /**
  * polygon 数据结构（语义化 JSON）:
  * {
- *   id,
+ *   slotKey,
  *   type: "polygon",
  *   points: [[x,y], ...],    // 已应用当前变换后的顶点（主轮廓）
  *   contours: [[[x,y], ...], ...],  // 所有轮廓数组，包括主轮廓和子轮廓（洞）
@@ -338,10 +340,10 @@ function createEllipseFromContext(index, shapeId, mainCompName, targetLayer) {
  * 顶点数量可变，支持多个轮廓（洞形）。
  * 主轮廓从 points 构建，子轮廓从 contours 数组构建。
  */
-function createPolygonFromContext(index, shapeId, mainCompName, targetLayer) {
+function createPolygonFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
   var mainPathGroup = _addPathGroup(shapeGroup);
 
   // 主路径：从 contours[0] 构建（主轮廓），如果没有 contours 则使用 points（向后兼容）
@@ -375,7 +377,7 @@ function createPolygonFromContext(index, shapeId, mainCompName, targetLayer) {
     "    var closed = !!shape.closed;",
     "    createPath(verts, ins, outs, closed);",
     "  }",
-    "}",
+    "}"
   ]);
 
   // 子轮廓路径：只在代码中实际调用了 beginContour() 时才创建
@@ -433,7 +435,7 @@ function createPolygonFromContext(index, shapeId, mainCompName, targetLayer) {
       "  }",
       "  // 子轮廓（洞）应该闭合",
       "  createPath(verts, ins, outs, true);",
-      "}",
+      "}"
     ]);
 
     // 在创建 Path 属性后，再次尝试设置 Reverse Path 属性
@@ -455,17 +457,17 @@ function createPolygonFromContext(index, shapeId, mainCompName, targetLayer) {
   _addStrokeProperties(shapeGroup, indexFind, 1);
 }
 
-function createRectFromContext(index, shapeId, mainCompName, targetLayer) {
+function createRectFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var rect = _contents(shapeGroup).addProperty("ADBE Vector Shape - Rect");
   var transform = shapeGroup.property("Transform");
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
-  _bindBasicTransform(transform, indexFind, shapeId);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
+  _bindBasicTransform(transform, indexFind);
   rect.property("Size").expression = _joinExpr([
     indexFind,
     "var s = shape && shape.size;",
-    "!s ? [0, 0] : [s[0], s[1]]",
+    "!s ? [0, 0] : [s[0], s[1]]"
   ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
@@ -474,7 +476,7 @@ function createRectFromContext(index, shapeId, mainCompName, targetLayer) {
 /**
  * quad 数据结构（语义化 JSON）:
  * {
- *   id,
+ *   slotKey,
  *   type: "quad",
  *   points: [p1,p2,p3,p4],
  *   fillColor, strokeColor,
@@ -482,11 +484,11 @@ function createRectFromContext(index, shapeId, mainCompName, targetLayer) {
  *   strokeWeight
  * }
  */
-function createQuadFromContext(index, shapeId, mainCompName, targetLayer) {
+function createQuadFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
   path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 4) {",
@@ -504,7 +506,7 @@ function createQuadFromContext(index, shapeId, mainCompName, targetLayer) {
     "    var outs = [[0,0],[0,0],[0,0],[0,0]];",
     "    createPath(verts, ins, outs, true);",
     "  }",
-    "}",
+    "}"
   ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
@@ -513,7 +515,7 @@ function createQuadFromContext(index, shapeId, mainCompName, targetLayer) {
 /**
  * triangle 数据结构（语义化 JSON）:
  * {
- *   id,
+ *   slotKey,
  *   type: "triangle",
  *   points: [p1,p2,p3],
  *   fillColor, strokeColor,
@@ -521,11 +523,11 @@ function createQuadFromContext(index, shapeId, mainCompName, targetLayer) {
  *   strokeWeight
  * }
  */
-function createTriangleFromContext(index, shapeId, mainCompName, targetLayer) {
+function createTriangleFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
   path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 3) {",
@@ -542,7 +544,7 @@ function createTriangleFromContext(index, shapeId, mainCompName, targetLayer) {
     "    var outs = [[0,0],[0,0],[0,0]];",
     "    createPath(verts, ins, outs, true);",
     "  }",
-    "}",
+    "}"
   ]);
   _addFillProperties(shapeGroup, indexFind);
   _addStrokeProperties(shapeGroup, indexFind, 1);
@@ -551,18 +553,18 @@ function createTriangleFromContext(index, shapeId, mainCompName, targetLayer) {
 /**
  * line 数据结构（语义化 JSON）:
  * {
- *   id,
+ *   slotKey,
  *   type: "line",
  *   points: [p1,p2],
  *   strokeColor, strokeOpacity,
  *   strokeWeight
  * }
  */
-function createLineFromContext(index, shapeId, mainCompName, targetLayer) {
+function createLineFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
   path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 2) {",
@@ -571,7 +573,7 @@ function createLineFromContext(index, shapeId, mainCompName, targetLayer) {
     "  var p1 = shape.points[0];",
     "  var p2 = shape.points[1];",
     "  createPath([p1||[-9999,-9999], p2||[-9999,-9999]], [], [], false);",
-    "}",
+    "}"
   ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
@@ -579,7 +581,7 @@ function createLineFromContext(index, shapeId, mainCompName, targetLayer) {
 /**
  * point 数据结构（语义化 JSON）:
  * {
- *   id,
+ *   slotKey,
  *   type: "point",
  *   pos, size,
  *   fillColor, fillOpacity,
@@ -587,50 +589,50 @@ function createLineFromContext(index, shapeId, mainCompName, targetLayer) {
  * }
  * 注意: point 使用 strokeWeight 控制点的大小，颜色使用 stroke 作为可见颜色（导出到 fillColor）
  */
-function createPointFromContext(index, shapeId, mainCompName, targetLayer) {
+function createPointFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var ellipse = _contents(shapeGroup).addProperty(
-    "ADBE Vector Shape - Ellipse",
+    "ADBE Vector Shape - Ellipse"
   );
   var transform = shapeGroup.property("Transform");
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
-  transform.property("Position").expression = _getPositionExpr(indexFind, shapeId);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
+  transform.property("Position").expression = _getPositionExpr(indexFind);
   ellipse.property("Size").expression = _joinExpr([
     indexFind,
     "if (!shape) [2,2];",
     "var d = shape.size;",
-    "d ? [d[0], d[1]] : [2,2]",
+    "d ? [d[0], d[1]] : [2,2]"
   ]);
   var fill = _contents(shapeGroup).addProperty("ADBE Vector Graphic - Fill");
   fill.property("Color").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.fillColor) [0,0,0,1];",
     "var fc = shape.fillColor;",
-    "[fc[0], fc[1], fc[2], 1]",
+    "[fc[0], fc[1], fc[2], 1]"
   ]);
   fill.property("Opacity").expression = _joinExpr([
     indexFind,
     "if (!shape) 100;",
-    "shape.strokeOpacity !== undefined ? shape.strokeOpacity : 100",
+    "shape.strokeOpacity !== undefined ? shape.strokeOpacity : 100"
   ]);
 }
 
 /**
  * bezier 数据结构（语义化 JSON）:
  * {
- *   id,
+ *   slotKey,
  *   type: "bezier",
  *   points: [p1,p2,p3,p4],
  *   strokeColor, strokeOpacity,
  *   strokeWeight
  * }
  */
-function createBezierFromContext(index, shapeId, mainCompName, targetLayer) {
+function createBezierFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
   path.property("Path").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.points || shape.points.length < 4) {",
@@ -643,7 +645,7 @@ function createBezierFromContext(index, shapeId, mainCompName, targetLayer) {
     "  var out1 = [p2[0]-p1[0], p2[1]-p1[1]];",
     "  var in4 = [p3[0]-p4[0], p3[1]-p4[1]];",
     "  createPath([p1, p4], [[0,0], in4], [out1, [0,0]], false);",
-    "}",
+    "}"
   ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
@@ -651,7 +653,7 @@ function createBezierFromContext(index, shapeId, mainCompName, targetLayer) {
 /**
  * curve 数据结构（语义化 JSON）:
  * {
- *   id,
+ *   slotKey,
  *   type: "curve",
  *   points: [p1,p2,p3,p4],
  *   tightness,
@@ -659,11 +661,11 @@ function createBezierFromContext(index, shapeId, mainCompName, targetLayer) {
  *   strokeWeight
  * }
  */
-function createCurveFromContext(index, shapeId, mainCompName, targetLayer) {
+function createCurveFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
   var path = _addPathGroup(shapeGroup);
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
 
   // Path (p1 at -10, p2 at -9, p3 at -8, p4 at -7)
   // Catmull-Rom 样条曲线：
@@ -705,7 +707,7 @@ function createCurveFromContext(index, shapeId, mainCompName, targetLayer) {
     "    outTangents.push([0, 0]);",
     "  }",
     "  createPath(vertices, inTangents, outTangents, false);",
-    "}",
+    "}"
   ]);
   _addStrokeProperties(shapeGroup, indexFind, 2);
 }
@@ -740,8 +742,34 @@ function getShapeLib(deps) {
 
   // 渲染标记
   funcs.push("var _render = true;");
-  funcs.push("function _nextShapeId(typeName, count) {");
-  funcs.push("  return _shapeTypeCode[typeName] * 10000 + count;");
+  funcs.push("var _callsiteCounters = {};");
+  funcs.push("function _consumeShapeArgs(argsLike) {");
+  funcs.push("  var args = [].slice.call(argsLike || []);");
+  funcs.push("  var callsiteId = null;");
+  funcs.push(
+    "  if (args.length > 0 && typeof args[0] === 'string' && args[0].indexOf('__mcs_') === 0) {"
+  );
+  funcs.push("    callsiteId = args.shift();");
+  funcs.push("  }");
+  funcs.push("  return { callsiteId: callsiteId, values: args };");
+  funcs.push("}");
+  funcs.push("function _requireShapeCallsiteId(typeName, callsiteId) {");
+  funcs.push("  if (callsiteId) return callsiteId;");
+  funcs.push(
+    "  throw new Error('[ShapeLib] Missing callsiteId for shape type: ' + String(typeName || 'shape'));"
+  );
+  funcs.push("}");
+  funcs.push("function _nextShapeRef(typeName, callsiteId) {");
+  funcs.push("  var phase = __momentumPhase || 'global';");
+  funcs.push(
+    "  var callsiteKey = _requireShapeCallsiteId(typeName, callsiteId);"
+  );
+  funcs.push("  var counterKey = phase + ':' + callsiteKey;");
+  funcs.push("  var ordinal = (_callsiteCounters[counterKey] || 0) + 1;");
+  funcs.push("  _callsiteCounters[counterKey] = ordinal;");
+  funcs.push(
+    "  return { slotKey: counterKey + ':' + ordinal, callsiteId: callsiteId };"
+  );
   funcs.push("}");
   funcs.push("function _shapeStyle() {");
   funcs.push("  var c2 = _encodeColorState();");
@@ -749,10 +777,10 @@ function getShapeLib(deps) {
   funcs.push("  var hasStroke = !(c2[2][0] < 0);");
   funcs.push("  return {");
   funcs.push(
-    "    fillColor: hasFill ? [c2[0][0], c2[0][1], c2[1][0], c2[1][1]] : null,",
+    "    fillColor: hasFill ? [c2[0][0], c2[0][1], c2[1][0], c2[1][1]] : null,"
   );
   funcs.push(
-    "    strokeColor: hasStroke ? [c2[2][0], c2[2][1], c2[3][0], c2[3][1]] : null,",
+    "    strokeColor: hasStroke ? [c2[2][0], c2[2][1], c2[3][0], c2[3][1]] : null,"
   );
   funcs.push("    fillOpacity: hasFill ? c2[4][0] : 0,");
   funcs.push("    strokeOpacity: hasStroke ? c2[4][1] : 0,");
@@ -760,81 +788,22 @@ function getShapeLib(deps) {
   funcs.push("  };");
   funcs.push("}");
 
-  // 形状类型前缀映射（用于生成 id = typeCode * 10000 + 调用次数）
-  // 从 registry 中读取各基础图形类型的前缀编码，保证与前端/宿主逻辑一致
-  var _typeCodeMap =
-    typeof functionRegistry !== "undefined" && functionRegistry.shapeTypeCode
-      ? functionRegistry.shapeTypeCode
-      : {
-          ellipse: 1,
-          rect: 2,
-          line: 3,
-          point: 4,
-          polygon: 5,
-          arc: 6,
-          quad: 7,
-          triangle: 8,
-          bezier: 9,
-          curve: 10,
-          background: 11,
-        };
-
-  var _typeCodeParts = [];
-  for (var _k in _typeCodeMap) {
-    if (_typeCodeMap.hasOwnProperty(_k)) {
-      _typeCodeParts.push("  " + _k + ": " + _typeCodeMap[_k]);
-    }
-  }
-  funcs.push("var _shapeTypeCode = {");
-  if (_typeCodeParts.length > 0) {
-    funcs.push(_typeCodeParts.join(",\n"));
-  }
-  funcs.push("};");
-
-  // 计数器初始化（非文本）
-  if (deps.ellipse || deps.circle) {
-    funcs.push("var _ellipseCount = 0;");
-  }
-  if (deps.arc) {
-    funcs.push("var _arcCount = 0;");
-  }
-  if (deps.quad) {
-    funcs.push("var _quadCount = 0;");
-  }
-  if (deps.triangle) {
-    funcs.push("var _triangleCount = 0;");
-  }
-  if (deps.rect || deps.square) {
-    funcs.push("var _rectCount = 0;");
-  }
-  if (deps.line) {
-    funcs.push("var _lineCount = 0;");
-  }
-  if (deps.point) {
-    funcs.push("var _pointCount = 0;");
-  }
-  if (deps.polygon) {
-    funcs.push("var _polygonCount = 0;");
-  }
-  if (deps.bezier) {
-    funcs.push("var _bezierCount = 0;");
-  }
-  if (deps.curve) {
-    funcs.push("var _curveCount = 0;");
-  }
 
   if (deps.ellipse || deps.circle) {
     funcs.push(
       _joinExpr([
-        "function _ellipse(a,b,c,d){",
+        "function _ellipse(){",
         "  if(!_render){return;}",
-        "  _ellipseCount++;",
-        "  var id = _nextShapeId('ellipse', _ellipseCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('ellipse', callsiteId);",
+        "  var slotKey = ref.slotKey;",
         "  var mode = (typeof _ellipseMode !== 'undefined') ? _ellipseMode : 0;",
-        "  var x = a;",
-        "  var y = b;",
-        "  var w = c;",
-        "  var h = (d !== undefined) ? d : c;",
+        "  var x = __vals[0];",
+        "  var y = __vals[1];",
+        "  var w = __vals[2];",
+        "  var h = (__vals[3] !== undefined) ? __vals[3] : __vals[2];",
         "  if (!(w===w)) w = 0;",
         "  if (!(h===h)) h = 0;",
         "  var cx, cy, ww, hh;",
@@ -849,8 +818,8 @@ function getShapeLib(deps) {
         "    ww = w;",
         "    hh = h;",
         "  } else if (mode === 3) {",
-        "    var x2 = c;",
-        "    var y2 = (d !== undefined) ? d : b;",
+        "    var x2 = __vals[2];",
+        "    var y2 = (__vals[3] !== undefined) ? __vals[3] : __vals[1];",
         "    var dx = x2 - x;",
         "    var dy = y2 - y;",
         "    cx = x + dx * 0.5;",
@@ -868,23 +837,35 @@ function getShapeLib(deps) {
         "  var r=_rotation*180/Math.PI;",
         "  var style=_shapeStyle();",
         "  _shapes.push({",
-        '    id:id, type:"ellipse",',
+        '    slotKey:slotKey, type:"ellipse",',
         "    pos:p, size:s, rot:r,",
         "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
         "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function ellipse(){ return _ellipse.apply(this, arguments); }");
+    funcs.push("function circle(x, y, d){ return _ellipse.apply(this, arguments.length > 0 ? arguments : [x, y, d, d]); }");
   }
   if (deps.arc) {
     funcs.push(
       _joinExpr([
-        "function _arc(x,y,w,h,start,stop,mode){",
+        "function _arc(){",
         "  if(!_render){return;}",
-        "  _arcCount++;",
-        "  var id = _nextShapeId('arc', _arcCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('arc', callsiteId);",
+        "  var slotKey = ref.slotKey;",
+        "  var x = __vals[0];",
+        "  var y = __vals[1];",
+        "  var w = __vals[2];",
+        "  var h = __vals[3];",
+        "  var start = __vals[4];",
+        "  var stop = __vals[5];",
+        "  var mode = __vals[6];",
         "  var p = _applyTransform(x,y);",
         "  var ww = w * _scaleX;",
         "  var hh = (h || w) * _scaleY;",
@@ -897,73 +878,87 @@ function getShapeLib(deps) {
         "  }",
         "  var style = _shapeStyle();",
         "  _shapes.push({",
-        '    id:id, type:"arc",',
+        '    slotKey:slotKey, type:"arc",',
         "    pos:p, size:[ww,hh], angles:ang, mode:md,",
         "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
         "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function arc(){ return _arc.apply(this, arguments); }");
   }
   if (deps.quad) {
     funcs.push(
       _joinExpr([
-        "function _quad(x1,y1,x2,y2,x3,y3,x4,y4){",
+        "function _quad(){",
         "  if(!_render){return;}",
-        "  _quadCount++;",
-        "  var id = _nextShapeId('quad', _quadCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('quad', callsiteId);",
+        "  var slotKey = ref.slotKey;",
+        "  var x1 = __vals[0], y1 = __vals[1], x2 = __vals[2], y2 = __vals[3], x3 = __vals[4], y3 = __vals[5], x4 = __vals[6], y4 = __vals[7];",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
         "  var p4=_applyTransform(x4,y4);",
         "  var style=_shapeStyle();",
         "  _shapes.push({",
-        '    id:id, type:"quad",',
+        '    slotKey:slotKey, type:"quad",',
         "    points:[p1,p2,p3,p4],",
         "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
         "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function quad(){ return _quad.apply(this, arguments); }");
   }
   if (deps.triangle) {
     funcs.push(
       _joinExpr([
-        "function _triangle(x1,y1,x2,y2,x3,y3){",
+        "function _triangle(){",
         "  if(!_render){return;}",
-        "  _triangleCount++;",
-        "  var id = _nextShapeId('triangle', _triangleCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('triangle', callsiteId);",
+        "  var slotKey = ref.slotKey;",
+        "  var x1 = __vals[0], y1 = __vals[1], x2 = __vals[2], y2 = __vals[3], x3 = __vals[4], y3 = __vals[5];",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
         "  var style=_shapeStyle();",
         "  _shapes.push({",
-        '    id:id, type:"triangle",',
+        '    slotKey:slotKey, type:"triangle",',
         "    points:[p1,p2,p3],",
         "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
         "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function triangle(){ return _triangle.apply(this, arguments); }");
   }
   if (deps.rect || deps.square) {
     funcs.push(
       _joinExpr([
-        "function _rect(a,b,c,d){",
+        "function _rect(){",
         "  if(!_render){return;}",
-        "  _rectCount++;",
-        "  var id = _nextShapeId('rect', _rectCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('rect', callsiteId);",
+        "  var slotKey = ref.slotKey;",
         "  var mode = (typeof _rectMode !== 'undefined') ? _rectMode : 2;",
-        "  var x = a;",
-        "  var y = b;",
-        "  var w = c;",
-        "  var h = (d !== undefined) ? d : c;",
+        "  var x = __vals[0];",
+        "  var y = __vals[1];",
+        "  var w = __vals[2];",
+        "  var h = (__vals[3] !== undefined) ? __vals[3] : __vals[2];",
         "  if (!(w===w)) w = 0;",
         "  if (!(h===h)) h = 0;",
         "  var cx, cy, ww, hh;",
@@ -978,8 +973,8 @@ function getShapeLib(deps) {
         "    ww = w * 2;",
         "    hh = h * 2;",
         "  } else if (mode === 3) {",
-        "    var x2 = c;",
-        "    var y2 = (d !== undefined) ? d : b;",
+        "    var x2 = __vals[2];",
+        "    var y2 = (__vals[3] !== undefined) ? __vals[3] : __vals[1];",
         "    var dx = x2 - x;",
         "    var dy = y2 - y;",
         "    cx = x + dx * 0.5;",
@@ -997,87 +992,108 @@ function getShapeLib(deps) {
         "  var r=_rotation*180/Math.PI;",
         "  var style=_shapeStyle();",
         "  _shapes.push({",
-        '    id:id, type:"rect",',
+        '    slotKey:slotKey, type:"rect",',
         "    pos:p, size:s, rot:r,",
         "    fillColor:style.fillColor, strokeColor:style.strokeColor,",
         "    fillOpacity:style.fillOpacity, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function rect(){ return _rect.apply(this, arguments); }");
+    funcs.push("function square(x, y, s){ return _rect.apply(this, arguments.length > 0 ? arguments : [x, y, s, s]); }");
   }
   if (deps.line) {
     funcs.push(
       _joinExpr([
-        "function _line(x1,y1,x2,y2){",
+        "function _line(){",
         "  if(!_render){return;}",
-        "  _lineCount++;",
-        "  var id = _nextShapeId('line', _lineCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('line', callsiteId);",
+        "  var slotKey = ref.slotKey;",
+        "  var x1 = __vals[0], y1 = __vals[1], x2 = __vals[2], y2 = __vals[3];",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var style=_shapeStyle();",
         "  _shapes.push({",
-        '    id:id, type:"line",',
+        '    slotKey:slotKey, type:"line",',
         "    points:[p1,p2],",
         "    fillColor:null, strokeColor:style.strokeColor,",
         "    fillOpacity:0, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function line(){ return _line.apply(this, arguments); }");
   }
   if (deps.point) {
     funcs.push(
       _joinExpr([
-        "function _point(x,y){",
+        "function _point(){",
         "  if(!_render){return;}",
-        "  _pointCount++;",
-        "  var id = _nextShapeId('point', _pointCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('point', callsiteId);",
+        "  var slotKey = ref.slotKey;",
+        "  var x = __vals[0], y = __vals[1];",
         "  var p=_applyTransform(x,y);",
         "  var style=_shapeStyle();",
         "  _shapes.push({",
-        '    id:id, type:"point",',
+        '    slotKey:slotKey, type:"point",',
         "    pos:p, size:[style.strokeWeight,style.strokeWeight],",
         "    fillColor:style.strokeColor, strokeColor:style.strokeColor,",
         "    fillOpacity:style.strokeOpacity, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function point(){ return _point.apply(this, arguments); }");
   }
   if (deps.bezier) {
     funcs.push(
       _joinExpr([
-        "function _bezier(x1,y1,x2,y2,x3,y3,x4,y4){",
+        "function _bezier(){",
         "  if(!_render){return;}",
-        "  _bezierCount++;",
-        "  var id = _nextShapeId('bezier', _bezierCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('bezier', callsiteId);",
+        "  var slotKey = ref.slotKey;",
+        "  var x1 = __vals[0], y1 = __vals[1], x2 = __vals[2], y2 = __vals[3], x3 = __vals[4], y3 = __vals[5], x4 = __vals[6], y4 = __vals[7];",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
         "  var p4=_applyTransform(x4,y4);",
         "  var style=_shapeStyle();",
         "  _shapes.push({",
-        '    id:id, type:"bezier",',
+        '    slotKey:slotKey, type:"bezier",',
         "    points:[p1,p2,p3,p4],",
         "    fillColor:null, strokeColor:style.strokeColor,",
         "    fillOpacity:0, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function bezier(){ return _bezier.apply(this, arguments); }");
   }
   if (deps.curve) {
     funcs.push(
       _joinExpr([
-        "function _curve(x1,y1,x2,y2,x3,y3,x4,y4){",
+        "function _curve(){",
         "  if(!_render){return;}",
-        "  _curveCount++;",
-        "  var id = _nextShapeId('curve', _curveCount);",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var __vals = __shapeArgs.values;",
+        "  var callsiteId = __shapeArgs.callsiteId;",
+        "  var ref = _nextShapeRef('curve', callsiteId);",
+        "  var slotKey = ref.slotKey;",
+        "  var x1 = __vals[0], y1 = __vals[1], x2 = __vals[2], y2 = __vals[3], x3 = __vals[4], y3 = __vals[5], x4 = __vals[6], y4 = __vals[7];",
         "  var p1=_applyTransform(x1,y1);",
         "  var p2=_applyTransform(x2,y2);",
         "  var p3=_applyTransform(x3,y3);",
@@ -1085,16 +1101,17 @@ function getShapeLib(deps) {
         "  var style=_shapeStyle();",
         "  var tightness = typeof _curveTightness !== 'undefined' ? _curveTightness : 0.5;",
         "  _shapes.push({",
-        '    id:id, type:"curve",',
+        '    slotKey:slotKey, type:"curve",',
         "    points:[p1,p2,p3,p4],",
         "    tightness:tightness,",
         "    fillColor:null, strokeColor:style.strokeColor,",
         "    fillOpacity:0, strokeOpacity:style.strokeOpacity,",
         "    strokeWeight:style.strokeWeight",
         "  });",
-        "}",
-      ]),
+        "}"
+      ])
     );
+    funcs.push("function curve(){ return _curve.apply(this, arguments); }");
   }
   if (deps.polygon) {
     funcs.push(
@@ -1105,10 +1122,11 @@ function getShapeLib(deps) {
         "",
         "var _VERTEX_SUBDIV = 16;",
         "",
-        "function beginShape(kind){",
+        "function beginShape(){",
         "  if(!_render){ _currentPolygon = null; return; }",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
         "  _currentPolygon = {",
-        "    id: 0,",
+        "    slotKey: null,",
         '    type: "polygon",',
         "    points: [],",
         "    closed: false,",
@@ -1132,8 +1150,11 @@ function getShapeLib(deps) {
         "  }",
         "}",
         "",
-        "function vertex(x,y){",
+        "function vertex(){",
         "  if(!_render || !_currentPolygon){ return; }",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var x = __shapeArgs.values[0];",
+        "  var y = __shapeArgs.values[1];",
         "  if(!_currentPolygon._currentContour){",
         "    _currentPolygon._currentContour = [];",
         "  }",
@@ -1144,6 +1165,7 @@ function getShapeLib(deps) {
         "",
         "function beginContour(){",
         "  if(!_render || !_currentPolygon){ return; }",
+        "  _consumeShapeArgs(arguments);",
         "  if(_currentPolygon._currentContour && _currentPolygon._currentContour.length){",
         "    _currentPolygon.contours.push(_currentPolygon._currentContour);",
         "  }",
@@ -1154,6 +1176,7 @@ function getShapeLib(deps) {
         "",
         "function endContour(){",
         "  if(!_render || !_currentPolygon){ return; }",
+        "  _consumeShapeArgs(arguments);",
         "  if(_currentPolygon._currentContour && _currentPolygon._currentContour.length){",
         "    _currentPolygon.contours.push(_currentPolygon._currentContour);",
         "  }",
@@ -1162,8 +1185,10 @@ function getShapeLib(deps) {
         "  _currentPolygon._inContour = false;",
         "}",
         "",
-        "function bezierVertex(cx1,cy1,cx2,cy2,x,y){",
+        "function bezierVertex(){",
         "  if(!_render || !_currentPolygon){ return; }",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var cx1 = __shapeArgs.values[0], cy1 = __shapeArgs.values[1], cx2 = __shapeArgs.values[2], cy2 = __shapeArgs.values[3], x = __shapeArgs.values[4], y = __shapeArgs.values[5];",
         "  var contour = _currentPolygon._currentContour;",
         "  if(!contour || contour.length === 0) return;",
         "  var p0 = contour[contour.length-1];",
@@ -1181,8 +1206,10 @@ function getShapeLib(deps) {
         "  _currentPolygon._curveBuffer.push(p3);",
         "}",
         "",
-        "function quadraticVertex(cpx,cpy,x,y){",
+        "function quadraticVertex(){",
         "  if(!_render || !_currentPolygon){ return; }",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var cpx = __shapeArgs.values[0], cpy = __shapeArgs.values[1], x = __shapeArgs.values[2], y = __shapeArgs.values[3];",
         "  var contour = _currentPolygon._currentContour;",
         "  if(!contour || contour.length === 0) return;",
         "  var p0 = contour[contour.length-1];",
@@ -1199,8 +1226,10 @@ function getShapeLib(deps) {
         "  _currentPolygon._curveBuffer.push(p2);",
         "}",
         "",
-        "function curveVertex(x,y){",
+        "function curveVertex(){",
         "  if(!_render || !_currentPolygon){ return; }",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var x = __shapeArgs.values[0], y = __shapeArgs.values[1];",
         "  if(!_currentPolygon._currentContour){",
         "    _currentPolygon._currentContour = [];",
         "  }",
@@ -1231,8 +1260,10 @@ function getShapeLib(deps) {
         "  }",
         "}",
         "",
-        "function endShape(mode){",
+        "function endShape(){",
         "  if(!_render || !_currentPolygon){ return; }",
+        "  var __shapeArgs = _consumeShapeArgs(arguments);",
+        "  var mode = __shapeArgs.values[0];",
         "  if(_currentPolygon._currentContour && _currentPolygon._currentContour.length){",
         "    _currentPolygon.contours.push(_currentPolygon._currentContour);",
         "  }",
@@ -1241,12 +1272,12 @@ function getShapeLib(deps) {
         "    return;",
         "  }",
         "  var style = _shapeStyle();",
-        "  _polygonCount++;",
+        "  var ref = _nextShapeRef('polygon', __shapeArgs.callsiteId);",
         "  var closed = false;",
         "  if (mode !== undefined) {",
-        "    closed = (mode === true || mode === CLOSE);",
+          "    closed = (mode === true || mode === CLOSE);",
         "  }",
-        "  _currentPolygon.id = _nextShapeId('polygon', _polygonCount);",
+        "  _currentPolygon.slotKey = ref.slotKey;",
         "  _currentPolygon.fillColor = style.fillColor;",
         "  _currentPolygon.strokeColor = style.strokeColor;",
         "  _currentPolygon.fillOpacity = style.fillOpacity;",
@@ -1255,22 +1286,21 @@ function getShapeLib(deps) {
         "  _currentPolygon.closed = closed;",
         "  _shapes.push(_currentPolygon);",
         "  _currentPolygon = null;",
-        "}",
-      ]),
+        "}"
+      ])
     );
   }
   if (deps.background) {
-    funcs.push("var _backgroundCount = 0;");
     funcs.push(getBackgroundLib());
   }
 
   return funcs.join("\n");
 }
 
-function createArcFromContext(index, shapeId, mainCompName, targetLayer) {
+function createArcFromContext(index, slotKey, mainCompName, targetLayer) {
   var base = _createBaseShapeTarget(index, targetLayer);
   var shapeGroup = base.shapeGroup;
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
 
   var strokeGroup = _contents(shapeGroup).addProperty("ADBE Vector Group");
   strokeGroup.name = "Stroke_Arc";
@@ -1278,19 +1308,16 @@ function createArcFromContext(index, shapeId, mainCompName, targetLayer) {
   strokePath.property("Path").expression = _getArcPathExpr(indexFind, 0);
 
   var stroke = _contents(strokeGroup).addProperty(
-    "ADBE Vector Graphic - Stroke",
+    "ADBE Vector Graphic - Stroke"
   );
   stroke.property("Color").expression = _joinExpr([
     indexFind,
     "if (!shape || !shape.strokeColor) [0,0,0,1];",
     "var sc = shape.strokeColor;",
-    "[sc[0], sc[1], sc[2], 1]",
+    "[sc[0], sc[1], sc[2], 1]"
   ]);
   stroke.property("Opacity").expression = _getStrokeOpacityExpr(indexFind);
-  stroke.property("Stroke Width").expression = _getStrokeWidthExpr(
-    indexFind,
-    1,
-  );
+  stroke.property("Stroke Width").expression = _getStrokeWidthExpr(indexFind, 1);
 
   var fillGroup = _contents(shapeGroup).addProperty("ADBE Vector Group");
   fillGroup.name = "Fill_Arc";

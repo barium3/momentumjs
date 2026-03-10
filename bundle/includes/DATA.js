@@ -160,7 +160,7 @@ function _getDataCoreLib() {
     "function _dataStrSingle(value) {",
     "  if (value === null || value === undefined) return '';",
     "  return String(value);",
-    "}",
+    "}"
   ];
 }
 
@@ -177,7 +177,7 @@ function _getDataOptionalLib(deps) {
       "  if (!_dataIsArray(list)) return [value];",
       "  list.push(value);",
       "  return list;",
-      "}",
+      "}"
     ]);
   }
 
@@ -203,7 +203,7 @@ function _getDataOptionalLib(deps) {
       "    target[toIndex + i] = src[srcIndex];",
       "  }",
       "  return target;",
-      "}",
+      "}"
     ]);
   }
 
@@ -211,7 +211,7 @@ function _getDataOptionalLib(deps) {
     pushBlock([
       "function _data_boolean(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataBoolSingle) : _dataBoolSingle(value);",
-      "}",
+      "}"
     ]);
   }
 
@@ -219,7 +219,7 @@ function _getDataOptionalLib(deps) {
     pushBlock([
       "function _data_byte(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataByteSingle) : _dataByteSingle(value);",
-      "}",
+      "}"
     ]);
   }
 
@@ -227,7 +227,7 @@ function _getDataOptionalLib(deps) {
     pushBlock([
       "function _data_char(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataCharSingle) : _dataCharSingle(value);",
-      "}",
+      "}"
     ]);
   }
 
@@ -237,7 +237,7 @@ function _getDataOptionalLib(deps) {
       "  var left = _dataIsArray(list0) ? list0 : [];",
       "  var right = _dataIsArray(list1) ? list1 : [];",
       "  return left.concat(right);",
-      "}",
+      "}"
     ]);
   }
 
@@ -245,7 +245,7 @@ function _getDataOptionalLib(deps) {
     pushBlock([
       "function _data_float(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataFloatSingle) : _dataFloatSingle(value);",
-      "}",
+      "}"
     ]);
   }
 
@@ -256,7 +256,7 @@ function _getDataOptionalLib(deps) {
       "    return _dataMapArray(value, function(item) { return _dataHexSingle(item, digits); });",
       "  }",
       "  return _dataHexSingle(value, digits);",
-      "}",
+      "}"
     ]);
   }
 
@@ -267,7 +267,7 @@ function _getDataOptionalLib(deps) {
       "    return _dataMapArray(value, function(item) { return _dataIntSingle(item, radix); });",
       "  }",
       "  return _dataIntSingle(value, radix);",
-      "}",
+      "}"
     ]);
   }
 
@@ -276,7 +276,7 @@ function _getDataOptionalLib(deps) {
       "function join(list, separator) {",
       "  if (!_dataIsArray(list)) return '';",
       "  return list.join(separator === undefined ? '' : String(separator));",
-      "}",
+      "}"
     ]);
   }
 
@@ -286,7 +286,7 @@ function _getDataOptionalLib(deps) {
       "  var source = String(str === null || str === undefined ? '' : str);",
       "  var regex = _dataRegex(reg, false);",
       "  return source.match(regex);",
-      "}",
+      "}"
     ]);
   }
 
@@ -302,7 +302,7 @@ function _getDataOptionalLib(deps) {
       "    if (found[0] === '') regex.lastIndex++;",
       "  }",
       "  return result.length ? result : null;",
-      "}",
+      "}"
     ]);
   }
 
@@ -311,7 +311,7 @@ function _getDataOptionalLib(deps) {
       "function nf(value, left, right) {",
       "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'none'); });",
       "  return _dataNFSingle(value, left, right, 'none');",
-      "}",
+      "}"
     ]);
   }
 
@@ -320,7 +320,7 @@ function _getDataOptionalLib(deps) {
       "function nfc(value, right) {",
       "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFCSingle(item, right); });",
       "  return _dataNFCSingle(value, right);",
-      "}",
+      "}"
     ]);
   }
 
@@ -329,7 +329,7 @@ function _getDataOptionalLib(deps) {
       "function nfp(value, left, right) {",
       "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'plus'); });",
       "  return _dataNFSingle(value, left, right, 'plus');",
-      "}",
+      "}"
     ]);
   }
 
@@ -338,7 +338,7 @@ function _getDataOptionalLib(deps) {
       "function nfs(value, left, right) {",
       "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'space'); });",
       "  return _dataNFSingle(value, left, right, 'space');",
-      "}",
+      "}"
     ]);
   }
 
@@ -351,7 +351,7 @@ function _getDataOptionalLib(deps) {
       "    for (var i = 0; i < arguments.length; i++) parts.push(String(arguments[i]));",
       "    _ctx.globals.__printLogs.push(parts.join(' '));",
       "  }",
-      "}",
+      "}"
     ]);
   }
 
@@ -360,7 +360,7 @@ function _getDataOptionalLib(deps) {
       "function reverse(list) {",
       "  if (!_dataIsArray(list)) return [];",
       "  return list.reverse();",
-      "}",
+      "}"
     ]);
   }
 
@@ -370,7 +370,7 @@ function _getDataOptionalLib(deps) {
       "  if (!_dataIsArray(list)) return [];",
       "  if (list.length > 0) list.pop();",
       "  return list;",
-      "}",
+      "}"
     ]);
   }
 
@@ -379,7 +379,7 @@ function _getDataOptionalLib(deps) {
       "function split(str, delim) {",
       "  var source = String(str === null || str === undefined ? '' : str);",
       "  return source.split(delim === undefined ? '' : String(delim));",
-      "}",
+      "}"
     ]);
   }
 
@@ -395,7 +395,7 @@ function _getDataOptionalLib(deps) {
       "    if (parts[i] !== '') out.push(parts[i]);",
       "  }",
       "  return out;",
-      "}",
+      "}"
     ]);
   }
 
@@ -403,7 +403,7 @@ function _getDataOptionalLib(deps) {
     pushBlock([
       "function str(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataStrSingle) : _dataStrSingle(value);",
-      "}",
+      "}"
     ]);
   }
 
@@ -413,7 +413,7 @@ function _getDataOptionalLib(deps) {
       "  var target = _dataIsArray(list) ? list : [];",
       "  if (!modify) target = _dataCloneArray(target);",
       "  return _dataShuffle(target);",
-      "}",
+      "}"
     ]);
   }
 
@@ -431,7 +431,7 @@ function _getDataOptionalLib(deps) {
       "  head.sort(_dataCompare);",
       "  for (var i = 0; i < head.length; i++) target[i] = head[i];",
       "  return target;",
-      "}",
+      "}"
     ]);
   }
 
@@ -445,7 +445,7 @@ function _getDataOptionalLib(deps) {
       "  for (var i = 0; i < values.length; i++) args.push(values[i]);",
       "  list.splice.apply(list, args);",
       "  return list;",
-      "}",
+      "}"
     ]);
   }
 
@@ -457,7 +457,7 @@ function _getDataOptionalLib(deps) {
       "  if (count === undefined) return list.slice(begin);",
       "  var size = Math.max(0, Math.floor(Number(count) || 0));",
       "  return list.slice(begin, begin + size);",
-      "}",
+      "}"
     ]);
   }
 
@@ -465,7 +465,7 @@ function _getDataOptionalLib(deps) {
     pushBlock([
       "function trim(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataTrimSingle) : _dataTrimSingle(value);",
-      "}",
+      "}"
     ]);
   }
 
@@ -473,7 +473,7 @@ function _getDataOptionalLib(deps) {
     pushBlock([
       "function _data_unchar(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataUncharSingle) : _dataUncharSingle(value);",
-      "}",
+      "}"
     ]);
   }
 
@@ -481,7 +481,7 @@ function _getDataOptionalLib(deps) {
     pushBlock([
       "function _data_unhex(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataUnhexSingle) : _dataUnhexSingle(value);",
-      "}",
+      "}"
     ]);
   }
 

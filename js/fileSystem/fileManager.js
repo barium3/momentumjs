@@ -6,7 +6,7 @@ window.fileManager = (function () {
   function loadFileList() {
     var scriptPath = csInterface.getSystemPath(SystemPath.EXTENSION);
     var folderPath = scriptPath + "/user";
-    // 转义路径中的特殊字符，确保正确传递给 ExtendScript
+
     var escapedPath = folderPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     csInterface.evalScript(
       'getFileList("' + escapedPath + '")',

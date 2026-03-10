@@ -13,7 +13,7 @@ function getTransformStateLib() {
     "var _rotation = 0;",
     "var _cosR = 1, _sinR = 0;",
     "var _scaleX = 1, _scaleY = 1;",
-    "var _stack = [];",
+    "var _stack = [];"
   ].join("\n");
 }
 
@@ -38,7 +38,7 @@ function getTransformBasicLib() {
     "  _cosR = Math.cos(_rotation);",
     "  _sinR = Math.sin(_rotation);",
     "}",
-    "function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }",
+    "function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }"
   ].join("\n");
 }
 
@@ -117,7 +117,7 @@ function getTransformStackLib() {
     "    if (s.tah !== undefined) _textAlignH = s.tah;",
     "    if (s.tav !== undefined) _textAlignV = s.tav;",
     "  }",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -132,7 +132,7 @@ function getResetMatrixLib() {
     "  _cosR = 1; _sinR = 0;",
     "  _scaleX = 1; _scaleY = 1;",
     "  _stack = [];",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -145,7 +145,7 @@ function getApplyTransformLib() {
     "  var sx = x * _scaleX, sy = y * _scaleY;",
     "  var c = _cosR, s = _sinR;",
     "  return [sx * c - sy * s + _tx, sx * s + sy * c + _ty];",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -181,7 +181,7 @@ function getTransformationLib(deps) {
       "  var dy = x * s + y * c;",
       "  _tx += dx;",
       "  _ty += dy;",
-      "}",
+      "}"
     );
   }
   if (deps.rotate) {
@@ -190,12 +190,12 @@ function getTransformationLib(deps) {
       "  _rotation += a;",
       "  _cosR = Math.cos(_rotation);",
       "  _sinR = Math.sin(_rotation);",
-      "}",
+      "}"
     );
   }
   if (deps.scale) {
     lib.push(
-      "function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }",
+      "function scale(sx, sy) { sy = sy === undefined ? sx : sy; _scaleX *= sx; _scaleY *= sy; }"
     );
   }
   if (deps.push) {
@@ -230,7 +230,7 @@ function getTransformationLib(deps) {
       "  if (typeof _textAlignH !== 'undefined') s.tah = _textAlignH;",
       "  if (typeof _textAlignV !== 'undefined') s.tav = _textAlignV;",
       "  _stack.push(s);",
-      "}",
+      "}"
     );
   }
   if (deps.pop) {
@@ -263,12 +263,12 @@ function getTransformationLib(deps) {
       "    if (s.tah !== undefined) _textAlignH = s.tah;",
       "    if (s.tav !== undefined) _textAlignV = s.tav;",
       "  }",
-      "}",
+      "}"
     );
   }
   if (deps.resetMatrix) {
     lib.push(
-      "function resetMatrix() { _tx = 0; _ty = 0; _rotation = 0; _scaleX = 1; _scaleY = 1; _stack = []; }",
+      "function resetMatrix() { _tx = 0; _ty = 0; _rotation = 0; _scaleX = 1; _scaleY = 1; _stack = []; }"
     );
   }
   if (deps.shape) {

@@ -126,14 +126,14 @@ function getImageLib(deps) {
     "  }",
     "  return { cx: cx, cy: cy, drawW: drawW, drawH: drawH };",
     "}",
-    "function _recordImage(path, cx, cy, drawW, drawH, iw, ih) {",
+    "function _recordImage(callsiteId, path, cx, cy, drawW, drawH, iw, ih) {",
     "  if (!_render) return;",
-    "  _imageCount++;",
-    "  var id = _shapeTypeCode.image * 10000 + _imageCount;",
+    "  var ref = _nextShapeRef('image', callsiteId);",
+    "  var slotKey = ref.slotKey;",
     "  var finalW = (drawW !== undefined && drawW !== null) ? drawW : iw;",
     "  var finalH = (drawH !== undefined && drawH !== null) ? drawH : ih;",
     "  _shapes.push({",
-    "    id: id,",
+    "    slotKey: slotKey,",
     "    type: 'image',",
     "    pos: _applyTransform(cx, cy),",
     "    size: [finalW * _scaleX, finalH * _scaleY],",
@@ -155,16 +155,24 @@ function getImageLib(deps) {
     "var _tintColor = null;",
     "function tint() { _tintColor = color.apply(null, arguments); }",
     "function noTint() { _tintColor = null; }",
-    "function _image(img, x, y, w, h) {",
+    "function _image() {",
+    "  var __shapeArgs = _consumeShapeArgs(arguments);",
+    "  var __vals = __shapeArgs.values;",
+    "  var callsiteId = __shapeArgs.callsiteId;",
+    "  var img = __vals[0];",
+    "  var x = __vals[1];",
+    "  var y = __vals[2];",
+    "  var w = __vals[3];",
+    "  var h = __vals[4];",
     "  if (!img) return;",
     "  var iw = img.width || 0;",
     "  var ih = img.height || 0;",
     "  var sourceW = _imageSizeValue(img._momentumSourceWidth, iw);",
     "  var sourceH = _imageSizeValue(img._momentumSourceHeight, ih);",
     "  var placement = _resolveImagePlacement(x, y, w, h, iw, ih, _imageMode);",
-    "  _recordImage(img._momentumPath || '', placement.cx, placement.cy, placement.drawW, placement.drawH, sourceW, sourceH);",
+    "  _recordImage(callsiteId, img._momentumPath || '', placement.cx, placement.cy, placement.drawW, placement.drawH, sourceW, sourceH);",
     "}",
-    "function image(img, x, y, w, h) { return _image(img, x, y, w, h); }",
+    "function image(img, x, y, w, h) { return _image(img, x, y, w, h); }"
   ].join("\n");
 }
 
@@ -210,7 +218,7 @@ function _getOrCreateFootageSampleComp(compFolder, targetComp) {
     height,
     1,
     duration,
-    frameRate,
+    frameRate
   );
   if (compFolder) {
     sampleComp.parentFolder = compFolder;
@@ -225,7 +233,7 @@ function ensureFootageSampleLayer(
   compFolder,
   targetComp,
   layerPrefix,
-  configureTransform,
+  configureTransform
 ) {
   if (!relativePath || !fullPath) return null;
 
@@ -283,7 +291,7 @@ function ensureImageSampleLayers(imageMetadata, compFolder, targetComp) {
       compFolder,
       targetComp,
       "__imgsrc__",
-      true,
+      true
     );
   }
 }
@@ -293,10 +301,10 @@ function ensureImageSampleLayers(imageMetadata, compFolder, targetComp) {
  */
 function createImageFromContext(
   index,
-  shapeId,
+  slotKey,
   mainCompName,
   shapeData,
-  compFolder,
+  compFolder
 ) {
   var src = shapeData && shapeData.src ? shapeData.src : null;
   if (!src) return;
@@ -315,16 +323,16 @@ function createImageFromContext(
   var fw = footageItem.width;
   var fh = footageItem.height;
 
-  var indexFind = _getIdFindExpr(shapeId, mainCompName);
+  var indexFind = _getSlotFindExpr(slotKey, mainCompName);
 
   imgLayer.property("Transform").property("Anchor Point").expression = [
-    "[" + fw + " / 2, " + fh + " / 2]",
+    "[" + fw + " / 2, " + fh + " / 2]"
   ].join("\n");
 
   imgLayer.property("Transform").property("Position").expression = [
     indexFind,
     "var p = shape && shape.pos;",
-    "p ? [p[0], p[1]] : [thisComp.width/2, thisComp.height/2];",
+    "p ? [p[0], p[1]] : [thisComp.width/2, thisComp.height/2];"
   ].join("\n");
 
   imgLayer.property("Transform").property("Scale").expression = [
@@ -337,13 +345,13 @@ function createImageFromContext(
     "  var sx = shape.sx !== undefined ? shape.sx : 1;",
     "  var sy = shape.sy !== undefined ? shape.sy : 1;",
     "  [drawW * sx / natW * 100, drawH * sy / natH * 100];",
-    "}",
+    "}"
   ].join("\n");
 
   imgLayer.property("Transform").property("Rotation").expression = [
     indexFind,
     "var r = shape && shape.rot;",
-    "r !== undefined ? r : 0;",
+    "r !== undefined ? r : 0;"
   ].join("\n");
 
   imgLayer.property("Transform").property("Opacity").expression = [
@@ -352,7 +360,7 @@ function createImageFromContext(
     "var o = shape && shape.fillOpacity;",
     "var tintAlpha = t && t[3] !== undefined ? t[3] : 1;",
     "var fillAlpha = o !== undefined ? o / 100 : 1;",
-    "tintAlpha * fillAlpha * 100;",
+    "tintAlpha * fillAlpha * 100;"
   ].join("\n");
 
   var tintEffect = imgLayer.Effects.addProperty("ADBE Tint");
@@ -362,7 +370,7 @@ function createImageFromContext(
     "if (!t) [255, 255, 255, 255];",
     "else if (t.length === 1) [t[0] * 255, t[0] * 255, t[0] * 255, 255];",
     "else if (t.length === 2) [t[0] * 255, t[0] * 255, t[0] * 255, t[1] * 255];",
-    "else [t[0] * 255, t[1] * 255, t[2] * 255, (t[3] !== undefined ? t[3] * 255 : 255)]",
+    "else [t[0] * 255, t[1] * 255, t[2] * 255, (t[3] !== undefined ? t[3] * 255 : 255)]"
   ].join("\n");
   tintEffect.property(3).setValue(100);
 }

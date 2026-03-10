@@ -77,14 +77,6 @@ window.codeExecutor = (function () {
     const fallbackFont = availableFonts.length > 0 ? availableFonts[0] : null;
 
     return renderLayers.map((layer) => {
-      if (layer === "text") {
-        const fontName = defaultFont || fallbackFont;
-        return {
-          type: "text",
-          fontFamily: fontName || "Arial",
-        };
-      }
-
       if (layer && layer.type === "text") {
         const fontName = defaultFont || fallbackFont;
         return {
@@ -101,27 +93,68 @@ window.codeExecutor = (function () {
     return new Promise((resolve, reject) => {
       const extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
       const bundlePath = extensionRoot + "/bundle/momentum.js";
+      const bundlePathExpr = toExtendScriptStringExpr(bundlePath);
+      const loadScript =
+        "(function() {" +
+        "var file = new File(" +
+        bundlePathExpr +
+        ");" +
+        "if (!file.exists) return 'ERROR: Cannot find momentum.js file at ' + file.fsName;" +
+        "try {" +
+        "$.evalFile(file.fsName);" +
+        "return 'SUCCESS';" +
+        "} catch(e) {" +
+        "return 'ERROR: ' + e.message + ' | line=' + e.line + ' | file=' + e.fileName;" +
+        "}" +
+        "})();";
 
       csInterface.evalScript(
-        `
-        (function() {
-          var file = new File("${bundlePath.replace(/\\/g, "\\\\")}");
-          if (!file.exists) return "ERROR: Cannot find momentum.js file";
-
-          try {
-            $.evalFile(file.fsName);
-            return "SUCCESS";
-          } catch(e) {
-            return "ERROR: " + e.message;
-          }
-        })();
-        `,
+        loadScript,
         (result) => {
           if (result.startsWith(ERROR_PREFIX)) {
-            reject(result.substring(ERROR_PREFIX.length + 1));
+            debugMomentumLibraryLoad(extensionRoot)
+              .then((debugResult) => {
+                const baseError = result.substring(ERROR_PREFIX.length + 1);
+                reject(
+                  debugResult
+                    ? `${baseError}\n[Momentum debug] ${debugResult}`
+                    : baseError,
+                );
+              })
+              .catch(() => {
+                reject(result.substring(ERROR_PREFIX.length + 1));
+              });
           } else {
             resolve();
           }
+        },
+      );
+    });
+  }
+
+  function debugMomentumLibraryLoad(extensionRoot) {
+    return new Promise((resolve) => {
+      const rootExpr = toExtendScriptStringExpr(extensionRoot);
+      csInterface.evalScript(
+        "(function() {" +
+          "var root = " +
+          rootExpr +
+          ";" +
+          "var report = [];" +
+          "function readSummary(relativePath) {" +
+          "var file = new File(root + '/' + relativePath);" +
+          "if (!file.exists) { report.push('summary ' + relativePath + ' | missing'); return; }" +
+          "var text = '';" +
+          "try { if (file.open('r')) { text = String(file.read() || ''); file.close(); } } catch (e) { try { file.close(); } catch (_e) {} }" +
+          "var lines = text ? text.split('\\n') : [];" +
+          "report.push('summary ' + relativePath + ' | fsName=' + file.fsName + ' | modified=' + file.modified + ' | lines=' + lines.length + ' | line133=' + (lines[132] || '') + ' | line134=' + (lines[133] || ''));" +
+          "}" +
+          "readSummary('bundle/includes/core.js');" +
+          "readSummary('bundle/momentum.js');" +
+          "return report.join('\\n');" +
+        "})();",
+        function (result) {
+          resolve(result || "");
         },
       );
     });
@@ -208,6 +241,78 @@ window.codeExecutor = (function () {
     }
 
     return null;
+  }
+
+  function collectNamesFromPattern(pattern, outNames) {
+    if (!pattern || !outNames) {
+      return;
+    }
+
+    switch (pattern.type) {
+      case "Identifier":
+        outNames.push(pattern.name);
+        return;
+      case "ObjectPattern":
+        for (const prop of pattern.properties || []) {
+          if (!prop) continue;
+          if (prop.type === "Property") {
+            collectNamesFromPattern(prop.value, outNames);
+          } else if (prop.type === "RestElement") {
+            collectNamesFromPattern(prop.argument, outNames);
+          }
+        }
+        return;
+      case "ArrayPattern":
+        for (const item of pattern.elements || []) {
+          if (item) collectNamesFromPattern(item, outNames);
+        }
+        return;
+      case "AssignmentPattern":
+        collectNamesFromPattern(pattern.left, outNames);
+        return;
+      case "RestElement":
+        collectNamesFromPattern(pattern.argument, outNames);
+        return;
+      default:
+        return;
+    }
+  }
+
+  function getGlobalVarNames(program) {
+    const names = [];
+    const seen = Object.create(null);
+    const excluded = {
+      setup: true,
+      draw: true,
+      preload: true,
+    };
+
+    if (!program || !Array.isArray(program.body)) {
+      return names;
+    }
+
+    for (const node of program.body) {
+      if (!node || node.type !== "VariableDeclaration") {
+        continue;
+      }
+
+      if (node.kind === "const") {
+        continue;
+      }
+
+      for (const decl of node.declarations || []) {
+        const bindingNames = [];
+        collectNamesFromPattern(decl && decl.id, bindingNames);
+
+        for (const name of bindingNames) {
+          if (!name || seen[name] || excluded[name]) continue;
+          seen[name] = true;
+          names.push(name);
+        }
+      }
+    }
+
+    return names;
   }
 
   // Remove only top-level setup()/draw() definitions and leave helper code intact.
@@ -335,7 +440,12 @@ window.codeExecutor = (function () {
         }
 
         const word = source.slice(i, j);
-        const alias = AE_RESERVED_DATA_HELPERS[word];
+        const alias = Object.prototype.hasOwnProperty.call(
+          AE_RESERVED_DATA_HELPERS,
+          word,
+        )
+          ? AE_RESERVED_DATA_HELPERS[word]
+          : null;
         const prev = i > 0 ? source[i - 1] : "";
 
         if (alias && prev !== "." && !/[A-Za-z0-9_$]/.test(prev)) {
@@ -360,6 +470,15 @@ window.codeExecutor = (function () {
     }
 
     return out;
+  }
+
+  function toExtendScriptStringExpr(value) {
+    const source = String(value == null ? "" : value);
+    const encoded = encodeURIComponent(source)
+      .replace(/'/g, "%27")
+      .replace(/\(/g, "%28")
+      .replace(/\)/g, "%29");
+    return `decodeURIComponent('${encoded}')`;
   }
 
   function getP5Analyzer() {
@@ -405,7 +524,14 @@ window.codeExecutor = (function () {
     }
   }
 
-  async function analyzeSeparatedAsync(setupCode, drawCode, globalCode) {
+  async function analyzeSeparatedAsync(
+    setupCode,
+    drawCode,
+    globalCode,
+    setupFullCode,
+    drawFullCode,
+    preloadFullCode,
+  ) {
     const analyzer = getP5Analyzer();
     if (!analyzer) {
       console.warn("[CodeExecutor] P5Analyzer not loaded");
@@ -417,6 +543,9 @@ window.codeExecutor = (function () {
         setupCode,
         drawCode,
         globalCode,
+        setupFullCode,
+        drawFullCode,
+        preloadFullCode,
       );
     } catch (error) {
       console.warn("[CodeExecutor] 分别分析失败:", error.message);
@@ -436,18 +565,21 @@ window.codeExecutor = (function () {
   // Split source into:
   // - globalCode: top-level helpers and globals
   // - setupCode/drawCode: entry bodies
-  // - setupFullCode/drawFullCode: original entry definitions for analysis
+  // - setupFullCode/drawFullCode/preloadFullCode: original entry definitions
   function parseProcessingCode(code) {
     let drawCode = "";
     let setupCode = "";
     let drawFullCode = "";
     let setupFullCode = "";
+    let preloadFullCode = "";
     let globalCode = code || "";
+    let globalVarNames = [];
 
     try {
       const program = parseTopLevelProgram(code || "");
       const drawEntry = getEntryDefinition(program, code || "", "draw");
       const setupEntry = getEntryDefinition(program, code || "", "setup");
+      const preloadEntry = getEntryDefinition(program, code || "", "preload");
 
       if (drawEntry) {
         drawCode = drawEntry.body || "";
@@ -457,11 +589,16 @@ window.codeExecutor = (function () {
         setupCode = setupEntry.body || "";
         setupFullCode = setupEntry.full || "";
       }
+      if (preloadEntry) {
+        preloadFullCode = preloadEntry.full || "";
+      }
 
       globalCode = removeRangesFromCode(code || "", [
         drawEntry ? { start: drawEntry.start, end: drawEntry.end } : null,
         setupEntry ? { start: setupEntry.start, end: setupEntry.end } : null,
+        preloadEntry ? { start: preloadEntry.start, end: preloadEntry.end } : null,
       ]).trim();
+      globalVarNames = getGlobalVarNames(program);
     } catch (e) {
       console.warn(
         "[CodeExecutor] AST 提取 setup/draw 失败，回退为空拆分:",
@@ -471,16 +608,107 @@ window.codeExecutor = (function () {
     }
 
     const globalVars = parseGlobalVars(globalCode);
-    const maxShapes = globalVars.maxShapes || 50;
 
     return {
       drawCode,
       setupCode,
       drawFullCode,
       setupFullCode,
+      preloadFullCode,
       globalCode,
       globalVars,
-      maxShapes,
+      globalVarNames,
+    };
+  }
+
+  function evalExtendScript(script) {
+    return new Promise((resolve) => {
+      csInterface.evalScript(script, (result) => {
+        resolve(result);
+      });
+    });
+  }
+
+  async function sendPayload(payload) {
+    const payloadId = `momentum_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    const payloadJson = JSON.stringify(payload);
+    const chunkSize = 1200;
+
+    let result = await evalExtendScript(
+      `startMomentumPayloadBuffer(${toExtendScriptStringExpr(payloadId)})`,
+    );
+    if (result && result.startsWith && result.startsWith(ERROR_PREFIX)) {
+      throw new Error(result.substring(ERROR_PREFIX.length + 1));
+    }
+
+    for (let i = 0; i < payloadJson.length; i += chunkSize) {
+      const chunk = payloadJson.slice(i, i + chunkSize);
+      result = await evalExtendScript(
+        `appendMomentumPayloadChunk(${toExtendScriptStringExpr(payloadId)}, ${toExtendScriptStringExpr(chunk)})`,
+      );
+      if (result && result.startsWith && result.startsWith(ERROR_PREFIX)) {
+        throw new Error(result.substring(ERROR_PREFIX.length + 1));
+      }
+    }
+
+    result = await evalExtendScript(
+      `executeMomentumPayloadBuffer(${toExtendScriptStringExpr(payloadId)})`,
+    );
+
+    return result;
+  }
+
+  function makePayload(
+    parsed,
+    fullResult,
+    separatedResult,
+    fontMetricsMap,
+    loadedImagesMap,
+    compName,
+  ) {
+    const drawBackgroundCount =
+      separatedResult &&
+      typeof separatedResult.drawBackgroundCount === "number"
+        ? separatedResult.drawBackgroundCount
+        : 0;
+
+    const drawNeedsEcho =
+      separatedResult && separatedResult.drawNeedsEcho === true;
+
+    const hasSetup = !!(parsed.setupCode && parsed.setupCode.length > 0);
+    const hasDraw = !!(parsed.drawCode && parsed.drawCode.length > 0);
+    const hasSetupOrDraw = hasSetup || hasDraw;
+
+    return {
+      args: [
+        rewriteReservedDataHelperCalls(parsed.drawCode || ""),
+        rewriteReservedDataHelperCalls(parsed.setupCode || ""),
+        rewriteReservedDataHelperCalls(parsed.globalCode || ""),
+        compName,
+        parsed.globalVars.width || 100,
+        parsed.globalVars.height || 100,
+        parsed.globalVars.frameRate || 30,
+        fullResult && fullResult.dependencies ? fullResult.dependencies : null,
+        separatedResult &&
+        separatedResult.setupRenderLayers &&
+        separatedResult.setupRenderLayers.length > 0
+          ? separatedResult.setupRenderLayers
+          : null,
+        separatedResult &&
+        separatedResult.drawRenderLayers &&
+        separatedResult.drawRenderLayers.length > 0
+          ? separatedResult.drawRenderLayers
+          : null,
+        hasSetupOrDraw,
+        drawBackgroundCount,
+        drawNeedsEcho,
+        fontMetricsMap,
+        loadedImagesMap,
+        rewriteReservedDataHelperCalls(parsed.setupFullCode || ""),
+        rewriteReservedDataHelperCalls(parsed.drawFullCode || ""),
+        rewriteReservedDataHelperCalls(parsed.preloadFullCode || ""),
+        parsed.globalVarNames || [],
+      ],
     };
   }
 
@@ -494,17 +722,18 @@ window.codeExecutor = (function () {
 
         code = await translateFontNames(code);
 
-        const parsed = parseProcessingCode(code);
-        const aeDrawCode = rewriteReservedDataHelperCalls(parsed.drawCode || "");
-        const aeSetupCode = rewriteReservedDataHelperCalls(
-          parsed.setupCode || "",
-        );
-        const aeGlobalCode = rewriteReservedDataHelperCalls(
-          parsed.globalCode || "",
-        );
+        if (
+          window.codePreprocessor &&
+          window.codePreprocessor.instrumentShapeCallsites
+        ) {
+          code = window.codePreprocessor.instrumentShapeCallsites(code);
+        }
 
+        const parsed = parseProcessingCode(code);
         const analysisCode =
           (parsed.globalCode || "") +
+          "\n" +
+          (parsed.preloadFullCode || "") +
           "\n" +
           (parsed.setupFullCode || "") +
           "\n" +
@@ -527,6 +756,9 @@ window.codeExecutor = (function () {
             parsed.setupCode || "",
             parsed.drawCode || "",
             parsed.globalCode || "",
+            parsed.setupFullCode || "",
+            parsed.drawFullCode || "",
+            parsed.preloadFullCode || "",
           );
         } catch (e) {
           console.warn("[CodeExecutor] 分别分析失败，使用默认结果");
@@ -552,84 +784,18 @@ window.codeExecutor = (function () {
           }
         }
 
-        const drawArg = JSON.stringify(aeDrawCode);
-        const setupArg = JSON.stringify(aeSetupCode);
-        const globalArg = JSON.stringify(aeGlobalCode);
-        const nameArg = JSON.stringify(compName);
-
-        const setupRenderLayersArg =
-          separatedResult &&
-          separatedResult.setupRenderLayers &&
-          separatedResult.setupRenderLayers.length > 0
-            ? JSON.stringify(separatedResult.setupRenderLayers)
-            : "null";
-        const drawRenderLayersArg =
-          separatedResult &&
-          separatedResult.drawRenderLayers &&
-          separatedResult.drawRenderLayers.length > 0
-            ? JSON.stringify(separatedResult.drawRenderLayers)
-            : "null";
-
-        const drawBackgroundCount =
-          separatedResult &&
-          typeof separatedResult.drawBackgroundCount === "number"
-            ? separatedResult.drawBackgroundCount
-            : 0;
-
-        const drawNeedsEcho =
-          separatedResult && separatedResult.drawNeedsEcho === true;
-
-        const hasSetup = !!(parsed.setupCode && parsed.setupCode.length > 0);
-        const hasDraw = !!(parsed.drawCode && parsed.drawCode.length > 0);
-        const hasSetupOrDraw = hasSetup || hasDraw;
-
-        const dependenciesArg =
-          fullResult && fullResult.dependencies
-            ? JSON.stringify(fullResult.dependencies)
-            : "null";
-
-        const widthArg = parsed.globalVars.width || 100;
-        const heightArg = parsed.globalVars.height || 100;
-        const frameRateArg = parsed.globalVars.frameRate || 30;
-
-        const finalCode =
-          "m.runParsed(" +
-          drawArg +
-          ", " +
-          setupArg +
-          ", " +
-          globalArg +
-          ", " +
-          nameArg +
-          ", " +
-          widthArg +
-          ", " +
-          heightArg +
-          ", " +
-          frameRateArg +
-          ", " +
-          dependenciesArg +
-          ", " +
-          setupRenderLayersArg +
-          ", " +
-          drawRenderLayersArg +
-          ", " +
-          hasSetupOrDraw +
-          ", " +
-          drawBackgroundCount +
-          ", " +
-          drawNeedsEcho +
-          ", " +
-          JSON.stringify(fontMetricsMap) +
-          ", " +
-          JSON.stringify(loadedImagesMap) +
-          ")";
-
-        const scriptToRun = `try { m._debugLogs = []; ${finalCode}; "__DEBUG__" + JSON.stringify(m._debugLogs || []); } catch(e) { "ERROR: " + e.message + " at line " + e.line + " stack: " + e.stack; }`;
+        const payload = makePayload(
+          parsed,
+          fullResult,
+          separatedResult,
+          fontMetricsMap,
+          loadedImagesMap,
+          compName,
+        );
 
         loadMomentumLibrary()
           .then(() => {
-            csInterface.evalScript(scriptToRun, (result) => {
+            sendPayload(payload).then((result) => {
               if (result && result.startsWith && result.startsWith("ERROR:")) {
                 console.error("[CodeExecutor] AE script error:", result);
               }
@@ -661,7 +827,7 @@ window.codeExecutor = (function () {
               } else {
                 resolve("Code executed successfully");
               }
-            });
+            }).catch(reject);
           })
           .catch(reject);
       } catch (error) {

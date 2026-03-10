@@ -19,11 +19,21 @@ class P5Analyzer {
     };
   }
 
-  async analyzeSetupAndDraw(setupCode, drawCode, globalCode) {
+  async analyzeSetupAndDraw(
+    setupCode,
+    drawCode,
+    globalCode,
+    setupFullCode,
+    drawFullCode,
+    preloadFullCode,
+  ) {
     const result = await this.runtime.executeSetupAndDraw(
       setupCode,
       drawCode,
       globalCode,
+      setupFullCode,
+      drawFullCode,
+      preloadFullCode,
     );
 
     const setupRenderLayers = (result.setupResult.renderOrder || []).slice();
@@ -36,13 +46,7 @@ class P5Analyzer {
     if (Array.isArray(drawRenderLayers) && drawRenderLayers.length > 0) {
       for (let i = 0; i < drawRenderLayers.length; i++) {
         const item = drawRenderLayers[i];
-        let type = null;
-
-        if (item && typeof item === "object") {
-          type = item.type || null;
-        } else if (typeof item === "string") {
-          type = item;
-        }
+        let type = item && typeof item === "object" ? item.type || null : null;
 
         if (!type) continue;
 

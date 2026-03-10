@@ -13,21 +13,21 @@ var m = {};
 
   // Core includes
 
-  #include "includes/registry.js"
+  #include "includes/registry.js";
 
   // Processing-style modules (must be before core.js)
-  #include "includes/math.js"
-  #include "includes/DATA.js"
-  #include "includes/transformation.js"
-  #include "includes/color.js"
-  #include "includes/typography.js"
-  #include "includes/image.js"
-  #include "includes/IO.js"
-  #include "includes/shape.js"
-  #include "includes/environment.js"
-  #include "includes/structure.js"
-  #include "includes/controller.js"
-  #include "includes/core.js"
+  #include "includes/math.js";
+  #include "includes/DATA.js";
+  #include "includes/transformation.js";
+  #include "includes/color.js";
+  #include "includes/typography.js";
+  #include "includes/image.js";
+  #include "includes/IO.js";
+  #include "includes/shape.js";
+  #include "includes/environment.js";
+  #include "includes/structure.js";
+  #include "includes/controller.js";
+  #include "includes/core.js";
 
 
   $.global.m = pub;

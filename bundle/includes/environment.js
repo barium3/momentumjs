@@ -130,7 +130,7 @@ function extractEnvironmentConfig(
   compName,
   defaultWidth,
   defaultHeight,
-  defaultFrameRate,
+  defaultFrameRate
 ) {
   var sizeParams = extractSizeParams(setupCode || "");
   var frameRateValue = extractFrameRateParam(setupCode || "");
@@ -145,7 +145,7 @@ function extractEnvironmentConfig(
     duration: durationValue || 10,
     sizeParams: sizeParams,
     frameRateValue: frameRateValue,
-    durationValue: durationValue,
+    durationValue: durationValue
   };
 }
 
@@ -262,7 +262,7 @@ function addEchoEffect(
   drawLayer,
   engineComp,
   uniqueMainCompName,
-  drawBackgroundCount,
+  drawBackgroundCount
 ) {
   try {
     // 获取效果容器
@@ -325,7 +325,7 @@ function addEchoEffect(
         if (numEchoesProp) {
           var escapedMainCompNameForEcho = uniqueMainCompName.replace(
             /"/g,
-            '\\"',
+            '\\"'
           );
           var drawBgCountForEcho = drawBackgroundCount || 0;
           var numEchoesExprLines = [
@@ -352,7 +352,7 @@ function addEchoEffect(
             "  0;",
             "} else {",
             "  timeToFrames(time);",
-            "}",
+            "}"
           ];
           numEchoesProp.expression = numEchoesExprLines.join("\n");
         }
@@ -375,7 +375,7 @@ function addEchoEffect(
           // 衰减只会受draw中的background影响，不会受setup中的影响
           var escapedMainCompNameForDecay = uniqueMainCompName.replace(
             /"/g,
-            '\\"',
+            '\\"'
           );
           var drawBgCount = drawBackgroundCount || 0;
           var decayExpr = [
@@ -422,7 +422,7 @@ function addEchoEffect(
             "// 如果没有draw中的background（alpha=0），则Decay=1，完全保留之前画面",
             "// 如果alpha=0.392（透明），则Decay=0.608，产生拖尾效果",
             "// 如果alpha=1（不透明），则Decay=0，不产生拖尾",
-            "1 - alpha",
+            "1 - alpha"
           ].join("\n");
 
           decayProp.expression = decayExpr;

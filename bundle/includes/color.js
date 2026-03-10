@@ -10,7 +10,7 @@
 var COLOR_MODES = {
   RGB: 0,
   HSB: 1,
-  HSL: 2,
+  HSL: 2
 };
 
 /**
@@ -24,7 +24,7 @@ var COLOR_DEFAULTS = {
   // 全局默认填充仍然保持白色，保证与 p5 默认一致
   fillColor: [1, 1, 1, 1],
   strokeColor: [0, 0, 0, 1], // 默认描边色 (黑色)
-  strokeWeight: 1,
+  strokeWeight: 1
 };
 
 /**
@@ -35,7 +35,7 @@ function getColorModeConstantsLib() {
     "// ===== Color Mode Constants =====",
     "var RGB = " + COLOR_MODES.RGB + ";",
     "var HSB = " + COLOR_MODES.HSB + ";",
-    "var HSL = " + COLOR_MODES.HSL + ";",
+    "var HSL = " + COLOR_MODES.HSL + ";"
   ].join("\n");
 }
 
@@ -66,7 +66,7 @@ function getColorStateLib() {
     "var _lastNoFill = null;",
     "var _lastNoStroke = null;",
     "var _lastStrokeWeight = null;",
-    "var _lastEncodedColorState = null;",
+    "var _lastEncodedColorState = null;"
   ].join("\n");
 }
 
@@ -152,7 +152,7 @@ function getColorConversionLib() {
     "    b = hue2rgb(p, q, h - 1/3);",
     "  }",
     "  return [r, g, b];",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -177,7 +177,7 @@ function getColorModeLib() {
     "    _colorMax3 = max3;",
     "    _colorMaxA = maxA;",
     "  }",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -228,7 +228,7 @@ function getParseColorStringLib() {
     "    return [rgb[0], rgb[1], rgb[2], a];",
     "  }",
     "  return null;",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -300,7 +300,7 @@ function getColorFuncLib() {
     "  na = Math.max(0, Math.min(1, na));",
 
     "  return [r, g, b, na];",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -327,7 +327,7 @@ function getFillStrokeLib() {
     "    _strokeColor = color.apply(null, arguments);",
     "  }",
     "  _noStroke = false;",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -338,7 +338,7 @@ function getNoFillStrokeWeightLib() {
   return [
     "function noFill() { _noFill = true; }",
     "function noStroke() { _noStroke = true; }",
-    "function strokeWeight(w) { _strokeWeight = w; }",
+    "function strokeWeight(w) { _strokeWeight = w; }"
   ].join("\n");
 }
 
@@ -403,7 +403,7 @@ function getColorExtractLib() {
     "  if (!c || !c.length) return 0;",
     "  var hsl = _rgbToHsl(c[0], c[1], c[2]);",
     "  return _colorMode === RGB ? hsl[2] * 100 : hsl[2] * _colorMax3;",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -444,7 +444,7 @@ function getLerpColorLib() {
     "  var rgb;",
     "  if (_colorMode === HSB) rgb = _hsbToRgb(lh, ls, lv); else rgb = _hslToRgb(lh, ls, lv);",
     "  return [rgb[0], rgb[1], rgb[2], la];",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -483,7 +483,7 @@ function getEncodeColorStateLib() {
     "  _lastStrokeWeight = _strokeWeight;",
     "  _lastEncodedColorState = [fill1, fill2, stroke1, stroke2, opacity, [_strokeWeight, 0]];",
     "  return _lastEncodedColorState;",
-    "}",
+    "}"
   ].join("\n");
 }
 
@@ -554,12 +554,12 @@ function getColorLib(deps) {
   // fill/stroke 支持数组、CSS 字符串、数字参数（通过 color 解析）
   if (deps.fill) {
     lib.push(
-      'function fill() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _fillColor = arguments[0]; } else { _fillColor = color.apply(null, arguments); } _noFill = false; _hasUserFill = true; }',
+      'function fill() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _fillColor = arguments[0]; } else { _fillColor = color.apply(null, arguments); } _noFill = false; _hasUserFill = true; }'
     );
   }
   if (deps.stroke) {
     lib.push(
-      'function stroke() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _strokeColor = arguments[0]; } else { _strokeColor = color.apply(null, arguments); } _noStroke = false; _hasUserStroke = true; }',
+      'function stroke() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _strokeColor = arguments[0]; } else { _strokeColor = color.apply(null, arguments); } _noStroke = false; _hasUserStroke = true; }'
     );
   }
 
@@ -577,22 +577,22 @@ function getColorLib(deps) {
   // 颜色提取函数
   if (deps.red) {
     lib.push(
-      "function red(c) { if (!c || !c.length) return 0; return c[0] * _colorMax1; }",
+      "function red(c) { if (!c || !c.length) return 0; return c[0] * _colorMax1; }"
     );
   }
   if (deps.green) {
     lib.push(
-      "function green(c) { if (!c || !c.length) return 0; return c[1] * _colorMax2; }",
+      "function green(c) { if (!c || !c.length) return 0; return c[1] * _colorMax2; }"
     );
   }
   if (deps.blue) {
     lib.push(
-      "function blue(c) { if (!c || !c.length) return 0; return c[2] * _colorMax3; }",
+      "function blue(c) { if (!c || !c.length) return 0; return c[2] * _colorMax3; }"
     );
   }
   if (deps.alpha) {
     lib.push(
-      "function alpha(c) { if (!c || !c.length) return 0; return (c[3] !== undefined ? c[3] : 1) * _colorMaxA; }",
+      "function alpha(c) { if (!c || !c.length) return 0; return (c[3] !== undefined ? c[3] : 1) * _colorMaxA; }"
     );
   }
   if (deps.hue) {
@@ -601,7 +601,7 @@ function getColorLib(deps) {
       needsConversion = true;
     }
     lib.push(
-      "function hue(c) { if (!c || !c.length) return 0; if (_colorMode === RGB) { var hsl = _rgbToHsl(c[0], c[1], c[2]); return hsl[0] * 360; } if (_colorMode === HSB) { var hsb = _rgbToHsb(c[0], c[1], c[2]); return hsb[0] * _colorMax1; } var hsl = _rgbToHsl(c[0], c[1], c[2]); return hsl[0] * _colorMax1; }",
+      "function hue(c) { if (!c || !c.length) return 0; if (_colorMode === RGB) { var hsl = _rgbToHsl(c[0], c[1], c[2]); return hsl[0] * 360; } if (_colorMode === HSB) { var hsb = _rgbToHsb(c[0], c[1], c[2]); return hsb[0] * _colorMax1; } var hsl = _rgbToHsl(c[0], c[1], c[2]); return hsl[0] * _colorMax1; }"
     );
   }
   if (deps.saturation) {
@@ -610,7 +610,7 @@ function getColorLib(deps) {
       needsConversion = true;
     }
     lib.push(
-      "function saturation(c) { if (!c || !c.length) return 0; if (_colorMode === HSB) { var hsb = _rgbToHsb(c[0], c[1], c[2]); return hsb[1] * _colorMax2; } var hsl = _rgbToHsl(c[0], c[1], c[2]); return _colorMode === RGB ? hsl[1] * 100 : hsl[1] * _colorMax2; }",
+      "function saturation(c) { if (!c || !c.length) return 0; if (_colorMode === HSB) { var hsb = _rgbToHsb(c[0], c[1], c[2]); return hsb[1] * _colorMax2; } var hsl = _rgbToHsl(c[0], c[1], c[2]); return _colorMode === RGB ? hsl[1] * 100 : hsl[1] * _colorMax2; }"
     );
   }
   if (deps.brightness) {
@@ -619,7 +619,7 @@ function getColorLib(deps) {
       needsConversion = true;
     }
     lib.push(
-      "function brightness(c) { if (!c || !c.length) return 0; var hsb = _rgbToHsb(c[0], c[1], c[2]); return _colorMode === RGB ? hsb[2] * 100 : hsb[2] * _colorMax3; }",
+      "function brightness(c) { if (!c || !c.length) return 0; var hsb = _rgbToHsb(c[0], c[1], c[2]); return _colorMode === RGB ? hsb[2] * 100 : hsb[2] * _colorMax3; }"
     );
   }
   if (deps.lightness) {
@@ -628,7 +628,7 @@ function getColorLib(deps) {
       needsConversion = true;
     }
     lib.push(
-      "function lightness(c) { if (!c || !c.length) return 0; var hsl = _rgbToHsl(c[0], c[1], c[2]); return _colorMode === RGB ? hsl[2] * 100 : hsl[2] * _colorMax3; }",
+      "function lightness(c) { if (!c || !c.length) return 0; var hsl = _rgbToHsl(c[0], c[1], c[2]); return _colorMode === RGB ? hsl[2] * 100 : hsl[2] * _colorMax3; }"
     );
   }
 
@@ -659,44 +659,47 @@ function getColorLib(deps) {
  * p5 逻辑：background 完全独立于 fill/stroke，仅使用传入的参数
  * 支持: background(gray), background(gray,a), background(v1,v2,v3), background(v1,v2,v3,a)
  * 以及 background(c) 其中 c 为 color() 返回的数组
- * 输出格式（语义化 JSON）: { id, type:"background", color:[r,g,b,a] }
+ * 输出格式（语义化 JSON）: { slotKey, type:"background", color:[r,g,b,a] }
  */
 function getBackgroundLib() {
   return [
     "function _background() {",
     "  if (!_render) return;",
-    "  _backgroundCount++;",
-    "  var m = _backgroundCount;",
-    "  var id = _shapeTypeCode.background * 10000 + m;",
+    "  var __shapeArgs = _consumeShapeArgs(arguments);",
+    "  var args = __shapeArgs.values;",
+    "  var callsiteId = __shapeArgs.callsiteId;",
+    "  var ref = _nextShapeRef('background', callsiteId);",
+    "  var slotKey = ref.slotKey;",
     "  var hasExplicitAlpha = false;",
     "  // 判断是否显式传入透明度参数：",
     "  // - background(gray, a) 或 background(r,g,b,a)：arguments.length === 2 或 4",
     "  // - background(c)：如果 c 是 color() 得到的数组且长度 >= 4，也认为显式带 alpha",
-    "  if (arguments.length === 2 || arguments.length === 4) {",
+    "  if (args.length === 2 || args.length === 4) {",
     "    hasExplicitAlpha = true;",
-    "  } else if (arguments.length === 1) {",
-    "    var arg0 = arguments[0];",
+    "  } else if (args.length === 1) {",
+    "    var arg0 = args[0];",
     "    if (arg0 && typeof arg0 === 'object' && arg0.length !== undefined) {",
     "      hasExplicitAlpha = arg0.length >= 4;",
     "    }",
     "  }",
-    "  var c = color.apply(null, arguments);",
+    "  var c = color.apply(null, args);",
     "  var col = [c[0], c[1], c[2], c[3] !== undefined ? c[3] : 1];",
     "  _backgrounds.push({",
-    '    id:id, type:"background",',
+    '    slotKey:slotKey, type:"background",',
     "    color: col,",
     "    explicitAlpha: hasExplicitAlpha",
     "  });",
     "}",
+    "function background(){ return _background.apply(this, arguments); }"
   ].join("\n");
 }
 
 /**
  * 创建 background 图层
  * 纯色图层，使用形状矩形 + 填色效果（效果-生成-填色）
- * 数据格式（语义化 JSON）: { id, type:"background", color:[r,g,b,a] }
+ * 数据格式（语义化 JSON）: { slotKey, type:"background", color:[r,g,b,a] }
  */
-function createBackgroundFromContext(index, renderIndex, mainCompName, targetLayer) {
+function createBackgroundFromContext(index, slotKey, mainCompName, targetLayer) {
   var layer = targetLayer || engineComp.layers.addShape();
   if (!targetLayer) {
     layer.name = "Background_" + index;
@@ -728,14 +731,9 @@ function createBackgroundFromContext(index, renderIndex, mainCompName, targetLay
     "var json = raw && raw.toString ? raw.toString() : raw;",
     "var data = JSON.parse(json);",
     "var backgrounds = data.backgrounds || [];",
-    "var targetId = " + renderIndex + ";",
-    "var bg = null;",
-    "for (var i = backgrounds.length - 1; i >= 0; i--) {",
-    "  if (backgrounds[i] && backgrounds[i].id === targetId) {",
-    "    bg = backgrounds[i];",
-    "    break;",
-    "  }",
-    "}",
+    "var idx = data.backgroundSlotIndex || {};",
+    "var targetKey = " + JSON.stringify(slotKey) + ";",
+    "var bg = (idx && idx[targetKey] !== undefined) ? backgrounds[idx[targetKey]] : null;"
   ].join("\n");
 
   // 矩形覆盖整个合成：锚点左上角，位置 (0,0)，尺寸为合成宽高
@@ -746,11 +744,11 @@ function createBackgroundFromContext(index, renderIndex, mainCompName, targetLay
   transform.property("Anchor Point").setValue([0, 0]);
   transform.property("Position").setValue([
     engineComp.width / 2,
-    engineComp.height / 2,
+    engineComp.height / 2
   ]);
   rect.property("Size").expression = [
     indexFind,
-    "!bg ? [0, 0] : [thisComp.width, thisComp.height]",
+    "!bg ? [0, 0] : [thisComp.width, thisComp.height]"
   ].join("\n");
   transform.property("Rotation").setValue(0);
 
@@ -758,19 +756,18 @@ function createBackgroundFromContext(index, renderIndex, mainCompName, targetLay
   var fill = shapeGroup
     .property("Contents")
     .addProperty("ADBE Vector Graphic - Fill");
-
   fill.property("Color").expression = [
     indexFind,
     "if (!bg || !bg.color) [1, 1, 1, 1];",
     "var c = bg.color;",
-    "[c[0], c[1], c[2], 1]",
+    "[c[0], c[1], c[2], 1]"
   ].join("\n");
 
   fill.property("Opacity").expression = [
     indexFind,
     "if (!bg || !bg.color) 100;",
     "var c = bg.color;",
-    "c[3] !== undefined ? c[3] * 100 : 100",
+    "c[3] !== undefined ? c[3] * 100 : 100"
   ].join("\n");
 }
 

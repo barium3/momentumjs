@@ -21,23 +21,23 @@ functionRegistry.shapes = {
     baseType: "ellipse",
     // 椭圆/矩形模式常量（与 p5.ellipseMode / rectMode 对齐）
     // 0=CENTER, 1=RADIUS, 2=CORNER, 3=CORNERS
-    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"],
+    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"]
   },
   circle: {
     internal: "_ellipse",
-    baseType: "ellipse",
+    baseType: "ellipse"
   },
 
   // 三角形
   triangle: {
     internal: "_triangle",
-    baseType: "triangle",
+    baseType: "triangle"
   },
 
   // 四边形
   quad: {
     internal: "_quad",
-    baseType: "quad",
+    baseType: "quad"
   },
 
   // 圆弧
@@ -46,7 +46,7 @@ functionRegistry.shapes = {
     baseType: "arc",
     // 圆弧模式常量（与 p5.arc 的 mode 对齐）
     // 0=OPEN, 1=CHORD, 2=PIE
-    modes: ["OPEN", "CHORD", "PIE"],
+    modes: ["OPEN", "CHORD", "PIE"]
   },
 
   // 矩形/正方形
@@ -54,36 +54,36 @@ functionRegistry.shapes = {
     internal: "_rect",
     baseType: "rect",
     // 与 ellipse 共用的模式常量
-    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"],
+    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"]
   },
   square: {
     internal: "_rect",
-    baseType: "rect",
+    baseType: "rect"
   },
 
   // 直线
   line: {
     internal: "_line",
-    baseType: "line",
+    baseType: "line"
   },
 
   // 点
   point: {
     internal: "_point",
-    baseType: "point",
+    baseType: "point"
   },
 
   // 背景: 纯色图层，颜色由效果-生成-填色控制
   // 数据格式（语义化 JSON）: { index, type:"background", color:[r,g,b,a] }
   background: {
     internal: "_background",
-    baseType: "background",
+    baseType: "background"
   },
 
   // 文本: text() 渲染图层
   // 数据结构（语义化 JSON，存放在 _ctx.shapes 中）:
   // {
-  //   id,
+  //   slotKey,
   //   type: "text",
   //   pos: [x, y],              // 已应用当前变换后的锚点位置
   //   text: "string",           // 文本内容
@@ -95,7 +95,7 @@ functionRegistry.shapes = {
   // }
   text: {
     internal: "_text",
-    baseType: "text",
+    baseType: "text"
   },
 
   // 多边形: 通过 beginShape()/vertex()/endShape() 构建的任意多边形
@@ -124,25 +124,25 @@ functionRegistry.shapes = {
       quadraticVertex: { role: "add" }, // 添加二次贝塞尔曲线顶点
       curveVertex: { role: "add" }, // 添加曲线顶点（Catmull-Rom 样条）
       endShape: { role: "end" }, // 结束构建（触发统计）
-    },
+    }
   },
 
   // 贝塞尔曲线
   bezier: {
     internal: "_bezier",
-    baseType: "bezier",
+    baseType: "bezier"
   },
 
   // Catmull-Rom 样条曲线
   curve: {
     internal: "_curve",
-    baseType: "curve",
+    baseType: "curve"
   },
 
   // 图片：image() 绘制图层
   // 数据结构（语义化 JSON）:
   // {
-  //   id,
+  //   slotKey,
   //   type: "image",
   //   pos: [cx, cy],         // 中心点（已应用当前变换）
   //   size: [w, h],          // 绘制尺寸（已乘当前 transform scale）
@@ -156,46 +156,8 @@ functionRegistry.shapes = {
   // }
   image: {
     internal: "_image",
-    baseType: "image",
-  },
-};
-
-/**
- * 形状类型前缀编码表
- * 用于生成稳定的 id：id = typeCode * 10000 + 调用次数
- * key 为基础图形类型（baseType），value 为前缀编码
- *
- * 约定（默认值）：
- *   1xxxx = ellipse
- *   2xxxx = rect
- *   3xxxx = line
- *   4xxxx = point
- *   5xxxx = polygon
- *   6xxxx = arc
- *   7xxxx = quad
- *   8xxxx = triangle
- *   9xxxx = bezier
- *  10xxxx = curve
- *  11xxxx = background
- *  12xxxx = text
- *
- * 如需新增渲染图层，只需在此处为新的 baseType 分配唯一前缀编码，
- * 其余逻辑（id 生成与表达式查找）都会自动对齐。
- */
-functionRegistry.shapeTypeCode = {
-  ellipse: 1,
-  rect: 2,
-  line: 3,
-  point: 4,
-  polygon: 5,
-  arc: 6,
-  quad: 7,
-  triangle: 8,
-  bezier: 9,
-  curve: 10,
-  background: 11,
-  text: 12,
-  image: 13,
+    baseType: "image"
+  }
 };
 
 /**
@@ -207,7 +169,7 @@ functionRegistry.transforms = {
   scale: { internal: "scale" },
   push: { internal: "push" },
   pop: { internal: "pop" },
-  resetMatrix: { internal: "resetMatrix" },
+  resetMatrix: { internal: "resetMatrix" }
 };
 
 /**
@@ -242,7 +204,7 @@ functionRegistry.colors = {
   // 颜色模式常量
   RGB: { internal: "RGB", type: "constant" },
   HSB: { internal: "HSB", type: "constant" },
-  HSL: { internal: "HSL", type: "constant" },
+  HSL: { internal: "HSL", type: "constant" }
 };
 
 /**
@@ -285,7 +247,7 @@ functionRegistry.typography = {
   NORMAL: { internal: "NORMAL", type: "constant" },
   BOLD: { internal: "BOLD", type: "constant" },
   ITALIC: { internal: "ITALIC", type: "constant" },
-  BOLDITALIC: { internal: "BOLDITALIC", type: "constant" },
+  BOLDITALIC: { internal: "BOLDITALIC", type: "constant" }
 };
 
 /**
@@ -377,7 +339,7 @@ functionRegistry.math = {
   // 向量函数（p5.Vector 命名空间）
   // 检测 p5.Vector 或 createVector 时注入整个 p5 命名空间
   p5: { internal: "p5", type: "namespace" },
-  createVector: { internal: "createVector" },
+  createVector: { internal: "createVector" }
 };
 
 /**
@@ -408,7 +370,7 @@ functionRegistry.controllers = {
   createPoint: { internal: "createPoint" },
   // Path 控件：在 __controller__ 图层上创建可编辑 mask path，并在表达式侧返回路径采样器
   // API：var path = createPathController("guide", [[0,0],[100,0],[100,100]], true)
-  createPathController: { internal: "createPathController" },
+  createPathController: { internal: "createPathController" }
 };
 
 /**
@@ -444,7 +406,7 @@ functionRegistry.data = {
   subset: { internal: "subset" },
   trim: { internal: "trim" },
   unchar: { internal: "_data_unchar" },
-  unhex: { internal: "_data_unhex" },
+  unhex: { internal: "_data_unhex" }
 };
 
 /**
@@ -460,7 +422,7 @@ functionRegistry.images = {
   // 图像模式常量
   CORNER: { internal: "CORNER", type: "constant" },
   CORNERS: { internal: "CORNERS", type: "constant" },
-  CENTER: { internal: "CENTER", type: "constant" },
+  CENTER: { internal: "CENTER", type: "constant" }
 };
 
 /**
@@ -478,127 +440,127 @@ functionRegistry.tables = {
     internal: "getRowCount",
     type: "instance_method",
     receiver: "Table",
-    returns: "number",
+    returns: "number"
   },
   getColumnCount: {
     internal: "getColumnCount",
     type: "instance_method",
     receiver: "Table",
-    returns: "number",
+    returns: "number"
   },
   get: {
     internal: "get",
     type: "instance_method",
     receiver: "Table",
-    returns: "value",
+    returns: "value"
   },
   getRow: {
     internal: "getRow",
     type: "instance_method",
     receiver: "Table",
-    returns: "TableRow",
+    returns: "TableRow"
   },
   getString: {
     internal: "getString",
     type: "instance_method",
     receiver: "Table",
-    returns: "string",
+    returns: "string"
   },
   getNum: {
     internal: "getNum",
     type: "instance_method",
     receiver: "Table",
-    returns: "number",
+    returns: "number"
   },
   getColumn: {
     internal: "getColumn",
     type: "instance_method",
     receiver: "Table",
-    returns: "array",
+    returns: "array"
   },
   getObject: {
     internal: "getObject",
     type: "instance_method",
     receiver: "Table",
-    returns: "object",
+    returns: "object"
   },
   getArray: {
     internal: "getArray",
     type: "instance_method",
     receiver: "Table",
-    returns: "array",
+    returns: "array"
   },
   findRow: {
     internal: "findRow",
     type: "instance_method",
     receiver: "Table",
-    returns: "TableRow",
+    returns: "TableRow"
   },
   findRows: {
     internal: "findRows",
     type: "instance_method",
     receiver: "Table",
-    returns: "TableRowArray",
+    returns: "TableRowArray"
   },
   matchRow: {
     internal: "matchRow",
     type: "instance_method",
     receiver: "Table",
-    returns: "TableRow",
+    returns: "TableRow"
   },
   matchRows: {
     internal: "matchRows",
     type: "instance_method",
     receiver: "Table",
-    returns: "TableRowArray",
+    returns: "TableRowArray"
   },
   set: {
     internal: "set",
     type: "instance_method",
     receiver: "Table",
-    returns: "value",
+    returns: "value"
   },
   setString: {
     internal: "setString",
     type: "instance_method",
     receiver: "Table",
-    returns: "string",
+    returns: "string"
   },
   setNum: {
     internal: "setNum",
     type: "instance_method",
     receiver: "Table",
-    returns: "number",
+    returns: "number"
   },
   addRow: {
     internal: "addRow",
     type: "instance_method",
     receiver: "Table",
-    returns: "TableRow",
+    returns: "TableRow"
   },
   removeRow: {
     internal: "removeRow",
     type: "instance_method",
     receiver: "Table",
-    returns: "Table",
+    returns: "Table"
   },
   clearRows: {
     internal: "clearRows",
     type: "instance_method",
     receiver: "Table",
-    returns: "Table",
+    returns: "Table"
   },
   addColumn: {
     internal: "addColumn",
     type: "instance_method",
     receiver: "Table",
-    returns: "string",
+    returns: "string"
   },
   removeColumn: {
     internal: "removeColumn",
     type: "instance_method",
     receiver: "Table",
-    returns: "Table",
+    returns: "Table"
   },
 
   // TableRow instance methods
@@ -606,56 +568,56 @@ functionRegistry.tables = {
     internal: "arr",
     type: "instance_method",
     receiver: "TableRow",
-    returns: "array",
+    returns: "array"
   },
   obj: {
     internal: "obj",
     type: "instance_method",
     receiver: "TableRow",
-    returns: "object",
+    returns: "object"
   },
   rowGet: {
     internal: "get",
     alias: "get",
     type: "instance_method",
     receiver: "TableRow",
-    returns: "value",
+    returns: "value"
   },
   rowGetString: {
     internal: "getString",
     alias: "getString",
     type: "instance_method",
     receiver: "TableRow",
-    returns: "string",
+    returns: "string"
   },
   rowGetNum: {
     internal: "getNum",
     alias: "getNum",
     type: "instance_method",
     receiver: "TableRow",
-    returns: "number",
+    returns: "number"
   },
   rowSet: {
     internal: "set",
     alias: "set",
     type: "instance_method",
     receiver: "TableRow",
-    returns: "value",
+    returns: "value"
   },
   rowSetString: {
     internal: "setString",
     alias: "setString",
     type: "instance_method",
     receiver: "TableRow",
-    returns: "string",
+    returns: "string"
   },
   rowSetNum: {
     internal: "setNum",
     alias: "setNum",
     type: "instance_method",
     receiver: "TableRow",
-    returns: "number",
-  },
+    returns: "number"
+  }
 };
 
 /**
@@ -675,7 +637,7 @@ functionRegistry.environment = {
   // 环境变量（按需注入）
   frameCount: { internal: "frameCount", type: "variable" },
   width: { internal: "width", type: "constant" },
-  height: { internal: "height", type: "constant" },
+  height: { internal: "height", type: "constant" }
 };
 
 // polygonBuilders 旧定义已废弃，相关信息已完全整合到 shapes.polygon.builders，
@@ -764,7 +726,7 @@ functionRegistry.getTableInstanceMethods = function () {
     result[methodName].push({
       receiver: info.receiver,
       returns: info.returns || null,
-      internal: info.internal || methodName,
+      internal: info.internal || methodName
     });
   }
   return result;
@@ -798,7 +760,7 @@ functionRegistry.getBuilderInfo = function (funcName) {
         return {
           shapeName: shapeName,
           role: shapeInfo.builders[funcName].role,
-          baseType: shapeInfo.baseType || shapeName,
+          baseType: shapeInfo.baseType || shapeName
         };
       }
     }
