@@ -523,6 +523,6 @@ function setup() {
 
 ## Related
 
-- [`README.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/README.md)
-- [`bundle/includes/shape.js`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/bundle/includes/shape.js)
-- [`bundle/includes/registry.js`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/bundle/includes/registry.js)
+- [`README.md`](../../README.md)
+- [`bundle/includes/shape.js`](../../bundle/includes/shape.js)
+- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)

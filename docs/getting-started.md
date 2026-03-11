@@ -179,7 +179,7 @@ Important notes:
 
 See also:
 
-- [`docs/api/image.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/image.md)
+- [`docs/api/image.md`](api/image.md)
 
 ---
 
@@ -209,7 +209,7 @@ You can:
 
 See also:
 
-- [`docs/api/controllers.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/controllers.md)
+- [`docs/api/controllers.md`](api/controllers.md)
 
 ---
 
@@ -221,7 +221,7 @@ Shape calls create vector-based geometry in After Effects.
 
 See:
 
-- [`docs/api/shapes.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/shapes.md)
+- [`docs/api/shapes.md`](api/shapes.md)
 
 ### Transform
 
@@ -229,7 +229,7 @@ Transform calls affect later drawing operations.
 
 See:
 
-- [`docs/api/transform.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/transform.md)
+- [`docs/api/transform.md`](api/transform.md)
 
 ### Typography
 
@@ -237,7 +237,7 @@ Text uses Momentum's text layout logic on top of After Effects text support.
 
 See:
 
-- [`docs/api/typography.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/typography.md)
+- [`docs/api/typography.md`](api/typography.md)
 
 ### Color
 
@@ -245,7 +245,7 @@ Color APIs control fill, stroke, tint, and background behavior.
 
 See:
 
-- [`docs/api/color.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/color.md)
+- [`docs/api/color.md`](api/color.md)
 
 ### Data and IO
 
@@ -253,8 +253,8 @@ Table and JSON loading pull data from `user/` and bake it into the current execu
 
 See:
 
-- [`docs/api/data.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/data.md)
-- [`docs/api/io.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/io.md)
+- [`docs/api/data.md`](api/data.md)
+- [`docs/api/io.md`](api/io.md)
 
 ---
 
@@ -271,7 +271,7 @@ See:
 
 After finishing this guide, the most useful next pages are:
 
-- [`docs/api/shapes.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/shapes.md)
-- [`docs/api/image.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/image.md)
-- [`docs/api/controllers.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/controllers.md)
-- [`docs/api/environment.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/environment.md)
+- [`docs/api/shapes.md`](api/shapes.md)
+- [`docs/api/image.md`](api/image.md)
+- [`docs/api/controllers.md`](api/controllers.md)
+- [`docs/api/environment.md`](api/environment.md)

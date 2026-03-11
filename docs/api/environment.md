@@ -274,6 +274,6 @@ function draw() {
 
 ## Related
 
-- [`README.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/README.md)
-- [`bundle/includes/environment.js`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/bundle/includes/environment.js)
-- [`bundle/includes/registry.js`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/bundle/includes/registry.js)
+- [`README.md`](../../README.md)
+- [`bundle/includes/environment.js`](../../bundle/includes/environment.js)
+- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)

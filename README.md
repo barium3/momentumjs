@@ -8,16 +8,16 @@
 
 Start here if you are new to Momentum:
 
-- [Getting Started](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/getting-started.md)
+- [Getting Started](docs/getting-started.md)
 
 Browse the full API reference here:
 
-- [API Reference](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/api/index.md)
+- [API Reference](docs/api/index.md)
 
 If you use AI to write Momentum code, you can give the following docs to the AI so it can understand Momentum syntax, supported APIs, and important limitations:
 
-- [Momentum For AI](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/ai/momentum-for-ai.md)
-- [AI Quick Rules](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/docs/ai/ai-quick-rules.md) (short version, suitable for directly copying into an AI prompt)
+- [Momentum For AI](docs/ai/momentum-for-ai.md)
+- [AI Quick Rules](docs/ai/ai-quick-rules.md) (short version, suitable for directly copying into an AI prompt)
 
 ## Features
 
@@ -29,6 +29,9 @@ If you use AI to write Momentum code, you can give the following docs to the AI 
 
 ![showcase](footage/showcase.png)
 Momentum includes an IDE inside After Effects for writing and testing sketches.
+
+<details>
+<summary>Example Code</summary>
 
 ```javascript
 // Example code: Casey reas Structure 3
@@ -129,6 +132,8 @@ function intersect(cA, cB) {
 
 }
 ```
+
+</details>
 
 ## Contribution
 

@@ -99,7 +99,7 @@ text("Hello world", 20, 30, 120, 60);
 
 - `text()` is affected by the current typography state and current fill/stroke state.
 - Boxed text behavior is also affected by `textAlign()`, `textWrap()`, and `rectMode()`.
-- When `maxWidth` or `maxHeight` is provided, the text box is interpreted using the current [`rectMode()`](</Library/Application Support/Adobe/CEP/extensions/momentumjs/docs/api/shapes.md>).
+- When `maxWidth` or `maxHeight` is provided, the text box is interpreted using the current [`rectMode()`](shapes.md).
 
 ---
 
@@ -360,6 +360,6 @@ function setup() {
 
 ## Related
 
-- [`README.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/README.md)
-- [`bundle/includes/typography.js`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/bundle/includes/typography.js)
-- [`bundle/includes/registry.js`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/bundle/includes/registry.js)
+- [`README.md`](../../README.md)
+- [`bundle/includes/typography.js`](../../bundle/includes/typography.js)
+- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)

@@ -386,6 +386,6 @@ function setup() {
 
 ## Related
 
-- [`README.md`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/README.md)
-- [`bundle/includes/math.js`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/bundle/includes/math.js)
-- [`bundle/includes/registry.js`](/Library/Application%20Support/Adobe/CEP/extensions/momentumjs/bundle/includes/registry.js)
+- [`README.md`](../../README.md)
+- [`bundle/includes/math.js`](../../bundle/includes/math.js)
+- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)
