@@ -31,7 +31,7 @@ If you use AI to write Momentum code, you can give the following docs to the AI 
 Momentum includes an IDE inside After Effects for writing and testing sketches.
 
 <details>
-<summary>Example Code</summary>
+<summary><u>Show full example</u></summary>
 
 ```javascript
 // Example code: Casey reas Structure 3
