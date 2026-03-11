@@ -2,6 +2,160 @@
 window.editorManager = (function () {
   let editor;
   let validationMarkers = [];
+  let validationTimer = null;
+  const MARKER_OWNER = "momentum-compiler";
+  const VALIDATION_DELAY = 250;
+
+  function getCompiler() {
+    return typeof window.sketchCompiler !== "undefined"
+      ? window.sketchCompiler
+      : null;
+  }
+
+  function getMarkerSeverity(severity) {
+    if (typeof monaco === "undefined" || !monaco.MarkerSeverity) {
+      return 8;
+    }
+
+    if (!severity) {
+      return monaco.MarkerSeverity.Error;
+    }
+
+    if (severity === "warning") {
+      return monaco.MarkerSeverity.Warning;
+    }
+
+    if (severity === "info") {
+      return monaco.MarkerSeverity.Info;
+    }
+
+    return monaco.MarkerSeverity.Error;
+  }
+
+  function getDiagnosticPosition(diagnostic) {
+    const loc = diagnostic && diagnostic.loc ? diagnostic.loc : null;
+    const line = loc && typeof loc.line === "number" ? loc.line : 1;
+    const column = loc && typeof loc.column === "number" ? loc.column + 1 : 1;
+
+    return {
+      startLineNumber: line,
+      startColumn: column,
+      endLineNumber: line,
+      endColumn: column + 1,
+    };
+  }
+
+  function formatDiagnosticMessage(diagnostic) {
+    if (!diagnostic) {
+      return "Unknown compiler error";
+    }
+
+    const phase = diagnostic.phase ? `[${diagnostic.phase}] ` : "";
+    return `${phase}${diagnostic.message || "Unknown compiler error"}`;
+  }
+
+  function toMarker(diagnostic) {
+    const position = getDiagnosticPosition(diagnostic);
+
+    return {
+      startLineNumber: position.startLineNumber,
+      startColumn: position.startColumn,
+      endLineNumber: position.endLineNumber,
+      endColumn: position.endColumn,
+      message: formatDiagnosticMessage(diagnostic),
+      severity: getMarkerSeverity(diagnostic && diagnostic.severity),
+      source: "compiler",
+      code: diagnostic && diagnostic.code ? String(diagnostic.code) : undefined,
+    };
+  }
+
+  function applyValidationMarkers(diagnostics) {
+    if (!editor || typeof monaco === "undefined") {
+      return [];
+    }
+
+    const model = editor.getModel();
+    if (!model) {
+      return [];
+    }
+
+    validationMarkers = (Array.isArray(diagnostics) ? diagnostics : []).map(toMarker);
+    monaco.editor.setModelMarkers(model, MARKER_OWNER, validationMarkers);
+    return validationMarkers;
+  }
+
+  function diagnoseCode(code) {
+    const compiler = getCompiler();
+    if (!compiler || typeof compiler.diagnose !== "function") {
+      applyValidationMarkers([]);
+      return {
+        ok: true,
+        diagnostics: [],
+      };
+    }
+
+    try {
+      const result = compiler.diagnose(code);
+      applyValidationMarkers(result && result.diagnostics ? result.diagnostics : []);
+      return result;
+    } catch (error) {
+      const fallbackDiagnostic = {
+        code: "COMPILER_INTERNAL_ERROR",
+        message: error && error.message ? error.message : "Compiler validation failed",
+        severity: "error",
+        phase: "diagnose",
+        fatal: true,
+        loc: { line: 1, column: 0 },
+      };
+      applyValidationMarkers([fallbackDiagnostic]);
+      return {
+        ok: false,
+        diagnostics: [fallbackDiagnostic],
+      };
+    }
+  }
+
+  function validateCurrentModel() {
+    if (!editor) {
+      return null;
+    }
+
+    return diagnoseCode(editor.getValue());
+  }
+
+  function scheduleValidation() {
+    if (validationTimer) {
+      clearTimeout(validationTimer);
+    }
+
+    validationTimer = setTimeout(() => {
+      validationTimer = null;
+      validateCurrentModel();
+    }, VALIDATION_DELAY);
+  }
+
+  function hasFatalDiagnostics(result) {
+    if (!result || !Array.isArray(result.diagnostics)) {
+      return false;
+    }
+
+    return result.diagnostics.some((diagnostic) => {
+      return diagnostic && diagnostic.fatal !== false && diagnostic.severity !== "warning";
+    });
+  }
+
+  function formatDiagnosticForConsole(diagnostic) {
+    if (!diagnostic) {
+      return "Unknown compiler error";
+    }
+
+    const loc =
+      diagnostic.loc && typeof diagnostic.loc.line === "number"
+        ? ` (${diagnostic.loc.line}:${(diagnostic.loc.column || 0) + 1})`
+        : "";
+    const phase = diagnostic.phase ? `[${diagnostic.phase}] ` : "";
+    return `${phase}${diagnostic.message || "Unknown compiler error"}${loc}`;
+  }
 
   function initEditor() {
     require.config({
@@ -101,6 +255,10 @@ window.editorManager = (function () {
       // Expose editor object to the module
       window.editorManager.editor = editor;
 
+      editor.onDidChangeModelContent(() => {
+        scheduleValidation();
+      });
+
       // Add cmd+/ shortcut functionality
       editor.addCommand(
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.US_SLASH,
@@ -116,6 +274,7 @@ window.editorManager = (function () {
       setTimeout(() => {
         if (editor) {
           editor.layout();
+          validateCurrentModel();
         }
       }, 100);
     });
@@ -125,14 +284,34 @@ window.editorManager = (function () {
   function runScript() {
     const code = editor.getValue();
     const fileName = window.fileManager.getCurrentFileName && window.fileManager.getCurrentFileName();
+    const validationResult = diagnoseCode(code);
 
     document.getElementById("console-output").innerHTML = ""; // Clear previous output
+    if (hasFatalDiagnostics(validationResult)) {
+      const primaryDiagnostic = (validationResult.diagnostics || []).find(
+        (diagnostic) => diagnostic && diagnostic.severity !== "warning",
+      );
+      if (primaryDiagnostic) {
+        console.error(
+          "Compile error:",
+          formatDiagnosticForConsole(primaryDiagnostic),
+        );
+      }
+      return;
+    }
+
     window.codeExecutor
       .executeUserCode(code, fileName)
-      .catch((error) => console.error("Error executing script:", error));
+      .catch((error) =>
+        console.error(
+          "Execution error:",
+          error && error.message ? error.message : String(error),
+        ),
+      );
   }
 
   return {
+    diagnoseCode,
     initEditor,
     runScript,
     editor: null,

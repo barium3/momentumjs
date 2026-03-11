@@ -1,742 +1,924 @@
 /**
  * Momentum 函数注册中心
  *
- * 单一数据源：定义系统中所有可用的函数
- * 各层从前端、后端、表达式都可以引用此文件
- * 确保函数定义的一致性
+ * 目标：
+ * 1. 单一数据源：函数名、内部映射、签名、返回类型都定义在 entry 上
+ * 2. 编译器 / 运行时 / 表达式侧共享同一份结构
+ * 3. 对外保留稳定查询接口，便于调用方逐步演进
  */
 
 var functionRegistry = {};
 
-/**
- * 形状函数定义
- * key: 用户调用的函数名 (p5.js API)
- * value: 内部实现配置
- *   - internal: 引擎表达式中使用的内部函数名
- */
-functionRegistry.shapes = {
-  // 椭圆/圆形
-  ellipse: {
-    internal: "_ellipse",
-    baseType: "ellipse",
-    // 椭圆/矩形模式常量（与 p5.ellipseMode / rectMode 对齐）
-    // 0=CENTER, 1=RADIUS, 2=CORNER, 3=CORNERS
-    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"]
-  },
-  circle: {
-    internal: "_ellipse",
-    baseType: "ellipse"
-  },
+var CATEGORY_NAMES = [
+  "shapes",
+  "transforms",
+  "colors",
+  "typography",
+  "math",
+  "controllers",
+  "data",
+  "images",
+  "tables",
+  "environment",
+];
 
-  // 三角形
-  triangle: {
-    internal: "_triangle",
-    baseType: "triangle"
-  },
+function signature(minArgs, maxArgs, returns) {
+  var info = {
+    minArgs: minArgs,
+    maxArgs: maxArgs,
+  };
 
-  // 四边形
-  quad: {
-    internal: "_quad",
-    baseType: "quad"
-  },
+  if (typeof returns === "string") {
+    info.returns = returns;
+  }
 
-  // 圆弧
-  arc: {
-    internal: "_arc",
-    baseType: "arc",
-    // 圆弧模式常量（与 p5.arc 的 mode 对齐）
-    // 0=OPEN, 1=CHORD, 2=PIE
-    modes: ["OPEN", "CHORD", "PIE"]
-  },
+  return info;
+}
 
-  // 矩形/正方形
-  rect: {
-    internal: "_rect",
-    baseType: "rect",
-    // 与 ellipse 共用的模式常量
-    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"]
-  },
-  square: {
-    internal: "_rect",
-    baseType: "rect"
-  },
+function assignObject(target) {
+  var out = target || {};
 
-  // 直线
-  line: {
-    internal: "_line",
-    baseType: "line"
-  },
+  for (var i = 1; i < arguments.length; i++) {
+    var source = arguments[i];
+    if (!source) continue;
 
-  // 点
-  point: {
-    internal: "_point",
-    baseType: "point"
-  },
-
-  // 背景: 纯色图层，颜色由效果-生成-填色控制
-  // 数据格式（语义化 JSON）: { index, type:"background", color:[r,g,b,a] }
-  background: {
-    internal: "_background",
-    baseType: "background"
-  },
-
-  // 文本: text() 渲染图层
-  // 数据结构（语义化 JSON，存放在 _ctx.shapes 中）:
-  // {
-  //   slotKey,
-  //   type: "text",
-  //   pos: [x, y],              // 已应用当前变换后的锚点位置
-  //   text: "string",           // 文本内容
-  //   size: number,             // 文本字号（与 p5.textSize 对齐）
-  //   wh: [maxWidth, maxHeight] | null,  // “伪 box”尺寸，可选；对应 text(str,x,y,maxWidth[,maxHeight])
-  //   fillColor, strokeColor,   // [r,g,b,a] 或 null
-  //   fillOpacity, strokeOpacity,
-  //   strokeWeight
-  // }
-  text: {
-    internal: "_text",
-    baseType: "text"
-  },
-
-  // 多边形: 通过 beginShape()/vertex()/endShape() 构建的任意多边形
-  // 数据结构（语义化 JSON）:
-  //   {
-  //     index,
-  //     type: "polygon",
-  //     points: [[x,y], ...],    // 已应用当前变换后的顶点
-  //     closed: true/false,      // 是否闭合（endShape(CLOSE)）
-  //     fillColor, strokeColor,  // [r,g,b,a] 或 null
-  //     fillOpacity, strokeOpacity,
-  //     strokeWeight
-  //   }
-  polygon: {
-    internal: "_polygon",
-    baseType: "polygon",
-    // 多边形闭合模式常量：endShape(CLOSE)
-    closeModes: ["CLOSE"],
-    // 构建器函数配置：定义用于构建此 shape 的函数及其角色
-    builders: {
-      beginShape: { role: "begin" }, // 开始构建
-      vertex: { role: "add" }, // 添加顶点
-      beginContour: { role: "add" }, // 开始轮廓（用于创建洞）
-      endContour: { role: "add" }, // 结束轮廓
-      bezierVertex: { role: "add" }, // 添加三次贝塞尔曲线顶点
-      quadraticVertex: { role: "add" }, // 添加二次贝塞尔曲线顶点
-      curveVertex: { role: "add" }, // 添加曲线顶点（Catmull-Rom 样条）
-      endShape: { role: "end" }, // 结束构建（触发统计）
+    for (var key in source) {
+      if (Object.prototype.hasOwnProperty.call(source, key)) {
+        out[key] = source[key];
+      }
     }
-  },
-
-  // 贝塞尔曲线
-  bezier: {
-    internal: "_bezier",
-    baseType: "bezier"
-  },
-
-  // Catmull-Rom 样条曲线
-  curve: {
-    internal: "_curve",
-    baseType: "curve"
-  },
-
-  // 图片：image() 绘制图层
-  // 数据结构（语义化 JSON）:
-  // {
-  //   slotKey,
-  //   type: "image",
-  //   pos: [cx, cy],         // 中心点（已应用当前变换）
-  //   size: [w, h],          // 绘制尺寸（已乘当前 transform scale）
-  //   drawW: number,         // 未乘 transform scale 的目标绘制宽度
-  //   drawH: number,         // 未乘 transform scale 的目标绘制高度
-  //   natW: number,          // 原始图片宽度
-  //   natH: number,          // 原始图片高度
-  //   rot: number,           // 旋转角度（度）
-  //   src: "apple.png",      // 图片相对路径
-  //   fillOpacity: 100,      // 不透明度 0-100
-  // }
-  image: {
-    internal: "_image",
-    baseType: "image"
   }
+
+  return out;
+}
+
+function objectKeys(source) {
+  var keys = [];
+  if (!source) return keys;
+
+  for (var key in source) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      keys.push(key);
+    }
+  }
+
+  return keys;
+}
+
+function entry(internal, options) {
+  return assignObject({ internal: internal }, options || {});
+}
+
+function constant(internal, options) {
+  return entry(internal, assignObject({ type: "constant" }, options || {}));
+}
+
+function variable(internal, options) {
+  return entry(internal, assignObject({ type: "variable" }, options || {}));
+}
+
+function namespace(internal, options) {
+  return entry(internal, assignObject({ type: "namespace" }, options || {}));
+}
+
+function instanceMethod(internal, receiver, options) {
+  return entry(
+    internal,
+    assignObject(
+      {
+        type: "instance_method",
+        receiver: receiver,
+      },
+      options || {},
+    ),
+  );
+}
+
+var COLOR_VALUE_SIGNATURES = [
+  signature(1, 1),
+  signature(2, 2),
+  signature(3, 3),
+  signature(4, 4),
+];
+
+functionRegistry.shapes = {
+  ellipse: entry("_ellipse", {
+    baseType: "ellipse",
+    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"],
+    signatures: [signature(3, 4)],
+  }),
+  circle: entry("_ellipse", {
+    baseType: "ellipse",
+    signatures: [signature(3, 3)],
+  }),
+  triangle: entry("_triangle", {
+    baseType: "triangle",
+    signatures: [signature(6, 6)],
+  }),
+  quad: entry("_quad", {
+    baseType: "quad",
+    signatures: [signature(8, 8)],
+  }),
+  arc: entry("_arc", {
+    baseType: "arc",
+    modes: ["OPEN", "CHORD", "PIE"],
+    signatures: [signature(6, 7)],
+  }),
+  rect: entry("_rect", {
+    baseType: "rect",
+    modes: ["CENTER", "RADIUS", "CORNER", "CORNERS"],
+    signatures: [signature(4, 8)],
+  }),
+  square: entry("_rect", {
+    baseType: "rect",
+    signatures: [signature(3, 4)],
+  }),
+  line: entry("_line", {
+    baseType: "line",
+    signatures: [signature(4, 4)],
+  }),
+  point: entry("_point", {
+    baseType: "point",
+    signatures: [signature(2, 2)],
+  }),
+  background: entry("_background", {
+    baseType: "background",
+    signatures: COLOR_VALUE_SIGNATURES,
+  }),
+  text: entry("_text", {
+    baseType: "text",
+    signatures: [signature(3, 5)],
+  }),
+  polygon: entry("_polygon", {
+    baseType: "polygon",
+    closeModes: ["CLOSE"],
+    builders: {
+      beginShape: { role: "begin" },
+      vertex: { role: "add" },
+      beginContour: { role: "add" },
+      endContour: { role: "add" },
+      bezierVertex: { role: "add" },
+      quadraticVertex: { role: "add" },
+      curveVertex: { role: "add" },
+      endShape: { role: "end" },
+    },
+  }),
+  bezier: entry("_bezier", {
+    baseType: "bezier",
+    signatures: [signature(8, 8)],
+  }),
+  curve: entry("_curve", {
+    baseType: "curve",
+    signatures: [signature(8, 8)],
+  }),
+  image: entry("_image", {
+    baseType: "image",
+    signatures: [
+      signature(3, 3),
+      signature(5, 5),
+    ],
+  }),
 };
 
-/**
- * 变换函数定义
- */
 functionRegistry.transforms = {
-  translate: { internal: "translate" },
-  rotate: { internal: "rotate" },
-  scale: { internal: "scale" },
-  push: { internal: "push" },
-  pop: { internal: "pop" },
-  resetMatrix: { internal: "resetMatrix" }
+  translate: entry("translate", {
+    signatures: [
+      signature(2, 2),
+      signature(3, 3),
+    ],
+  }),
+  rotate: entry("rotate", {
+    signatures: [signature(1, 1)],
+  }),
+  scale: entry("scale", {
+    signatures: [
+      signature(1, 1),
+      signature(2, 2),
+      signature(3, 3),
+    ],
+  }),
+  push: entry("push"),
+  pop: entry("pop"),
+  resetMatrix: entry("resetMatrix"),
 };
 
-/**
- * 颜色函数定义
- * 颜色模式常量：RGB=0, HSB=1, HSL=2
- */
 functionRegistry.colors = {
-  // 设置/重置函数
-  fill: { internal: "fill" },
-  noFill: { internal: "noFill" },
-  stroke: { internal: "stroke" },
-  noStroke: { internal: "noStroke" },
-  strokeWeight: { internal: "strokeWeight" },
-
-  // 颜色创建
-  color: { internal: "color" },
-  lerpColor: { internal: "lerpColor" },
-
-  // 颜色模式
-  colorMode: { internal: "colorMode" },
-
-  // 颜色提取函数
-  red: { internal: "red" },
-  green: { internal: "green" },
-  blue: { internal: "blue" },
-  alpha: { internal: "alpha" },
-  hue: { internal: "hue" },
-  saturation: { internal: "saturation" },
-  brightness: { internal: "brightness" },
-  lightness: { internal: "lightness" },
-
-  // 颜色模式常量
-  RGB: { internal: "RGB", type: "constant" },
-  HSB: { internal: "HSB", type: "constant" },
-  HSL: { internal: "HSL", type: "constant" }
+  fill: entry("fill", {
+    signatures: [signature(0, 0)].concat(COLOR_VALUE_SIGNATURES),
+  }),
+  noFill: entry("noFill"),
+  stroke: entry("stroke", {
+    signatures: [signature(0, 0)].concat(COLOR_VALUE_SIGNATURES),
+  }),
+  noStroke: entry("noStroke"),
+  strokeWeight: entry("strokeWeight", {
+    signatures: [signature(1, 1)],
+  }),
+  color: entry("color", {
+    signatures: COLOR_VALUE_SIGNATURES,
+    returns: "color",
+  }),
+  lerpColor: entry("lerpColor"),
+  colorMode: entry("colorMode", {
+    signatures: [
+      signature(1, 1),
+      signature(2, 2),
+      signature(4, 4),
+      signature(5, 5),
+    ],
+  }),
+  red: entry("red"),
+  green: entry("green"),
+  blue: entry("blue"),
+  alpha: entry("alpha"),
+  hue: entry("hue"),
+  saturation: entry("saturation"),
+  brightness: entry("brightness"),
+  lightness: entry("lightness"),
+  RGB: constant("RGB"),
+  HSB: constant("HSB"),
+  HSL: constant("HSL"),
 };
 
-/**
- * 排版/文本函数定义
- * 这里只包含与文本样式/排版相关但本身不直接产生命令式渲染输出的函数，
- * 如 textSize、textLeading；真正的渲染函数 text() 仍归类在 shapes 中。
- */
 functionRegistry.typography = {
-  // 文本字号控制：textSize()
-  textSize: { internal: "textSize" },
-  // 文本行距控制：textLeading()
-  textLeading: { internal: "textLeading" },
-  // 文本字体控制：textFont(font | config, [size])",
-  // - 字符串：直接作为 AE 的字体名称（推荐 PostScript name）",
-  // - 对象：{ postscript, family, name }，其中",
-  //   - postscript: 传给 AE setFont 的名称",
-  //   - family: 用于 fontMetrics 查表的 family 名称",
-  //   - name: 备用名称，在 postscript 缺失时可用作 setFont 名称",
-  textFont: { internal: "textFont" },
-  // 文本样式控制：textStyle(style)，支持 NORMAL / BOLD / ITALIC / BOLDITALIC
-  textStyle: { internal: "textStyle" },
-  // 文本换行策略（与 p5.js textWrap 一致）：textWrap(WORD|CHAR)
-  textWrap: { internal: "textWrap" },
-
-  // textAlign 对齐控制：textAlign([h], [v])，支持 LEFT / CENTER / RIGHT（水平）和 TOP / CENTER / BOTTOM / BASELINE（垂直）
-  textAlign: { internal: "textAlign" },
-
-  // 文本宽度计算：textWidth(str)，返回字符串在当前字体/字号下的宽度
-  textWidth: { internal: "textWidth" },
-  // 文本上升量：textAscent()，返回当前字体的上升高度
-  textAscent: { internal: "textAscent" },
-  // 文本下降量：textDescent()，返回当前字体的下降高度
-  textDescent: { internal: "textDescent" },
-
-  // textWrap 常量（与 p5.js 保持一致：WORD / CHAR）
-  WORD: { internal: "WORD", type: "constant" },
-  CHAR: { internal: "CHAR", type: "constant" },
-
-  // 文本样式常量（与 p5.js textStyle 一致）",
-  NORMAL: { internal: "NORMAL", type: "constant" },
-  BOLD: { internal: "BOLD", type: "constant" },
-  ITALIC: { internal: "ITALIC", type: "constant" },
-  BOLDITALIC: { internal: "BOLDITALIC", type: "constant" }
+  textSize: entry("textSize", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+    ],
+  }),
+  textLeading: entry("textLeading", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+    ],
+  }),
+  textFont: entry("textFont", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 2),
+    ],
+  }),
+  textStyle: entry("textStyle", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+    ],
+  }),
+  textWrap: entry("textWrap", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+    ],
+  }),
+  textAlign: entry("textAlign", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 2),
+    ],
+  }),
+  textWidth: entry("textWidth", {
+    signatures: [signature(1, 1)],
+    returns: "number",
+  }),
+  textAscent: entry("textAscent"),
+  textDescent: entry("textDescent"),
+  WORD: constant("WORD", { valueType: "string" }),
+  CHAR: constant("CHAR", { valueType: "string" }),
+  NORMAL: constant("NORMAL", { valueType: "string" }),
+  BOLD: constant("BOLD", { valueType: "string" }),
+  ITALIC: constant("ITALIC", { valueType: "string" }),
+  BOLDITALIC: constant("BOLDITALIC", { valueType: "string" }),
 };
 
-/**
- * 数学函数定义
- * 每个函数按需加载：调用了就加载，不调用就不加载
- */
 functionRegistry.math = {
-  // 常量
-  PI: { internal: "PI", type: "constant" },
-  TWO_PI: { internal: "TWO_PI", type: "constant" },
-  HALF_PI: { internal: "HALF_PI", type: "constant" },
-  QUARTER_PI: { internal: "QUARTER_PI", type: "constant" },
-
-  // 形状模式常量（与 p5.arc 的 mode 对齐）
-  // 0=OPEN, 1=CHORD, 2=PIE
-  OPEN: { internal: "OPEN", type: "constant" },
-  CHORD: { internal: "CHORD", type: "constant" },
-  PIE: { internal: "PIE", type: "constant" },
-  // beginShape/endShape 模式常量
-  CLOSE: { internal: "CLOSE", type: "constant" },
-
-  // 椭圆/矩形模式常量（与 p5.ellipseMode / rectMode 对齐）
-  // 0=CENTER, 1=RADIUS, 2=CORNER, 3=CORNERS
-  CENTER: { internal: "CENTER", type: "constant" },
-  RADIUS: { internal: "RADIUS", type: "constant" },
-  CORNER: { internal: "CORNER", type: "constant" },
-  CORNERS: { internal: "CORNERS", type: "constant" },
-
-  // 文本对齐常量（与 textAlign 对齐）
-  // 水平对齐：CENTER=0, LEFT=1, RIGHT=2
-  // 垂直对齐：CENTER=0, TOP=1, BOTTOM=2, BASELINE=3（水平/垂直共用 CENTER=0，通过 h/v 区分）
-  LEFT: { internal: "LEFT", type: "constant" },
-  RIGHT: { internal: "RIGHT", type: "constant" },
-  TOP: { internal: "TOP", type: "constant" },
-  BOTTOM: { internal: "BOTTOM", type: "constant" },
-  BASELINE: { internal: "BASELINE", type: "constant" },
-
-  // 椭圆/矩形模式设置函数（非渲染函数）
-  ellipseMode: { internal: "ellipseMode" },
-  rectMode: { internal: "rectMode" },
-
-  // 基本数学函数（三角与反三角）
-  sin: { internal: "sin" },
-  cos: { internal: "cos" },
-  tan: { internal: "tan" },
-  asin: { internal: "asin" },
-  acos: { internal: "acos" },
-  atan: { internal: "atan" },
-  atan2: { internal: "atan2" },
-  degrees: { internal: "degrees" },
-  radians: { internal: "radians" },
-  angleMode: { internal: "angleMode" },
-  sqrt: { internal: "sqrt" },
-  pow: { internal: "pow" },
-  abs: { internal: "abs" },
-  floor: { internal: "floor" },
-  ceil: { internal: "ceil" },
-  round: { internal: "round" },
-  min: { internal: "min" },
-  max: { internal: "max" },
-  exp: { internal: "exp" },
-  log: { internal: "log" },
-  sq: { internal: "sq" },
-  fract: { internal: "fract" },
-  norm: { internal: "norm" },
-  mag: { internal: "mag" },
-
-  // 扩展数学函数（randomSeed、randomGaussian 与 random 一同注入）
-  random: { internal: "random" },
-  randomGaussian: { internal: "randomGaussian" },
-  randomSeed: { internal: "randomSeed" },
-  map: { internal: "map" },
-  constrain: { internal: "constrain" },
-  lerp: { internal: "lerp" },
-  dist: { internal: "dist" },
-
-  // 噪声函数（noiseDetail、noiseSeed 与 noise 一同注入）
-  noise: { internal: "noise" },
-  noiseDetail: { internal: "noiseDetail" },
-  noiseSeed: { internal: "noiseSeed" },
-
-  // 曲线计算函数（bezierPoint、bezierTangent、curvePoint、curveTangent）
-  bezierPoint: { internal: "bezierPoint" },
-  bezierTangent: { internal: "bezierTangent" },
-  curvePoint: { internal: "curvePoint" },
-  curveTangent: { internal: "curveTangent" },
-  curveTightness: { internal: "curveTightness" },
-
-  // 向量函数（p5.Vector 命名空间）
-  // 检测 p5.Vector 或 createVector 时注入整个 p5 命名空间
-  p5: { internal: "p5", type: "namespace" },
-  createVector: { internal: "createVector" }
+  PI: constant("PI"),
+  TWO_PI: constant("TWO_PI"),
+  HALF_PI: constant("HALF_PI"),
+  QUARTER_PI: constant("QUARTER_PI"),
+  OPEN: constant("OPEN"),
+  CHORD: constant("CHORD"),
+  PIE: constant("PIE"),
+  CLOSE: constant("CLOSE", { valueType: "string" }),
+  CENTER: constant("CENTER"),
+  RADIUS: constant("RADIUS"),
+  CORNER: constant("CORNER"),
+  CORNERS: constant("CORNERS"),
+  LEFT: constant("LEFT"),
+  RIGHT: constant("RIGHT"),
+  TOP: constant("TOP"),
+  BOTTOM: constant("BOTTOM"),
+  BASELINE: constant("BASELINE"),
+  ellipseMode: entry("ellipseMode", {
+    signatures: [signature(1, 1)],
+  }),
+  rectMode: entry("rectMode", {
+    signatures: [signature(1, 1)],
+  }),
+  sin: entry("sin"),
+  cos: entry("cos"),
+  tan: entry("tan"),
+  asin: entry("asin"),
+  acos: entry("acos"),
+  atan: entry("atan"),
+  atan2: entry("atan2"),
+  degrees: entry("degrees", {
+    signatures: [signature(1, 1)],
+  }),
+  radians: entry("radians", {
+    signatures: [signature(1, 1)],
+  }),
+  angleMode: entry("angleMode", {
+    signatures: [signature(1, 1)],
+  }),
+  sqrt: entry("sqrt"),
+  pow: entry("pow", {
+    signatures: [signature(2, 2)],
+  }),
+  abs: entry("abs"),
+  floor: entry("floor"),
+  ceil: entry("ceil"),
+  round: entry("round"),
+  min: entry("min"),
+  max: entry("max"),
+  exp: entry("exp"),
+  log: entry("log"),
+  sq: entry("sq"),
+  fract: entry("fract"),
+  norm: entry("norm"),
+  mag: entry("mag"),
+  random: entry("random", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+      signature(2, 2),
+    ],
+    returns: "number",
+  }),
+  randomGaussian: entry("randomGaussian", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+      signature(2, 2),
+    ],
+    returns: "number",
+  }),
+  randomSeed: entry("randomSeed", {
+    signatures: [signature(1, 1)],
+  }),
+  map: entry("map", {
+    signatures: [signature(5, 5)],
+  }),
+  constrain: entry("constrain", {
+    signatures: [signature(3, 3)],
+  }),
+  lerp: entry("lerp", {
+    signatures: [signature(3, 3)],
+  }),
+  dist: entry("dist", {
+    signatures: [signature(4, 4)],
+  }),
+  noise: entry("noise", {
+    signatures: [signature(1, 3)],
+  }),
+  noiseDetail: entry("noiseDetail", {
+    signatures: [signature(1, 2)],
+  }),
+  noiseSeed: entry("noiseSeed", {
+    signatures: [signature(1, 1)],
+  }),
+  bezierPoint: entry("bezierPoint"),
+  bezierTangent: entry("bezierTangent"),
+  curvePoint: entry("curvePoint"),
+  curveTangent: entry("curveTangent"),
+  curveTightness: entry("curveTightness", {
+    signatures: [signature(1, 1)],
+  }),
+  p5: namespace("p5"),
+  createVector: entry("createVector", {
+    signatures: [signature(0, 3)],
+    returns: "object",
+  }),
+  DEGREES: constant("DEGREES", { valueType: "string" }),
+  RADIANS: constant("RADIANS", { valueType: "string" }),
 };
 
-/**
- * 控制器/交互函数定义
- * 统一管理所有与 UI 控件、交互相关但本身不产生渲染输出的函数
- * 这些函数在浏览器侧通常转发到真实 UI 控件，在 AE 表达式侧由 core/controller 模块提供实现
- */
 functionRegistry.controllers = {
-  // Slider 控件：在浏览器侧通常对应 p5.js DOM Slider，
-  // 在 AE 表达式侧由 core.js 注入同名辅助函数（返回 { value() } 接口）
-  // 两端保持 API 一致：slider = createSlider(min, max, value, step); slider.value()
-  createSlider: { internal: "createSlider" },
-  // Angle 控件：角度控制，在 AE 表达式侧由 createAngle() 提供角度数值
-  // API：var ang = createAngle(defaultDegrees); var v = ang.value(); // 以“度”为单位
-  createAngle: { internal: "createAngle" },
-  // Color 控件：在浏览器侧对应颜色选择器，在 AE 表达式侧由 createColorPicker() 提供
-  // API：picker = createColorPicker([r, g, b, a]); picker.value()
-  createColorPicker: { internal: "createColorPicker" },
-  // Checkbox 控件：在浏览器侧通常对应 p5.js DOM createCheckbox，
-  // 在 AE 表达式侧由 createCheckbox() 提供布尔控制器（勾选/取消）
-  // 建议使用：var cb = createCheckbox(initialChecked); if (cb.checked()) { ... }
-  createCheckbox: { internal: "createCheckbox" },
-  // Select 控件：下拉选择器/枚举选择，在 AE 表达式侧由 createSelect() 提供离散选项控制
-  // 建议使用：var sel = createSelect(optionsArray, defaultIndex); var v = sel.value();
-  createSelect: { internal: "createSelect" },
-  // Point 控件：二维点控制，在 AE 表达式侧由 createPoint() 提供 [x, y] 控制
-  // API：var pt = createPoint(defaultX, defaultY); var v = pt.value(); var x = pt.x(); var y = pt.y();
-  createPoint: { internal: "createPoint" },
-  // Path 控件：在 __controller__ 图层上创建可编辑 mask path，并在表达式侧返回路径采样器
-  // API：var path = createPathController("guide", [[0,0],[100,0],[100,100]], true)
-  createPathController: { internal: "createPathController" }
+  createSlider: entry("createSlider", {
+    signatures: [signature(0, 4)],
+    returns: "SliderController",
+  }),
+  createAngle: entry("createAngle", {
+    signatures: [signature(0, 1)],
+    returns: "AngleController",
+  }),
+  createColorPicker: entry("createColorPicker", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+      signature(3, 4),
+    ],
+    returns: "ColorController",
+  }),
+  createCheckbox: entry("createCheckbox", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+      signature(2, 2),
+    ],
+    returns: "CheckboxController",
+  }),
+  createSelect: entry("createSelect", {
+    signatures: [signature(0, 0)],
+    returns: "SelectController",
+  }),
+  createPoint: entry("createPoint", {
+    signatures: [signature(0, 2)],
+    returns: "PointController",
+  }),
+  createPathController: entry("createPathController", {
+    signatures: [signature(0, 3)],
+    returns: "PathController",
+  }),
 };
 
-/**
- * Data helper functions
- * 对齐 p5.js Data 类别中的数组辅助函数与转换函数。
- */
+functionRegistry.instances = {
+  SliderController: {
+    value: entry("value", {
+      signatures: [signature(0, 0, "number")],
+      returns: "number",
+    }),
+  },
+  AngleController: {
+    degrees: entry("degrees", {
+      signatures: [signature(0, 0, "number")],
+      returns: "number",
+    }),
+    radians: entry("radians", {
+      signatures: [signature(0, 0, "number")],
+      returns: "number",
+    }),
+    value: entry("value", {
+      signatures: [signature(0, 0, "number")],
+      returns: "number",
+    }),
+  },
+  ColorController: {
+    color: entry("color", {
+      signatures: [signature(0, 0, "color")],
+      returns: "color",
+    }),
+    value: entry("value", {
+      signatures: [signature(0, 0, "string")],
+      returns: "string",
+    }),
+  },
+  CheckboxController: {
+    checked: entry("checked", {
+      signatures: [signature(0, 0, "boolean")],
+      returns: "boolean",
+    }),
+    value: entry("value", {
+      signatures: [signature(0, 0, "boolean")],
+      returns: "boolean",
+    }),
+  },
+  SelectController: {
+    index: entry("index", {
+      signatures: [signature(0, 0, "number")],
+      returns: "number",
+    }),
+    option: entry("option", {
+      signatures: [signature(1, 2, "SelectController")],
+      returns: "SelectController",
+    }),
+    selected: entry("selected", {
+      signatures: [
+        signature(0, 0, "value"),
+        signature(1, 1, "SelectController"),
+      ],
+    }),
+    value: entry("value", {
+      signatures: [signature(0, 0, "value")],
+      returns: "value",
+    }),
+  },
+  PointController: {
+    value: entry("value", {
+      signatures: [signature(0, 0, "array")],
+      returns: "array",
+    }),
+    x: entry("x", {
+      signatures: [signature(0, 0, "number")],
+      returns: "number",
+    }),
+    y: entry("y", {
+      signatures: [signature(0, 0, "number")],
+      returns: "number",
+    }),
+  },
+  PathController: {
+    angle: entry("angle", {
+      signatures: [signature(1, 1, "number")],
+      returns: "number",
+    }),
+    closed: entry("closed", {
+      signatures: [signature(0, 0, "boolean")],
+      returns: "boolean",
+    }),
+    exists: entry("exists", {
+      signatures: [signature(0, 0, "boolean")],
+      returns: "boolean",
+    }),
+    normal: entry("normal", {
+      signatures: [signature(1, 1, "array")],
+      returns: "array",
+    }),
+    point: entry("point", {
+      signatures: [signature(1, 1, "array")],
+      returns: "array",
+    }),
+    points: entry("points", {
+      signatures: [signature(0, 0, "array")],
+      returns: "array",
+    }),
+    sample: entry("sample", {
+      signatures: [signature(1, 1, "array")],
+      returns: "array",
+    }),
+    tangent: entry("tangent", {
+      signatures: [signature(1, 1, "array")],
+      returns: "array",
+    }),
+  },
+};
+
 functionRegistry.data = {
-  append: { internal: "append" },
-  arrayCopy: { internal: "arrayCopy" },
-  "boolean": { internal: "_data_boolean" },
-  "byte": { internal: "_data_byte" },
-  "char": { internal: "_data_char" },
-  concat: { internal: "concat" },
-  "float": { internal: "_data_float" },
-  "hex": { internal: "_data_hex" },
-  "int": { internal: "_data_int" },
-  join: { internal: "join" },
-  match: { internal: "match" },
-  matchAll: { internal: "matchAll" },
-  nf: { internal: "nf" },
-  nfc: { internal: "nfc" },
-  nfp: { internal: "nfp" },
-  nfs: { internal: "nfs" },
-  print: { internal: "print" },
-  reverse: { internal: "reverse" },
-  shorten: { internal: "shorten" },
-  split: { internal: "split" },
-  splitTokens: { internal: "splitTokens" },
-  str: { internal: "str" },
-  shuffle: { internal: "shuffle" },
-  sort: { internal: "sort" },
-  splice: { internal: "splice" },
-  subset: { internal: "subset" },
-  trim: { internal: "trim" },
-  unchar: { internal: "_data_unchar" },
-  unhex: { internal: "_data_unhex" }
+  append: entry("append"),
+  arrayCopy: entry("arrayCopy"),
+  "boolean": entry("_data_boolean"),
+  "byte": entry("_data_byte"),
+  "char": entry("_data_char"),
+  concat: entry("concat"),
+  "float": entry("_data_float", { returns: "number" }),
+  "hex": entry("_data_hex"),
+  "int": entry("_data_int", {
+    signatures: [signature(1, 2)],
+    returns: "number",
+  }),
+  join: entry("join"),
+  match: entry("match"),
+  matchAll: entry("matchAll"),
+  nf: entry("nf", {
+    signatures: [signature(1, 3)],
+  }),
+  nfc: entry("nfc", {
+    signatures: [signature(1, 2)],
+  }),
+  nfp: entry("nfp", {
+    signatures: [signature(1, 3)],
+  }),
+  nfs: entry("nfs", {
+    signatures: [signature(1, 3)],
+  }),
+  print: entry("print"),
+  reverse: entry("reverse"),
+  shorten: entry("shorten"),
+  split: entry("split"),
+  splitTokens: entry("splitTokens"),
+  str: entry("str"),
+  shuffle: entry("shuffle"),
+  sort: entry("sort"),
+  splice: entry("splice"),
+  subset: entry("subset"),
+  trim: entry("trim"),
+  unchar: entry("_data_unchar"),
+  unhex: entry("_data_unhex"),
 };
 
-/**
- * 图像函数定义
- * loadImage / image / imageMode / tint / noTint
- * image() 是渲染函数（归在 shapes 里），其余是非渲染辅助函数
- */
 functionRegistry.images = {
-  loadImage: { internal: "loadImage" },
-  imageMode: { internal: "imageMode" },
-  tint: { internal: "tint" },
-  noTint: { internal: "noTint" },
-  // 图像模式常量
-  CORNER: { internal: "CORNER", type: "constant" },
-  CORNERS: { internal: "CORNERS", type: "constant" },
-  CENTER: { internal: "CENTER", type: "constant" }
+  loadImage: entry("loadImage", {
+    signatures: [signature(1, 1)],
+    returns: "image",
+  }),
+  imageMode: entry("imageMode", {
+    signatures: [signature(1, 1)],
+  }),
+  tint: entry("tint", { signatures: COLOR_VALUE_SIGNATURES }),
+  noTint: entry("noTint"),
+  CORNER: constant("CORNER", { valueType: "number" }),
+  CORNERS: constant("CORNERS", { valueType: "number" }),
+  CENTER: constant("CENTER", { valueType: "number" }),
 };
 
-/**
- * 表格 / CSV 函数定义
- * 说明：
- * - loadTable 是顶层全局函数，需要暴露给运行时
- * - 其余为 Table / TableRow 实例方法描述，用于依赖分析与接口统一，不直接暴露为全局函数
- */
 functionRegistry.tables = {
-  loadTable: { internal: "loadTable", returns: "Table" },
-  loadJSON: { internal: "loadJSON", returns: "object" },
-
-  // Table instance methods
-  getRowCount: {
-    internal: "getRowCount",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "number"
-  },
-  getColumnCount: {
-    internal: "getColumnCount",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "number"
-  },
-  get: {
-    internal: "get",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "value"
-  },
-  getRow: {
-    internal: "getRow",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "TableRow"
-  },
-  getString: {
-    internal: "getString",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "string"
-  },
-  getNum: {
-    internal: "getNum",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "number"
-  },
-  getColumn: {
-    internal: "getColumn",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "array"
-  },
-  getObject: {
-    internal: "getObject",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "object"
-  },
-  getArray: {
-    internal: "getArray",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "array"
-  },
-  findRow: {
-    internal: "findRow",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "TableRow"
-  },
-  findRows: {
-    internal: "findRows",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "TableRowArray"
-  },
-  matchRow: {
-    internal: "matchRow",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "TableRow"
-  },
-  matchRows: {
-    internal: "matchRows",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "TableRowArray"
-  },
-  set: {
-    internal: "set",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "value"
-  },
-  setString: {
-    internal: "setString",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "string"
-  },
-  setNum: {
-    internal: "setNum",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "number"
-  },
-  addRow: {
-    internal: "addRow",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "TableRow"
-  },
-  removeRow: {
-    internal: "removeRow",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "Table"
-  },
-  clearRows: {
-    internal: "clearRows",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "Table"
-  },
-  addColumn: {
-    internal: "addColumn",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "string"
-  },
-  removeColumn: {
-    internal: "removeColumn",
-    type: "instance_method",
-    receiver: "Table",
-    returns: "Table"
-  },
-
-  // TableRow instance methods
-  arr: {
-    internal: "arr",
-    type: "instance_method",
-    receiver: "TableRow",
-    returns: "array"
-  },
-  obj: {
-    internal: "obj",
-    type: "instance_method",
-    receiver: "TableRow",
-    returns: "object"
-  },
-  rowGet: {
-    internal: "get",
+  loadTable: entry("loadTable", {
+    signatures: [signature(1, Infinity)],
+    returns: "Table",
+  }),
+  loadJSON: entry("loadJSON", {
+    signatures: [signature(1, Infinity)],
+    returns: "object",
+  }),
+  getRowCount: instanceMethod("getRowCount", "Table", {
+    returns: "number",
+    signatures: [signature(0, 0, "number")],
+  }),
+  getColumnCount: instanceMethod("getColumnCount", "Table", {
+    returns: "number",
+    signatures: [signature(0, 0, "number")],
+  }),
+  get: instanceMethod("get", "Table", {
+    returns: "value",
+    signatures: [signature(2, 2, "value")],
+  }),
+  getRow: instanceMethod("getRow", "Table", {
+    returns: "TableRow",
+    signatures: [signature(1, 1, "TableRow")],
+  }),
+  getString: instanceMethod("getString", "Table", {
+    returns: "string",
+    signatures: [signature(2, 2, "string")],
+  }),
+  getNum: instanceMethod("getNum", "Table", {
+    returns: "number",
+    signatures: [signature(2, 2, "number")],
+  }),
+  getColumn: instanceMethod("getColumn", "Table", {
+    returns: "array",
+    signatures: [signature(1, 1, "array")],
+  }),
+  getObject: instanceMethod("getObject", "Table", {
+    returns: "object",
+    signatures: [signature(0, 1, "object")],
+  }),
+  getArray: instanceMethod("getArray", "Table", {
+    returns: "array",
+    signatures: [signature(0, 0, "array")],
+  }),
+  findRow: instanceMethod("findRow", "Table", {
+    returns: "TableRow",
+    signatures: [signature(2, 2, "TableRow")],
+  }),
+  findRows: instanceMethod("findRows", "Table", {
+    returns: "TableRowArray",
+    signatures: [signature(2, 2, "array")],
+  }),
+  matchRow: instanceMethod("matchRow", "Table", {
+    returns: "TableRow",
+    signatures: [signature(2, 2, "TableRow")],
+  }),
+  matchRows: instanceMethod("matchRows", "Table", {
+    returns: "TableRowArray",
+    signatures: [signature(2, 2, "array")],
+  }),
+  set: instanceMethod("set", "Table", {
+    returns: "value",
+    signatures: [signature(3, 3, "value")],
+  }),
+  setString: instanceMethod("setString", "Table", {
+    returns: "string",
+    signatures: [signature(3, 3, "string")],
+  }),
+  setNum: instanceMethod("setNum", "Table", {
+    returns: "number",
+    signatures: [signature(3, 3, "number")],
+  }),
+  addRow: instanceMethod("addRow", "Table", {
+    returns: "TableRow",
+    signatures: [signature(0, 0, "TableRow")],
+  }),
+  removeRow: instanceMethod("removeRow", "Table", {
+    returns: "Table",
+    signatures: [signature(1, 1, "Table")],
+  }),
+  clearRows: instanceMethod("clearRows", "Table", {
+    returns: "Table",
+    signatures: [signature(0, 0, "Table")],
+  }),
+  addColumn: instanceMethod("addColumn", "Table", {
+    returns: "string",
+    signatures: [signature(1, 1, "string")],
+  }),
+  removeColumn: instanceMethod("removeColumn", "Table", {
+    returns: "Table",
+    signatures: [signature(1, 1, "Table")],
+  }),
+  arr: instanceMethod("arr", "TableRow", {
+    returns: "array",
+    signatures: [signature(0, 0, "array")],
+  }),
+  obj: instanceMethod("obj", "TableRow", {
+    returns: "object",
+    signatures: [signature(0, 0, "object")],
+  }),
+  rowGet: instanceMethod("get", "TableRow", {
     alias: "get",
-    type: "instance_method",
-    receiver: "TableRow",
-    returns: "value"
-  },
-  rowGetString: {
-    internal: "getString",
+    returns: "value",
+    signatures: [signature(1, 1, "value")],
+  }),
+  rowGetString: instanceMethod("getString", "TableRow", {
     alias: "getString",
-    type: "instance_method",
-    receiver: "TableRow",
-    returns: "string"
-  },
-  rowGetNum: {
-    internal: "getNum",
+    returns: "string",
+    signatures: [signature(1, 1, "string")],
+  }),
+  rowGetNum: instanceMethod("getNum", "TableRow", {
     alias: "getNum",
-    type: "instance_method",
-    receiver: "TableRow",
-    returns: "number"
-  },
-  rowSet: {
-    internal: "set",
+    returns: "number",
+    signatures: [signature(1, 1, "number")],
+  }),
+  rowSet: instanceMethod("set", "TableRow", {
     alias: "set",
-    type: "instance_method",
-    receiver: "TableRow",
-    returns: "value"
-  },
-  rowSetString: {
-    internal: "setString",
+    returns: "value",
+    signatures: [signature(2, 2, "value")],
+  }),
+  rowSetString: instanceMethod("setString", "TableRow", {
     alias: "setString",
-    type: "instance_method",
-    receiver: "TableRow",
-    returns: "string"
-  },
-  rowSetNum: {
-    internal: "setNum",
+    returns: "string",
+    signatures: [signature(2, 2, "string")],
+  }),
+  rowSetNum: instanceMethod("setNum", "TableRow", {
     alias: "setNum",
-    type: "instance_method",
-    receiver: "TableRow",
-    returns: "number"
-  }
+    returns: "number",
+    signatures: [signature(2, 2, "number")],
+  }),
 };
 
-/**
- * 环境配置函数和变量定义
- * 包含：配置函数（createCanvas, frameRate）和环境变量（frameCount, width, height）
- * 环境变量按需注入，内部使用 currentFrame/fps 等语义化命名
- */
 functionRegistry.environment = {
-  // 配置函数
-  createCanvas: { internal: "createCanvas" },
-  frameRate: { internal: "frameRate" },
-  duration: { internal: "duration" },
-  isLooping: { internal: "isLooping" },
-  loop: { internal: "loop" },
-  noLoop: { internal: "noLoop" },
-  redraw: { internal: "redraw" },
-  // 环境变量（按需注入）
-  frameCount: { internal: "frameCount", type: "variable" },
-  width: { internal: "width", type: "constant" },
-  height: { internal: "height", type: "constant" }
+  createCanvas: entry("createCanvas", {
+    signatures: [signature(2, 2)],
+  }),
+  frameRate: entry("frameRate", {
+    signatures: [signature(1, 1)],
+  }),
+  duration: entry("duration", {
+    signatures: [
+      signature(1, 1),
+      signature(1, 4),
+    ],
+  }),
+  isLooping: entry("isLooping"),
+  loop: entry("loop"),
+  noLoop: entry("noLoop"),
+  redraw: entry("redraw"),
+  frameCount: variable("frameCount"),
+  width: constant("width"),
+  height: constant("height"),
 };
 
-// polygonBuilders 旧定义已废弃，相关信息已完全整合到 shapes.polygon.builders，
-// 为避免混淆，这里不再暴露额外的 polygonBuilders 别名。
+// polygonBuilders 旧定义已废弃，相关信息已完全整合到 shapes.polygon.builders。
 
-/**
- * 获取所有形状函数名（供前端渲染统计使用）
- */
 functionRegistry.getShapeNames = function () {
-  return Object.keys(this.shapes);
+  return objectKeys(this.shapes);
 };
 
-/**
- * 获取形状函数信息
- * @param {string} name - 形状函数名
- * @returns {Object|null} 形状配置信息
- */
 functionRegistry.getShapeInfo = function (name) {
   return this.shapes[name] || null;
 };
 
-/**
- * 获取所有渲染函数名（用于前端统计）
- * 渲染函数是指会产生可见图形的函数
- */
 functionRegistry.getRenderFunctions = function () {
-  return Object.keys(this.shapes);
+  return objectKeys(this.shapes);
 };
 
-/**
- * 获取所有支持的非渲染 p5 函数
- * 这些函数只转发，不做统计
- */
 functionRegistry.getP5Functions = function () {
   var result = [];
-  result.push.apply(result, Object.keys(this.transforms));
-  result.push.apply(result, Object.keys(this.colors));
-  result.push.apply(result, Object.keys(this.math));
-  result.push.apply(result, Object.keys(this.environment));
-  // 排版 / 文本相关函数（如 textSize），同样作为"非渲染函数"暴露给运行时
-  if (this.typography) {
-    result.push.apply(result, Object.keys(this.typography));
-  }
-  // 控制器/交互函数（如 createSlider）
-  if (this.controllers) {
-    result.push.apply(result, Object.keys(this.controllers));
-  }
-  if (this.data) {
-    result.push.apply(result, Object.keys(this.data));
-  }
-  // 图像辅助函数（loadImage / imageMode / tint / noTint）
-  if (this.images) {
-    result.push.apply(result, Object.keys(this.images));
-  }
-  if (this.tables) {
-    for (var tableName in this.tables) {
-      if (!this.tables.hasOwnProperty(tableName)) continue;
-      var tableInfo = this.tables[tableName] || {};
-      if (tableInfo.type === "instance_method") continue;
-      result.push(tableName);
-    }
-  }
-  // 收集所有 shape 的构建器函数
+  appendCallableNames(result, this.transforms);
+  appendCallableNames(result, this.colors);
+  appendCallableNames(result, this.math);
+  appendCallableNames(result, this.environment);
+  appendCallableNames(result, this.typography);
+  appendCallableNames(result, this.controllers);
+  appendCallableNames(result, this.data);
+  appendCallableNames(result, this.images);
+  appendCallableNames(result, this.tables);
   if (this.shapes) {
     for (var shapeName in this.shapes) {
-      if (this.shapes.hasOwnProperty(shapeName)) {
-        var shapeInfo = this.shapes[shapeName];
-        if (shapeInfo.builders) {
-          result.push.apply(result, Object.keys(shapeInfo.builders));
-        }
+      if (!Object.prototype.hasOwnProperty.call(this.shapes, shapeName)) continue;
+      var shapeInfo = this.shapes[shapeName];
+      if (shapeInfo.builders) {
+        result.push.apply(result, objectKeys(shapeInfo.builders));
       }
     }
   }
+
   return result;
 };
+
+function appendCallableNames(target, category) {
+  if (!category) return;
+
+  for (var name in category) {
+    if (!Object.prototype.hasOwnProperty.call(category, name)) continue;
+    var item = category[name] || {};
+    if (
+      item.type === "constant" ||
+      item.type === "variable" ||
+      item.type === "namespace" ||
+      item.type === "instance_method"
+    ) {
+      continue;
+    }
+    target.push(name);
+  }
+}
 
 functionRegistry.getTableInstanceMethods = function () {
   var result = {};
   if (!this.tables) return result;
+
   for (var name in this.tables) {
-    if (!this.tables.hasOwnProperty(name)) continue;
+    if (!Object.prototype.hasOwnProperty.call(this.tables, name)) continue;
     var info = this.tables[name];
     if (!info || info.type !== "instance_method") continue;
+
     var methodName = info.alias || name;
-    if (!result[methodName]) result[methodName] = [];
+    if (!result[methodName]) {
+      result[methodName] = [];
+    }
+
     result[methodName].push({
       receiver: info.receiver,
       returns: info.returns || null,
-      internal: info.internal || methodName
+      internal: info.internal || methodName,
+      signatures: info.signatures || null,
     });
   }
+
   return result;
 };
 
-/**
- * 获取指定 shape 的构建器函数配置
- * @param {string} shapeName - shape 名称（如 "polygon"）
- * @returns {Object|null} 构建器函数配置对象，key 为函数名，value 为角色配置
- */
+functionRegistry.getFunctionEntry = function (name) {
+  if (!name) return null;
+
+  for (var i = 0; i < CATEGORY_NAMES.length; i++) {
+    var category = this[CATEGORY_NAMES[i]];
+    if (!category) continue;
+    if (!Object.prototype.hasOwnProperty.call(category, name)) continue;
+    if (category[name] && category[name].type !== "instance_method") {
+      return category[name];
+    }
+  }
+
+  return null;
+};
+
+functionRegistry.getFunctionSignatures = function (name) {
+  var info = this.getFunctionEntry(name);
+  return info && info.signatures ? info.signatures : null;
+};
+
+functionRegistry.getFunctionReturnType = function (name) {
+  var info = this.getFunctionEntry(name);
+  return info && info.returns ? info.returns : null;
+};
+
+functionRegistry.getMethodEntry = function (receiverType, methodName) {
+  if (!receiverType || !methodName) return null;
+
+  if (this.instances && this.instances[receiverType]) {
+    var instanceEntry = this.instances[receiverType][methodName];
+    if (instanceEntry) {
+      return instanceEntry;
+    }
+  }
+
+  if (!this.tables) {
+    return null;
+  }
+
+  for (var name in this.tables) {
+    if (!Object.prototype.hasOwnProperty.call(this.tables, name)) continue;
+    var entryInfo = this.tables[name];
+    if (!entryInfo || entryInfo.type !== "instance_method") continue;
+    if (entryInfo.receiver !== receiverType) continue;
+    if ((entryInfo.alias || name) === methodName) {
+      return entryInfo;
+    }
+  }
+
+  return null;
+};
+
+functionRegistry.getMethodSignatures = function (receiverType, methodName) {
+  var info = this.getMethodEntry(receiverType, methodName);
+  return info && info.signatures ? info.signatures : null;
+};
+
+functionRegistry.getMethodReturnType = function (receiverType, methodName) {
+  var info = this.getMethodEntry(receiverType, methodName);
+  if (!info) return null;
+  if (info.returns) return info.returns;
+
+  var signatures = info.signatures || [];
+  for (var i = 0; i < signatures.length; i++) {
+    if (signatures[i] && signatures[i].returns) {
+      return signatures[i].returns;
+    }
+  }
+
+  return null;
+};
+
 functionRegistry.getShapeBuilders = function (shapeName) {
   if (!this.shapes || !this.shapes[shapeName]) {
     return null;
@@ -744,90 +926,65 @@ functionRegistry.getShapeBuilders = function (shapeName) {
   return this.shapes[shapeName].builders || null;
 };
 
-/**
- * 检查函数是否为某个 shape 的构建器函数
- * @param {string} funcName - 函数名
- * @returns {Object|null} 如果是指定 shape 的构建器，返回 { shapeName, role }，否则返回 null
- */
 functionRegistry.getBuilderInfo = function (funcName) {
   if (!this.shapes) {
     return null;
   }
+
   for (var shapeName in this.shapes) {
-    if (this.shapes.hasOwnProperty(shapeName)) {
-      var shapeInfo = this.shapes[shapeName];
-      if (shapeInfo.builders && shapeInfo.builders[funcName]) {
-        return {
-          shapeName: shapeName,
-          role: shapeInfo.builders[funcName].role,
-          baseType: shapeInfo.baseType || shapeName
-        };
-      }
+    if (!Object.prototype.hasOwnProperty.call(this.shapes, shapeName)) continue;
+    var shapeInfo = this.shapes[shapeName];
+    if (shapeInfo.builders && shapeInfo.builders[funcName]) {
+      return {
+        shapeName: shapeName,
+        role: shapeInfo.builders[funcName].role,
+        baseType: shapeInfo.baseType || shapeName,
+      };
     }
   }
+
   return null;
 };
 
-/**
- * 获取所有函数（包括渲染和非渲染）
- */
 functionRegistry.getAllFunctions = function () {
   return this.getRenderFunctions().concat(this.getP5Functions());
 };
 
-/**
- * 从一个类别中提取特定类型的项（用于提取变量/常量）
- * @param {Object} category - 类别对象（如 this.environment, this.math）
- * @param {Array<string>} types - 需要提取的类型列表（如 ["variable", "constant"]）
- * @returns {Array<string>} 匹配的项名称列表
- */
 functionRegistry.getItemsByType = function (category, types) {
   var result = [];
   if (!category) return result;
 
   for (var name in category) {
-    if (category.hasOwnProperty(name)) {
-      var item = category[name];
-      // 检查是否匹配任一类型
-      if (item.type && types.indexOf(item.type) !== -1) {
-        result.push(name);
-      }
+    if (!Object.prototype.hasOwnProperty.call(category, name)) continue;
+    if (category[name].type && types.indexOf(category[name].type) !== -1) {
+      result.push(name);
     }
   }
 
   return result;
 };
 
-/**
- * 获取所有变量（从各个类别中提取标记为 variable 或 constant 的项）
- * 变量需要在代码执行时暴露到全局作用域
- */
 functionRegistry.getAllVariables = function () {
   var result = [];
-  var types = ["variable", "constant"]; // 支持的变量类型
+  var types = ["variable", "constant"];
 
-  // 从各个类别中提取变量
   result.push.apply(result, this.getItemsByType(this.environment, types));
   result.push.apply(result, this.getItemsByType(this.math, types));
   result.push.apply(result, this.getItemsByType(this.transforms, types));
   result.push.apply(result, this.getItemsByType(this.colors, types));
-  // typography 也可能声明常量/变量（例如 textWrap 的 WORD / CHAR）
   result.push.apply(result, this.getItemsByType(this.typography, types));
 
   return result;
 };
 
-// 导出到全局（浏览器环境）
 if (typeof window !== "undefined") {
   window.functionRegistry = functionRegistry;
 }
 
-// 导出到全局（ExtendScript/AE 环境）
 if (typeof $ !== "undefined" && $.global) {
   $.global.functionRegistry = functionRegistry;
 }
 
-// CommonJS 导出（Node.js 环境）
 if (typeof module !== "undefined" && module.exports) {
   module.exports = functionRegistry;
 }

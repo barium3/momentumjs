@@ -1,1 +1,1 @@
-function setup() {  background(200);  tWidth = createSlider(0, 100,50);  tHeight = createSlider(0, 100,50);}function draw(){  let tw = tWidth.value();  let th = tHeight.value();  rectMode(CENTER);  text('The quick brown fox jumps over the lazy dog.', 50, 50,tw,th);}
+let tWidth;let tHeight;function setup() {  background(200);  tWidth = createSlider(0, 100,50);  tHeight = createSlider(0, 100,50);}function draw(){  let tw = tWidth.value();  let th = tHeight.value();  rectMode(CENTER);  text('The quick brown fox jumps over the lazy dog.', 50, 50,tw,th);}

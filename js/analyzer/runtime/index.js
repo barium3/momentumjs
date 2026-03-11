@@ -232,26 +232,38 @@ class P5Runtime {
     this.container = null;
     this.initPromise = null;
 
-    this.conditionalAnalyzer = new ConditionalAnalyzer();
-    this.loopAnalyzer =
-      typeof LoopAnalyzer !== "undefined" ? new LoopAnalyzer() : null;
+    var ConditionalCtor =
+      typeof CompilerConditionAnalysis !== "undefined"
+        ? CompilerConditionAnalysis
+        : typeof ConditionalAnalyzer !== "undefined"
+          ? ConditionalAnalyzer
+          : null;
+    var LoopCtor =
+      typeof CompilerLoopAnalysis !== "undefined"
+        ? CompilerLoopAnalysis
+        : typeof LoopAnalyzer !== "undefined"
+          ? LoopAnalyzer
+          : null;
+
+    this.conditionalAnalyzer = ConditionalCtor ? new ConditionalCtor() : null;
+    this.loopAnalyzer = LoopCtor ? new LoopCtor() : null;
 
     this._shapeTypeMapCache = null;
   }
 
   _buildAnalysisCode(fullCode) {
-    const conditions =
-      this.conditionalAnalyzer.findBranchesWithRender(fullCode);
+    const conditions = this.conditionalAnalyzer
+      ? this.conditionalAnalyzer.findBranchesWithRender(fullCode)
+      : [];
     let analysisCode = fullCode;
 
-    if (conditions.length > 0) {
+    if (this.conditionalAnalyzer && conditions.length > 0) {
       try {
         analysisCode = this.conditionalAnalyzer.convertElseToIndependentIf(
           fullCode,
           conditions,
         );
       } catch (e) {
-        console.error("[Runtime] 条件分支处理失败:", e);
         analysisCode = fullCode;
       }
     }
@@ -259,9 +271,7 @@ class P5Runtime {
     if (this.loopAnalyzer && shouldUseLoopAnalyzer(analysisCode)) {
       try {
         analysisCode = this.loopAnalyzer.buildMaxCode(analysisCode);
-      } catch (loopErr) {
-        console.error("[Runtime] loop 上界改写失败:", loopErr);
-      }
+      } catch (loopErr) {}
     }
 
     return analysisCode;
@@ -297,12 +307,7 @@ class P5Runtime {
     if (!fullCode.trim()) {
       return;
     }
-    try {
-      window.eval(fullCode);
-    } catch (evalErr) {
-      console.error("[Runtime] eval 执行失败", evalErr);
-      throw evalErr;
-    }
+    window.eval(fullCode);
   }
 
   _runPreload() {
@@ -311,9 +316,7 @@ class P5Runtime {
     }
     try {
       window.preload();
-    } catch (preloadErr) {
-      console.warn("[Runtime] preload() 调用失败", preloadErr);
-    }
+    } catch (preloadErr) {}
   }
 
   _setRuntimePhase(phase) {
@@ -349,7 +352,7 @@ class P5Runtime {
     var self = this;
     this.initPromise = new Promise(function (resolve, reject) {
       if (typeof p5 === "undefined") {
-        reject(new Error("p5.js 未加载"));
+        reject(new Error("p5.js is not loaded"));
         return;
       }
 
@@ -374,7 +377,7 @@ class P5Runtime {
           resolve();
         }, 100);
       } catch (err) {
-        reject(new Error(err.message || "p5 初始化失败"));
+        reject(new Error(err.message || "Failed to initialize p5"));
       }
     });
 
@@ -400,14 +403,19 @@ class P5Runtime {
     this.initPromise = null;
     this._shapeTypeMapCache = null;
   }
-  async execute(code) {
+  async execute(code, staticAnalysis) {
     await this.init();
-    return await this.executeWithBranches(code, null, null);
+    return await this.executeWithBranches(code, null, null, staticAnalysis);
   }
 
-  async executeWithBranches(code, globalCode, entryPoint) {
+  async executeWithBranches(code, globalCode, entryPoint, staticAnalysis) {
     const fullCode = globalCode ? globalCode + "\n" + code : code;
-    let analysisCode = this._buildAnalysisCode(fullCode);
+    let analysisCode =
+      staticAnalysis &&
+      staticAnalysis.runtimeCodePrepared === true &&
+      typeof staticAnalysis.runtimeCode === "string"
+        ? staticAnalysis.runtimeCode
+        : this._buildAnalysisCode(fullCode);
     return await this.executeCodeBlock(analysisCode, entryPoint);
   }
 
@@ -416,7 +424,7 @@ class P5Runtime {
 
     return createTimeoutTask(
       self.options.timeout,
-      entryPoint ? `${entryPoint}执行超时` : "执行超时",
+      entryPoint ? `${entryPoint} timed out` : "Execution timed out",
       function (resolve, reject) {
         var state = createExecutionState();
         self._installExecutionEnvironment(state);
@@ -432,9 +440,6 @@ class P5Runtime {
               try {
                 self._setRuntimePhase("setup");
                 window.setup();
-              } catch (setupErr) {
-                console.error("[Runtime] setup() 调用失败", setupErr);
-                throw setupErr;
               } finally {
                 self._clearRuntimePhase();
               }
@@ -444,9 +449,6 @@ class P5Runtime {
               try {
                 self._setRuntimePhase("draw");
                 window.draw();
-              } catch (drawErr) {
-                console.error("[Runtime] draw() 调用失败", drawErr);
-                throw drawErr;
               } finally {
                 self._clearRuntimePhase();
               }
@@ -463,11 +465,10 @@ class P5Runtime {
       },
     ).catch(function (err) {
       self._cleanupAfterExecution();
-      var errorMsg = entryPoint ? `${entryPoint}执行错误` : "执行错误";
+      var errorMsg = entryPoint ? `${entryPoint} failed` : "Execution failed";
       if (!(err instanceof Error)) {
         err = new Error(errorMsg);
       }
-      console.error("[Runtime] executeCodeBlock 执行失败", err);
       throw new Error(err.message || errorMsg);
     });
   }
@@ -479,6 +480,7 @@ class P5Runtime {
     setupFullCode,
     drawFullCode,
     preloadFullCode,
+    staticAnalysis,
   ) {
     const fullDefs = [];
     if (preloadFullCode && preloadFullCode.trim()) {
@@ -498,7 +500,12 @@ class P5Runtime {
     const fullCode = globalCode
       ? globalCode + "\n" + fullDefs.join("\n")
       : fullDefs.join("\n");
-    let analysisCode = this._buildAnalysisCode(fullCode);
+    let analysisCode =
+      staticAnalysis &&
+      staticAnalysis.runtimeCodePrepared === true &&
+      typeof staticAnalysis.runtimeCode === "string"
+        ? staticAnalysis.runtimeCode
+        : this._buildAnalysisCode(fullCode);
 
     const { setupResult, drawResult } =
       await this.executeSetupThenDraw(analysisCode);
@@ -510,7 +517,7 @@ class P5Runtime {
 
     return createTimeoutTask(
       self.options.timeout * 2,
-      "执行超时",
+      "Execution timed out",
       function (resolve, reject) {
         var setupState = createExecutionState({
           suppressPrint: true,
@@ -532,9 +539,6 @@ class P5Runtime {
               try {
                 self._setRuntimePhase("setup");
                 window.setup();
-              } catch (setupErr) {
-                console.error("[Runtime] setup() 调用失败", setupErr);
-                throw setupErr;
               } finally {
                 self._clearRuntimePhase();
               }
@@ -545,9 +549,6 @@ class P5Runtime {
               try {
                 self._setRuntimePhase("draw");
                 window.draw();
-              } catch (drawErr) {
-                console.error("[Runtime] draw() 调用失败", drawErr);
-                throw drawErr;
               } finally {
                 self._clearRuntimePhase();
               }
@@ -568,11 +569,10 @@ class P5Runtime {
       },
     ).catch(function (err) {
       self._cleanupAfterExecution();
-      var errorMsg = "执行错误";
+      var errorMsg = "Execution failed";
       if (!(err instanceof Error)) {
         err = new Error(errorMsg);
       }
-      console.error("[Runtime] executeSetupThenDraw 执行失败", err);
       throw new Error(err.message || errorMsg);
     });
   }

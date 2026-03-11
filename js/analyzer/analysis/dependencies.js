@@ -150,9 +150,6 @@ function analyzeDependenciesAST(code) {
   try {
     ast = acorn.parse(code, { ecmaVersion: 2020, sourceType: "script" });
   } catch (e) {
-    if (typeof console !== "undefined" && console.error) {
-      console.error("[dependencyAnalyzer] AST 解析失败:", e);
-    }
     return dependencies;
   }
 

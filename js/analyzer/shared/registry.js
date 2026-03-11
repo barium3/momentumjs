@@ -1,68 +1,58 @@
 // Shared registry lookup helpers for analyzer modules.
+// Compiler core owns registry metadata access; analyzer uses these wrappers
+// to preserve older global function names and cache-aware call sites.
 
 var functionRegistry;
 
 function initRegistryUtils(registry) {
-  functionRegistry = registry;
+  functionRegistry = registry || window.functionRegistry || null;
+  if (functionRegistry && typeof window !== "undefined") {
+    window.functionRegistry = functionRegistry;
+  }
 }
 
 function buildCategoryMappings(category, deps) {
-  if (!functionRegistry || !functionRegistry[category]) {
-    throw new Error(`[Runtime] functionRegistry.${category} not found!`);
-  }
-  var mappings = {};
-  var categoryData = functionRegistry[category];
-  for (var name in categoryData) {
-    if (categoryData.hasOwnProperty(name)) {
-      mappings[name] = {
-        internal: categoryData[name].internal,
-        deps: deps,
-      };
-    }
-  }
-  return mappings;
+  return window.compilerSymbols.buildCategoryMappings(category, deps);
 }
 
 function getCategoryFunctionNames(category) {
-  if (!functionRegistry || !functionRegistry[category]) {
+  var names = window.compilerSymbols.getCategoryFunctionNames(category);
+  if (!names || names.length === 0) {
     throw new Error(`[Runtime] functionRegistry.${category} not found!`);
   }
-  return Object.keys(functionRegistry[category]);
+  return names;
 }
 
 function getTransformFunctionNames() {
-  return getCategoryFunctionNames("transforms");
+  return window.compilerSymbols.getTransformFunctionNames();
 }
 
 function getColorFunctionNames() {
-  return getCategoryFunctionNames("colors");
+  return window.compilerSymbols.getColorFunctionNames();
 }
 
 function getEnvironmentFunctionNames() {
-  return getCategoryFunctionNames("environment");
+  return window.compilerSymbols.getEnvironmentFunctionNames();
 }
 
 function getRenderFunctionNames() {
-  if (!functionRegistry || typeof functionRegistry.getRenderFunctions !== "function") {
+  var names = window.compilerSymbols.getRenderFunctionNames();
+  if (!names || names.length === 0) {
     throw new Error("[Runtime] functionRegistry.getRenderFunctions not found!");
   }
-  return functionRegistry.getRenderFunctions();
+  return names;
 }
 
 function getShapeTypeMap(cache) {
   if (cache && cache._shapeTypeMapCache) {
     return cache._shapeTypeMapCache;
   }
-  if (!functionRegistry || !functionRegistry.shapes) {
+
+  var map = window.compilerSymbols.getShapeTypeMap();
+  if (!map || Object.keys(map).length === 0) {
     throw new Error("[Runtime] functionRegistry.shapes not found!");
   }
-  var map = {};
-  for (var name in functionRegistry.shapes) {
-    if (functionRegistry.shapes.hasOwnProperty(name)) {
-      var info = functionRegistry.shapes[name];
-      map[name] = info.baseType || name;
-    }
-  }
+
   if (cache) {
     cache._shapeTypeMapCache = map;
   }
@@ -70,31 +60,13 @@ function getShapeTypeMap(cache) {
 }
 
 function getShapeBuilders(shapeName) {
-  if (
-    !functionRegistry ||
-    !functionRegistry.shapes ||
-    !functionRegistry.shapes[shapeName]
-  ) {
+  var registry = functionRegistry || window.functionRegistry || null;
+  if (!registry || !registry.shapes || !registry.shapes[shapeName]) {
     return null;
   }
-  return functionRegistry.shapes[shapeName].builders || null;
+  return registry.shapes[shapeName].builders || null;
 }
 
 function getBuilderInfo(funcName) {
-  if (!functionRegistry || !functionRegistry.shapes) {
-    return null;
-  }
-  for (var shapeName in functionRegistry.shapes) {
-    if (functionRegistry.shapes.hasOwnProperty(shapeName)) {
-      var shapeInfo = functionRegistry.shapes[shapeName];
-      if (shapeInfo.builders && shapeInfo.builders[funcName]) {
-        return {
-          shapeName: shapeName,
-          role: shapeInfo.builders[funcName].role,
-          baseType: shapeInfo.baseType || shapeName,
-        };
-      }
-    }
-  }
-  return null;
+  return window.compilerSymbols.getBuilderInfo(funcName);
 }

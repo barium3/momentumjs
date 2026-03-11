@@ -19,7 +19,6 @@ class FontAnalyzer {
     }
 
     if (typeof acorn === "undefined") {
-      console.warn("[FontAnalyzer] acorn not available, falling back to regex");
       return this._collectFontsFromRegex(code);
     }
 
@@ -33,10 +32,6 @@ class FontAnalyzer {
         fonts.add(this.defaultFont);
       }
     } catch (e) {
-      console.warn(
-        "[FontAnalyzer] AST parse failed, falling back to regex:",
-        e.message,
-      );
       return this._collectFontsFromRegex(code);
     }
 
@@ -88,6 +83,11 @@ class FontAnalyzer {
 
   async collectFontMetricsFromCode(code) {
     const fonts = this.collectFontsFromAST(code);
+    return await this.collectFontMetricsFromNames(fonts);
+  }
+
+  async collectFontMetricsFromNames(fontNames) {
+    const fonts = this._normalizeFontNames(fontNames);
 
     if (fonts.size === 0) {
       return {};
@@ -114,6 +114,18 @@ class FontAnalyzer {
     return metricsMap;
   }
 
+  _normalizeFontNames(fontNames) {
+    if (fontNames instanceof Set) {
+      return fontNames;
+    }
+
+    if (Array.isArray(fontNames)) {
+      return new Set(fontNames.filter(Boolean));
+    }
+
+    return new Set();
+  }
+
   async init() {
     if (this.isLoaded || this.loading) return;
 
@@ -129,7 +141,6 @@ class FontAnalyzer {
         this.isLoaded = true;
       }
     } catch (e) {
-      console.error("[FontAnalyzer] Failed to load font map:", e);
     } finally {
       this.loading = false;
     }

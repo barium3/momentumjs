@@ -7,9 +7,10 @@ class P5Analyzer {
     return await this.runtime.analyzeDependencies(code);
   }
 
-  async fullAnalyze(code) {
-    const renderResult = await this.runtime.execute(code);
-    const depsResult = await this.analyzeDependencies(code);
+  async fullAnalyze(code, staticAnalysis, compiledDependencies) {
+    const renderResult = await this.runtime.execute(code, staticAnalysis);
+    const depsResult =
+      compiledDependencies || (await this.analyzeDependencies(code));
 
     return {
       loopExecutions: renderResult.loopExecutions,
@@ -26,6 +27,7 @@ class P5Analyzer {
     setupFullCode,
     drawFullCode,
     preloadFullCode,
+    staticAnalysis,
   ) {
     const result = await this.runtime.executeSetupAndDraw(
       setupCode,
@@ -34,6 +36,7 @@ class P5Analyzer {
       setupFullCode,
       drawFullCode,
       preloadFullCode,
+      staticAnalysis,
     );
 
     const setupRenderLayers = (result.setupResult.renderOrder || []).slice();
@@ -69,7 +72,10 @@ class P5Analyzer {
     const hasAnyDrawBackground = rawDrawBackgroundCount > 0;
 
     const drawBackgroundConditionalInDraw =
-      this.hasBackgroundInDrawCondition(drawCode);
+      staticAnalysis &&
+      typeof staticAnalysis.backgroundInDrawCondition === "boolean"
+        ? staticAnalysis.backgroundInDrawCondition
+        : this.hasBackgroundInDrawCondition(drawCode);
 
     let drawBackgroundCount = 0;
     if (hasAnyDrawBackground && !drawBackgroundConditionalInDraw) {
@@ -103,7 +109,6 @@ class P5Analyzer {
       const wrapped = `function __momentum_temp_draw__() {\n${drawCode}\n}`;
       ast = acorn.parse(wrapped, { ecmaVersion: 2020, locations: false });
     } catch (e) {
-      console.error("[P5Analyzer] drawCode AST 解析失败:", e);
       return false;
     }
 

@@ -51,7 +51,7 @@ function requireCallsiteId(baseType, callsiteId) {
   throw new Error(
     "[Runtime] Missing callsiteId for render function: " +
       String(baseType || "shape") +
-      ". Please ensure codePreprocessor.instrumentShapeCallsites ran before execution.",
+      ". Please ensure sketchCompiler callsite instrumentation ran before execution.",
   );
 }
 
@@ -93,7 +93,7 @@ function recordShapeExecution(context, baseType, funcName, callsiteId, extra) {
   if (context.loopExecutions) {
     context.loopExecutions.value++;
     if (context.loopExecutions.value > context.maxLoopCount) {
-      throw new Error("循环次数超过上限");
+      throw new Error("Loop iteration limit exceeded");
     }
   }
   if (context.renderOrder) {
@@ -194,7 +194,7 @@ function createShapeWrapper(options) {
     if (context.loopExecutions) {
       context.loopExecutions.value++;
       if (context.loopExecutions.value > context.maxLoopCount) {
-        throw new Error("循环次数超过上限");
+        throw new Error("Loop iteration limit exceeded");
       }
     }
 

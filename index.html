@@ -60,11 +60,32 @@
     <!-- Module JS Files -->
     <script src="js/utils/console.js"></script>
     <script src="js/utils/preprocessor.js"></script>
+    <!-- Registry (must be loaded before Runtime) -->
+    <script src="bundle/includes/registry.js"></script>
+    <!-- Compiler -->
+    <script src="js/compiler/core/ast.js"></script>
+    <script src="js/compiler/core/context.js"></script>
+    <script src="js/compiler/core/symbols.js"></script>
+    <script src="js/compiler/core/semantics.js"></script>
+    <script src="js/compiler/core/typeInference.js"></script>
+    <script src="js/compiler/core/callValidation.js"></script>
+    <script src="js/compiler/collectors/entryPoints.js"></script>
+    <script src="js/compiler/collectors/globalBindings.js"></script>
+    <script src="js/compiler/collectors/environmentConfig.js"></script>
+    <script src="js/compiler/collectors/assetCollection.js"></script>
+    <script src="js/compiler/validators/undeclaredIdentifiers.js"></script>
+    <script src="js/compiler/validators/callValidationPass.js"></script>
+    <script src="js/compiler/analyzers/conditionAnalysis.js"></script>
+    <script src="js/compiler/analyzers/loopAnalysis.js"></script>
+    <script src="js/compiler/analyzers/backgroundAnalysis.js"></script>
+    <script src="js/compiler/analyzers/dependencyAnalysis.js"></script>
+    <script src="js/compiler/analyzers/runtimeAnalysis.js"></script>
+    <script src="js/compiler/rewriters/callsiteInstrumentation.js"></script>
+    <script src="js/compiler/rewriters/reservedData.js"></script>
+    <script src="js/compiler/compilerPipeline.js"></script>
     <script src="js/utils/codeExecutor.js"></script>
     <script src="js/ui/fileTreeUI.js"></script>
     <script src="js/fileSystem/fileManager.js"></script>
-    <!-- Registry (must be loaded before Runtime) -->
-    <script src="bundle/includes/registry.js"></script>
     <!-- Analyzer: shared -->
     <script src="js/analyzer/shared/ast.js"></script>
     <script src="js/analyzer/shared/registry.js"></script>

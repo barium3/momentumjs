@@ -176,7 +176,7 @@ window.fileManager = (function () {
         ["jpg", "jpeg", "png", "gif", "bmp"].indexOf(fileExtension) !== -1;
 
       if (isImage) {
-        console.log("Image files do not need to be saved");
+        return;
       } else {
         var content = window.editorManager.editor.getValue();
         // 转义路径中的特殊字符
@@ -188,18 +188,16 @@ window.fileManager = (function () {
             escapedFilePath +
             '", "' +
             encodeURIComponent(content) +
-            '")',
+          '")',
           function (result) {
             if (result.startsWith("Error:")) {
               console.error("Error saving file:", result);
-            } else {
-              console.log(result);
             }
           },
         );
       }
     } else {
-      console.log("No open file to save");
+      return;
     }
   }
 
@@ -234,8 +232,6 @@ window.fileManager = (function () {
             console.error("Error creating file:", result);
             recentlyCreatedFile = null;
           } else {
-            console.log("File created successfully:", fileName);
-
             loadFileList();
 
             setTimeout(function () {

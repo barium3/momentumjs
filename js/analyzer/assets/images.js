@@ -15,9 +15,6 @@ class ImageAnalyzer {
     }
 
     if (typeof acorn === "undefined") {
-      console.warn(
-        "[ImageAnalyzer] acorn not available, falling back to regex",
-      );
       return this._collectImagesFromRegex(code);
     }
 
@@ -28,10 +25,6 @@ class ImageAnalyzer {
       });
       this._walkASTForImages(images, ast);
     } catch (e) {
-      console.warn(
-        "[ImageAnalyzer] AST parse failed, falling back to regex:",
-        e.message,
-      );
       return this._collectImagesFromRegex(code);
     }
 
@@ -143,7 +136,6 @@ class ImageAnalyzer {
   async loadImagesFromFrontend(imagePaths) {
     const userDir = await this._getUserDirectory();
     if (!userDir) {
-      console.error("[ImageAnalyzer] Cannot get user directory");
       return {};
     }
 
@@ -175,10 +167,6 @@ class ImageAnalyzer {
 
         if (info.success) {
           this.imageCache[rel] = info;
-        } else {
-          console.error(
-            `[ImageAnalyzer] Failed to load image: ${rel} - ${info.error}`,
-          );
         }
       }
     }
@@ -233,12 +221,7 @@ class ImageAnalyzer {
           .replace(/^(\d)/, "_$1");
 
         window[varName] = img;
-      } catch (e) {
-        console.error(
-          `[ImageAnalyzer] Failed to add image to runtime: ${relativePath}`,
-          e,
-        );
-      }
+      } catch (e) {}
     }
   }
 

@@ -172,7 +172,7 @@ function getImageLib(deps) {
     "  var placement = _resolveImagePlacement(x, y, w, h, iw, ih, _imageMode);",
     "  _recordImage(callsiteId, img._momentumPath || '', placement.cx, placement.cy, placement.drawW, placement.drawH, sourceW, sourceH);",
     "}",
-    "function image(img, x, y, w, h) { return _image(img, x, y, w, h); }"
+    "function image() { return _image.apply(this, arguments); }"
   ].join("\n");
 }
 
