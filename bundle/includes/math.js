@@ -312,20 +312,21 @@ function getVectorLib() {
     "",
     "// 2D 向量角度（相对于正 x 轴）",
     "p5.Vector.prototype.heading = function() {",
-    "  return Math.atan2(this.y, this.x);",
+    "  return _fromAngleRadians(Math.atan2(this.y, this.x));",
     "};",
     "",
     "// 设置 2D 向量角度",
     "p5.Vector.prototype.setHeading = function(angle) {",
     "  var m = this.mag();",
-    "  this.x = m * Math.cos(angle);",
-    "  this.y = m * Math.sin(angle);",
+    "  var rad = _toAngleRadians(angle);",
+    "  this.x = m * Math.cos(rad);",
+    "  this.y = m * Math.sin(rad);",
     "  return this;",
     "};",
     "",
     "// 旋转 2D 向量",
     "p5.Vector.prototype.rotate = function(angle) {",
-    "  var newHeading = this.heading() + angle;",
+    "  var newHeading = _toAngleRadians(this.heading()) + _toAngleRadians(angle);",
     "  var m = this.mag();",
     "  this.x = m * Math.cos(newHeading);",
     "  this.y = m * Math.sin(newHeading);",
@@ -340,7 +341,7 @@ function getVectorLib() {
     "  if (m1 === 0 || m2 === 0) return 0;",
     "  var cosAngle = dot / (m1 * m2);",
     "  cosAngle = Math.max(-1, Math.min(1, cosAngle));",
-    "  return Math.acos(cosAngle);",
+    "  return _fromAngleRadians(Math.acos(cosAngle));",
     "};",
     "",
     "// 线性插值",
@@ -527,17 +528,20 @@ function getVectorLib() {
     "// 从角度创建 2D 向量",
     "p5.Vector.fromAngle = function(angle, length) {",
     "  if (length === undefined) length = 1;",
-    "  return new p5.Vector(length * Math.cos(angle), length * Math.sin(angle), 0);",
+    "  var rad = _toAngleRadians(angle);",
+    "  return new p5.Vector(length * Math.cos(rad), length * Math.sin(rad), 0);",
     "};",
     "",
     "// 从 ISO 球面角创建 3D 向量",
     "p5.Vector.fromAngles = function(theta, phi, length) {",
     "  if (length === undefined) length = 1;",
-    "  var sinPhi = Math.sin(phi);",
+    "  var thetaRad = _toAngleRadians(theta);",
+    "  var phiRad = _toAngleRadians(phi);",
+    "  var sinPhi = Math.sin(phiRad);",
     "  return new p5.Vector(",
-    "    length * sinPhi * Math.sin(theta),",
-    "    length * Math.cos(phi),",
-    "    length * sinPhi * Math.cos(theta)",
+    "    length * sinPhi * Math.sin(thetaRad),",
+    "    length * Math.cos(phiRad),",
+    "    length * sinPhi * Math.cos(thetaRad)",
     "  );",
     "};",
     "",
@@ -631,26 +635,45 @@ function getMathLib(deps) {
   lines.push("const BASELINE = 3;");
 
   // --- 三角函数与角度 ---
-  if (deps.sin) lines.push("var sin = Math.sin;");
-  if (deps.cos) lines.push("var cos = Math.cos;");
-  if (deps.tan) lines.push("var tan = Math.tan;");
-  if (deps.asin) lines.push("var asin = Math.asin;");
-  if (deps.acos) lines.push("var acos = Math.acos;");
-  if (deps.atan) lines.push("var atan = Math.atan;");
-  if (deps.atan2) lines.push("var atan2 = Math.atan2;");
+  if (deps.angleMode) {
+    lines.push(
+      "var DEGREES = 'DEG', RADIANS = 'RAD';",
+      "var _angleMode = RADIANS;",
+      "var angleMode = function(m) { _angleMode = m; };"
+    );
+  }
   if (deps.degrees) {
     lines.push("var degrees = function(rad) { return rad * 180 / Math.PI; };");
   }
   if (deps.radians) {
     lines.push("var radians = function(deg) { return deg * Math.PI / 180; };");
   }
-  if (deps.angleMode) {
+  if (
+    deps.sin ||
+    deps.cos ||
+    deps.tan ||
+    deps.asin ||
+    deps.acos ||
+    deps.atan ||
+    deps.atan2 ||
+    deps.angleMode
+  ) {
     lines.push(
-      "var DEGREES = 'DEG', RADIANS = 'RAD';",
-      "var _angleMode = 'RAD';",
-      "var angleMode = function(m) { _angleMode = m; };"
+      "var _toAngleRadians = function(v) {",
+      "  return (typeof _angleMode !== 'undefined' && _angleMode === 'DEG') ? v * Math.PI / 180 : v;",
+      "};",
+      "var _fromAngleRadians = function(v) {",
+      "  return (typeof _angleMode !== 'undefined' && _angleMode === 'DEG') ? v * 180 / Math.PI : v;",
+      "};"
     );
   }
+  if (deps.sin) lines.push("var sin = function(v) { return Math.sin(_toAngleRadians(v)); };");
+  if (deps.cos) lines.push("var cos = function(v) { return Math.cos(_toAngleRadians(v)); };");
+  if (deps.tan) lines.push("var tan = function(v) { return Math.tan(_toAngleRadians(v)); };");
+  if (deps.asin) lines.push("var asin = function(v) { return _fromAngleRadians(Math.asin(v)); };");
+  if (deps.acos) lines.push("var acos = function(v) { return _fromAngleRadians(Math.acos(v)); };");
+  if (deps.atan) lines.push("var atan = function(v) { return _fromAngleRadians(Math.atan(v)); };");
+  if (deps.atan2) lines.push("var atan2 = function(y, x) { return _fromAngleRadians(Math.atan2(y, x)); };");
 
   // --- 基础运算 ---
   if (deps.sqrt) lines.push("var sqrt = Math.sqrt;");

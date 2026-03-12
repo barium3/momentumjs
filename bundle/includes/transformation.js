@@ -34,7 +34,7 @@ function getTransformBasicLib() {
     "  _ty += dy;",
     "}",
     "function rotate(a) {",
-    "  _rotation += a;",
+    "  _rotation += (typeof _angleMode !== 'undefined' && _angleMode === 'DEG') ? a * Math.PI / 180 : a;",
     "  _cosR = Math.cos(_rotation);",
     "  _sinR = Math.sin(_rotation);",
     "}",
@@ -187,7 +187,7 @@ function getTransformationLib(deps) {
   if (deps.rotate) {
     lib.push(
       "function rotate(a) {",
-      "  _rotation += a;",
+      "  _rotation += (typeof _angleMode !== 'undefined' && _angleMode === 'DEG') ? a * Math.PI / 180 : a;",
       "  _cosR = Math.cos(_rotation);",
       "  _sinR = Math.sin(_rotation);",
       "}"
