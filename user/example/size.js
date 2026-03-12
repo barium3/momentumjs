@@ -1,1 +1,0 @@
-function pattern() {  for (var i = 0; i < 10; i++) {    ellipse(i * 50, 100, 30);  }}function test(){    pattern();    ellipse(500, 500, 30);}function draw() {  test();}// 预期结果：count = 0，不生成图层 ✓

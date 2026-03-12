@@ -1,1 +1,0 @@
-// 测试 时间function setup() {  createCanvas(800, 400);  duration(1,10,20);}

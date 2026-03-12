@@ -1,6 +1,0 @@
-id,name,x,y,size,rotation,opacity,visible,color
-1,Title,120,80,48,0,100,true,#FF6B6B
-2,CircleA,240,160,64,15,85,true,#4ECDC4
-3,CircleB,360,220,72,-20,70,true,#FFE66D
-4,Label,480,300,32,0,90,false,#1A535C
-5,Footer,600,360,28,5,100,true,#FF9F1C

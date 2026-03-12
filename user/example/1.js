@@ -1,1 +1,0 @@
-let myPicker;function setup() {  createCanvas(100, 100);  // Create a color picker and set its position.  myPicker = createColorPicker(200,0,10,10);    // Use the color picker to paint the background.  }function draw() {  let c = myPicker.color();  if(frameCount%20==5){     background(0);  }else{  background(c);   }  ellipse(frameCount,10,10,10);}
