@@ -139,3 +139,7 @@ function intersect(cA, cB) {
 
 - Contributors are welcome to submit issues, feature requests, and code improvements.
 - Please read our contribution guidelines before submitting.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
