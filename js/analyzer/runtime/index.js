@@ -173,6 +173,7 @@ function createExecutionState(overrides) {
       tableLoadTracker: { pending: [] },
       jsonLoadTracker: { pending: [] },
       suppressPrint: false,
+      suppressConsole: false,
     },
     overrides || {},
   );
@@ -184,6 +185,39 @@ function collectLoadPromises(state) {
     waitForMomentumTableLoads(state.tableLoadTracker),
     waitForMomentumJSONLoads(state.jsonLoadTracker),
   ]);
+}
+
+function suppressRuntimeConsole(state) {
+  if (!state || !state.suppressConsole || state._consoleRestore) {
+    return;
+  }
+
+  var originalConsole = {
+    log: console.log,
+    info: console.info,
+    warn: console.warn,
+    error: console.error,
+  };
+
+  var noop = function () {};
+  console.log = noop;
+  console.info = noop;
+  console.warn = noop;
+  console.error = noop;
+
+  state._consoleRestore = function () {
+    console.log = originalConsole.log;
+    console.info = originalConsole.info;
+    console.warn = originalConsole.warn;
+    console.error = originalConsole.error;
+    state._consoleRestore = null;
+  };
+}
+
+function restoreRuntimeConsole(state) {
+  if (state && typeof state._consoleRestore === "function") {
+    state._consoleRestore();
+  }
 }
 
 function createTimeoutTask(timeout, message, executor) {
@@ -403,12 +437,18 @@ class P5Runtime {
     this.initPromise = null;
     this._shapeTypeMapCache = null;
   }
-  async execute(code, staticAnalysis) {
+  async execute(code, staticAnalysis, executionOptions) {
     await this.init();
-    return await this.executeWithBranches(code, null, null, staticAnalysis);
+    return await this.executeWithBranches(
+      code,
+      null,
+      null,
+      staticAnalysis,
+      executionOptions,
+    );
   }
 
-  async executeWithBranches(code, globalCode, entryPoint, staticAnalysis) {
+  async executeWithBranches(code, globalCode, entryPoint, staticAnalysis, executionOptions) {
     const fullCode = globalCode ? globalCode + "\n" + code : code;
     let analysisCode =
       staticAnalysis &&
@@ -416,19 +456,30 @@ class P5Runtime {
       typeof staticAnalysis.runtimeCode === "string"
         ? staticAnalysis.runtimeCode
         : this._buildAnalysisCode(fullCode);
-    return await this.executeCodeBlock(analysisCode, entryPoint);
+    return await this.executeCodeBlock(analysisCode, entryPoint, executionOptions);
   }
 
-  async executeCodeBlock(fullCode, entryPoint) {
+  async executeCodeBlock(fullCode, entryPoint, executionOptions) {
     var self = this;
+    var runtimeOptions = executionOptions || {};
 
     return createTimeoutTask(
       self.options.timeout,
       entryPoint ? `${entryPoint} timed out` : "Execution timed out",
       function (resolve, reject) {
-        var state = createExecutionState();
-        self._installExecutionEnvironment(state);
-        self._evalUserCode(fullCode);
+        var state = createExecutionState({
+          suppressConsole: !!runtimeOptions.suppressConsole,
+        });
+        try {
+          self._installExecutionEnvironment(state);
+          suppressRuntimeConsole(state);
+          self._evalUserCode(fullCode);
+        } catch (err) {
+          restoreRuntimeConsole(state);
+          self._cleanupAfterExecution();
+          reject(err);
+          return;
+        }
 
         const shouldRunSetup = entryPoint === "setup" || entryPoint === null;
         const shouldRunDraw = entryPoint === "draw" || entryPoint === null;
@@ -455,10 +506,12 @@ class P5Runtime {
             }
 
             const result = self._snapshotExecutionResult(state);
+            restoreRuntimeConsole(state);
             self._cleanupAfterExecution();
             resolve(result);
           })
           .catch(function (err) {
+            restoreRuntimeConsole(state);
             self._cleanupAfterExecution();
             reject(err);
           });
@@ -481,7 +534,9 @@ class P5Runtime {
     drawFullCode,
     preloadFullCode,
     staticAnalysis,
+    executionOptions,
   ) {
+    const runtimeOptions = executionOptions || {};
     const fullDefs = [];
     if (preloadFullCode && preloadFullCode.trim()) {
       fullDefs.push(preloadFullCode);
@@ -508,29 +563,41 @@ class P5Runtime {
         : this._buildAnalysisCode(fullCode);
 
     const { setupResult, drawResult } =
-      await this.executeSetupThenDraw(analysisCode);
+      await this.executeSetupThenDraw(analysisCode, runtimeOptions);
     return { setupResult, drawResult };
   }
 
-  async executeSetupThenDraw(fullCode) {
+  async executeSetupThenDraw(fullCode, executionOptions) {
     var self = this;
+    var runtimeOptions = executionOptions || {};
 
     return createTimeoutTask(
       self.options.timeout * 2,
       "Execution timed out",
       function (resolve, reject) {
         var setupState = createExecutionState({
-          suppressPrint: true,
+          suppressPrint: !!runtimeOptions.suppressConsole,
+          suppressConsole: !!runtimeOptions.suppressConsole,
         });
         var drawState = createExecutionState({
           imageLoadTracker: setupState.imageLoadTracker,
           tableLoadTracker: setupState.tableLoadTracker,
           jsonLoadTracker: setupState.jsonLoadTracker,
-          suppressPrint: true,
+          suppressPrint: !!runtimeOptions.suppressConsole,
+          suppressConsole: !!runtimeOptions.suppressConsole,
         });
 
-        self._installExecutionEnvironment(setupState);
-        self._evalUserCode(fullCode);
+        try {
+          self._installExecutionEnvironment(setupState);
+          suppressRuntimeConsole(setupState);
+          self._evalUserCode(fullCode);
+        } catch (err) {
+          restoreRuntimeConsole(drawState);
+          restoreRuntimeConsole(setupState);
+          self._cleanupAfterExecution();
+          reject(err);
+          return;
+        }
         self._runPreload();
 
         collectLoadPromises(setupState)
@@ -545,6 +612,7 @@ class P5Runtime {
             }
 
             self._installExecutionEnvironment(drawState);
+            suppressRuntimeConsole(drawState);
             if (typeof window.draw === "function") {
               try {
                 self._setRuntimePhase("draw");
@@ -556,6 +624,8 @@ class P5Runtime {
 
             const setupResult = self._snapshotExecutionResult(setupState);
             const drawResult = self._snapshotExecutionResult(drawState);
+            restoreRuntimeConsole(drawState);
+            restoreRuntimeConsole(setupState);
             self._cleanupAfterExecution();
             resolve({
               setupResult: setupResult,
@@ -563,6 +633,8 @@ class P5Runtime {
             });
           })
           .catch(function (err) {
+            restoreRuntimeConsole(drawState);
+            restoreRuntimeConsole(setupState);
             self._cleanupAfterExecution();
             reject(err);
           });

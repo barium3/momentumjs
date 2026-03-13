@@ -1,11 +1,7 @@
-// ----------------------------------------
-// Color - 模块化版本
-// 处理 Processing 风格的颜色操作
-// 支持 RGB, HSB, HSL 颜色模式
-// ----------------------------------------
+// Color helpers.
 
 /**
- * 颜色模式常量
+ * Color mode constants.
  */
 var COLOR_MODES = {
   RGB: 0,
@@ -14,21 +10,20 @@ var COLOR_MODES = {
 };
 
 /**
- * 默认颜色配置
+ * Default color configuration.
  */
 var COLOR_DEFAULTS = {
   mode: COLOR_MODES.RGB,
-  maxRGB: [255, 255, 255, 255], // [r, g, b, a] max values for RGB
-  maxHSB: [360, 100, 100, 1], // [h, s, b, a] max values for HSB
-  maxHSL: [360, 100, 100, 1], // [h, s, l, a] max values for HSL
-  // 全局默认填充仍然保持白色，保证与 p5 默认一致
+  maxRGB: [255, 255, 255, 255],
+  maxHSB: [360, 100, 100, 1],
+  maxHSL: [360, 100, 100, 1],
   fillColor: [1, 1, 1, 1],
-  strokeColor: [0, 0, 0, 1], // 默认描边色 (黑色)
+  strokeColor: [0, 0, 0, 1],
   strokeWeight: 1
 };
 
 /**
- * 获取颜色模式常量定义
+ * Build color mode constants for the runtime.
  */
 function getColorModeConstantsLib() {
   return [
@@ -40,7 +35,7 @@ function getColorModeConstantsLib() {
 }
 
 /**
- * 获取颜色状态变量
+ * Build color state.
  */
 function getColorStateLib() {
   var defaults = COLOR_DEFAULTS;
@@ -54,10 +49,8 @@ function getColorStateLib() {
     "var _fillColor = [" + defaults.fillColor.join(", ") + "];",
     "var _strokeColor = [" + defaults.strokeColor.join(", ") + "];",
     "var _strokeWeight = " + defaults.strokeWeight + ";",
-    // 标记是否用户显式调用过 fill()/stroke()，用于让 text 拥有独立的“首帧默认样式”",
     "var _hasUserFill = false;",
     "var _hasUserStroke = false;",
-    // text 专用默认填充色（0-1 空间，黑色）；stroke 默认依赖 text 自己的“无描边”设置",
     "var _defaultTextFillColor = [0, 0, 0, 1];",
     "var _noFill = false;",
     "var _noStroke = false;",
@@ -71,13 +64,11 @@ function getColorStateLib() {
 }
 
 /**
- * 获取颜色转换工具函数
+ * Build color conversion helpers.
  */
 function getColorConversionLib() {
   return [
     "// ===== Color Conversion Utilities =====",
-
-    // RGB -> HSB
     "function _rgbToHsb(r, g, b) {",
     "  var max = Math.max(r, g, b), min = Math.min(r, g, b);",
     "  var h, s, v = max;",
@@ -95,7 +86,6 @@ function getColorConversionLib() {
     "  return [h, s, v];",
     "}",
 
-    // HSB -> RGB
     "function _hsbToRgb(h, s, v) {",
     "  var r, g, b;",
     "  var i = Math.floor(h * 6);",
@@ -114,7 +104,6 @@ function getColorConversionLib() {
     "  return [r, g, b];",
     "}",
 
-    // RGB -> HSL
     "function _rgbToHsl(r, g, b) {",
     "  var max = Math.max(r, g, b), min = Math.min(r, g, b);",
     "  var h, s, l = (max + min) / 2;",
@@ -132,7 +121,6 @@ function getColorConversionLib() {
     "  return [h, s, l];",
     "}",
 
-    // HSL -> RGB
     "function _hslToRgb(h, s, l) {",
     "  var r, g, b;",
     "  if (s === 0) { r = g = b = l; }",
@@ -157,7 +145,7 @@ function getColorConversionLib() {
 }
 
 /**
- * 获取 colorMode 函数
+ * Build colorMode().
  */
 function getColorModeLib() {
   return [
@@ -182,8 +170,7 @@ function getColorModeLib() {
 }
 
 /**
- * 获取 CSS 颜色解析函数（与 p5.js 兼容）
- * 支持: 命名颜色、#rgb、#rrggbb、rgb()、rgba()、hsl()、hsla()
+ * Build the CSS color parser.
  */
 function getParseColorStringLib() {
   return [
@@ -233,9 +220,7 @@ function getParseColorStringLib() {
 }
 
 /**
- * 获取 color 函数（颜色创建）
- * 返回 [r, g, b, a] 格式，其中 r, g, b, a 都是 0-1 范围
- * 支持 p5: 数字、数组、CSS 字符串
+ * Build color().
  */
 function getColorFuncLib() {
   return [
@@ -243,8 +228,6 @@ function getColorFuncLib() {
     "function color() {",
     "  var len = arguments.length;",
     "  var v1, v2, v3, a;",
-
-    // 单参数：数组、字符串、数字
     "  if (len === 1) {",
     "    var arg = arguments[0];",
     "    if (typeof arg === 'object' && arg.length) {",
@@ -272,14 +255,10 @@ function getColorFuncLib() {
     "  } else {",
     "    return [1, 1, 1, 1];",
     "  }",
-
-    // 归一化值
     "  var n1 = v1 / _colorMax1;",
     "  var n2 = v2 / _colorMax2;",
     "  var n3 = v3 / _colorMax3;",
     "  var na = a / _colorMaxA;",
-
-    // 根据颜色模式转换为 RGB
     "  var r, g, b;",
     "  if (_colorMode === RGB) {",
     "    r = n1; g = n2; b = n3;",
@@ -292,8 +271,6 @@ function getColorFuncLib() {
     "  } else {",
     "    r = n1; g = n2; b = n3;",
     "  }",
-
-    // 限制范围
     "  r = Math.max(0, Math.min(1, r));",
     "  g = Math.max(0, Math.min(1, g));",
     "  b = Math.max(0, Math.min(1, b));",
@@ -305,7 +282,7 @@ function getColorFuncLib() {
 }
 
 /**
- * 获取 fill/stroke 函数库
+ * Build fill() and stroke().
  */
 function getFillStrokeLib() {
   return [
@@ -332,7 +309,7 @@ function getFillStrokeLib() {
 }
 
 /**
- * 获取 noFill/noStroke/strokeWeight 函数库
+ * Build noFill(), noStroke(), and strokeWeight().
  */
 function getNoFillStrokeWeightLib() {
   return [
@@ -343,17 +320,11 @@ function getNoFillStrokeWeightLib() {
 }
 
 /**
- * 获取颜色提取函数库
- * p5 兼容：RGB 模式下 hue/saturation/brightness/lightness 使用固定默认范围
- * - hue: 0-360 (HSL)
- * - saturation: 0-100 (HSL)
- * - brightness: 0-100 (HSB)
- * - lightness: 0-100 (HSL)
- * HSB/HSL 模式下使用 _colorMax 范围
+ * Build color channel extractors.
  */
 function getColorExtractLib() {
   return [
-    "// ===== Color Extract Functions (p5 compatible) =====",
+    "// ===== Color Extract Functions =====",
 
     "function red(c) {",
     "  if (!c || !c.length) return 0;",
@@ -374,8 +345,6 @@ function getColorExtractLib() {
     "  if (!c || !c.length) return 0;",
     "  return (c[3] !== undefined ? c[3] : 1) * _colorMaxA;",
     "}",
-
-    // hue: RGB 模式默认 0-360(HSL)，HSB/HSL 模式用 _colorMax1
     "function hue(c) {",
     "  if (!c || !c.length) return 0;",
     "  if (_colorMode === RGB) { var hsl = _rgbToHsl(c[0], c[1], c[2]); return hsl[0] * 360; }",
@@ -383,7 +352,6 @@ function getColorExtractLib() {
     "  var hsl = _rgbToHsl(c[0], c[1], c[2]); return hsl[0] * _colorMax1;",
     "}",
 
-    // saturation: RGB 模式默认 0-100(HSL)，HSB/HSL 模式用 _colorMax2
     "function saturation(c) {",
     "  if (!c || !c.length) return 0;",
     "  if (_colorMode === HSB) { var hsb = _rgbToHsb(c[0], c[1], c[2]); return hsb[1] * _colorMax2; }",
@@ -391,14 +359,12 @@ function getColorExtractLib() {
     "  return _colorMode === RGB ? hsl[1] * 100 : hsl[1] * _colorMax2;",
     "}",
 
-    // brightness: RGB 模式默认 0-100(HSB)，HSB 模式用 _colorMax3
     "function brightness(c) {",
     "  if (!c || !c.length) return 0;",
     "  var hsb = _rgbToHsb(c[0], c[1], c[2]);",
     "  return _colorMode === RGB ? hsb[2] * 100 : hsb[2] * _colorMax3;",
     "}",
 
-    // lightness: RGB 模式默认 0-100(HSL)，HSL 模式用 _colorMax3
     "function lightness(c) {",
     "  if (!c || !c.length) return 0;",
     "  var hsl = _rgbToHsl(c[0], c[1], c[2]);",
@@ -408,12 +374,11 @@ function getColorExtractLib() {
 }
 
 /**
- * 获取 lerpColor 函数库
- * p5 兼容：amt 限制 [0,1]，HSB/HSL 模式下色相沿色轮最短路径插值
+ * Build lerpColor().
  */
 function getLerpColorLib() {
   return [
-    "// ===== lerpColor Function (p5 compatible) =====",
+    "// ===== lerpColor Function =====",
     "function lerpColor(c1, c2, amt) {",
     "  if (!c1 || !c2) return [1, 1, 1, 1];",
     "  amt = Math.max(0, Math.min(1, amt));",
@@ -449,13 +414,7 @@ function getLerpColorLib() {
 }
 
 /**
- * 获取颜色编码函数（形状函数依赖）
- * 编码结构: [fill1, fill2, stroke1, stroke2, opacity]
- * - fill1: [r, g]
- * - fill2: [b, a]
- * - stroke1: [r, g]
- * - stroke2: [b, a]
- * - opacity: [fillOpacity(0-100), strokeOpacity(0-100)]
+ * Build encoded color state.
  */
 function getEncodeColorStateLib() {
   return [
@@ -488,16 +447,14 @@ function getEncodeColorStateLib() {
 }
 
 /**
- * 获取颜色库（根据依赖动态构建）
- * @param {Object} deps - 依赖对象
+ * Build the color library for the requested dependencies.
+ * @param {Object} deps
  */
 function getColorLib(deps) {
   if (!deps) deps = {};
   var lib = [];
   var needsConversion = false;
   var needsColorFunc = false;
-
-  // 检查是否需要颜色转换函数
   if (
     deps.colorMode ||
     deps.hue ||
@@ -507,21 +464,13 @@ function getColorLib(deps) {
   ) {
     needsConversion = true;
   }
-
-  // 检查是否需要 color 函数
   if (deps.color || deps.fill || deps.stroke) {
     needsColorFunc = true;
   }
-
-  // 颜色模式常量（如果使用了任何颜色函数）
   if (needsColorFunc || deps.colorMode || deps.RGB || deps.HSB || deps.HSL) {
     lib.push(getColorModeConstantsLib());
   }
-
-  // 状态变量始终需要
   lib.push(getColorStateLib());
-
-  // 内部模式：只需要状态变量和 _encodeColorState
   if (deps.state) {
     if (needsConversion) {
       lib.push(getColorConversionLib());
@@ -529,29 +478,19 @@ function getColorLib(deps) {
     lib.push(getEncodeColorStateLib());
     return lib.join("\n\n");
   }
-
-  // 颜色转换函数（如果需要）
   if (needsConversion) {
     lib.push(getColorConversionLib());
   }
-
-  // colorMode 函数
   if (deps.colorMode) {
     lib.push(getColorModeLib());
   }
-
-  // color 函数
   if (needsColorFunc) {
-    // color 需要颜色转换（非 RGB 模式 + CSS hsl 解析）
     if (!needsConversion) {
       lib.push(getColorConversionLib());
     }
     lib.push(getParseColorStringLib());
     lib.push(getColorFuncLib());
   }
-
-  // fill/stroke
-  // fill/stroke 支持数组、CSS 字符串、数字参数（通过 color 解析）
   if (deps.fill) {
     lib.push(
       'function fill() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _fillColor = arguments[0]; } else { _fillColor = color.apply(null, arguments); } _noFill = false; _hasUserFill = true; }'
@@ -562,8 +501,6 @@ function getColorLib(deps) {
       'function stroke() { if (arguments.length === 0) return; if (Object.prototype.toString.call(arguments[0]) === "[object Array]") { _strokeColor = arguments[0]; } else { _strokeColor = color.apply(null, arguments); } _noStroke = false; _hasUserStroke = true; }'
     );
   }
-
-  // noFill/noStroke/strokeWeight
   if (deps.noFill) {
     lib.push("function noFill() { _noFill = true; }");
   }
@@ -573,8 +510,6 @@ function getColorLib(deps) {
   if (deps.strokeWeight) {
     lib.push("function strokeWeight(w) { _strokeWeight = w; }");
   }
-
-  // 颜色提取函数
   if (deps.red) {
     lib.push(
       "function red(c) { if (!c || !c.length) return 0; return c[0] * _colorMax1; }"
@@ -631,8 +566,6 @@ function getColorLib(deps) {
       "function lightness(c) { if (!c || !c.length) return 0; var hsl = _rgbToHsl(c[0], c[1], c[2]); return _colorMode === RGB ? hsl[2] * 100 : hsl[2] * _colorMax3; }"
     );
   }
-
-  // lerpColor（HSB/HSL 插值需要颜色转换）
   if (deps.lerpColor) {
     if (!needsConversion) {
       lib.push(getColorConversionLib());
@@ -640,8 +573,6 @@ function getColorLib(deps) {
     }
     lib.push(getLerpColorLib());
   }
-
-  // 形状函数需要 _encodeColorState
   if (deps.shape) {
     lib.push(getEncodeColorStateLib());
   }
@@ -650,16 +581,11 @@ function getColorLib(deps) {
 }
 
 // ========================================
-// background - 渲染函数（纯色图层）
-// 颜色逻辑与 color() 一致
+// background helper
 // ========================================
 
 /**
- * 获取 background 内部函数
- * p5 逻辑：background 完全独立于 fill/stroke，仅使用传入的参数
- * 支持: background(gray), background(gray,a), background(v1,v2,v3), background(v1,v2,v3,a)
- * 以及 background(c) 其中 c 为 color() 返回的数组
- * 输出格式（语义化 JSON）: { slotKey, type:"background", color:[r,g,b,a] }
+ * Build background().
  */
 function getBackgroundLib() {
   return [
@@ -671,9 +597,6 @@ function getBackgroundLib() {
     "  var ref = _nextShapeRef('background', callsiteId);",
     "  var slotKey = ref.slotKey;",
     "  var hasExplicitAlpha = false;",
-    "  // 判断是否显式传入透明度参数：",
-    "  // - background(gray, a) 或 background(r,g,b,a)：arguments.length === 2 或 4",
-    "  // - background(c)：如果 c 是 color() 得到的数组且长度 >= 4，也认为显式带 alpha",
     "  if (args.length === 2 || args.length === 4) {",
     "    hasExplicitAlpha = true;",
     "  } else if (args.length === 1) {",
@@ -695,9 +618,7 @@ function getBackgroundLib() {
 }
 
 /**
- * 创建 background 图层
- * 纯色图层，使用形状矩形 + 填色效果（效果-生成-填色）
- * 数据格式（语义化 JSON）: { slotKey, type:"background", color:[r,g,b,a] }
+ * Create a background layer from exported data.
  */
 function createBackgroundFromContext(index, slotKey, mainCompName, targetLayer) {
   var layer = targetLayer || engineComp.layers.addShape();
@@ -716,13 +637,10 @@ function createBackgroundFromContext(index, slotKey, mainCompName, targetLayer) 
 
   var engineLayerExpr;
   if (mainCompName) {
-    // 从主合成读取，通过合成名称直接调用
-    // 转义合成名称中的引号（如果存在）
     var escapedName = mainCompName.replace(/"/g, '\\"');
     engineLayerExpr =
       'comp("' + escapedName + '").layer("__engine__").text.sourceText';
   } else {
-    // 从当前合成读取
     engineLayerExpr = 'thisComp.layer("__engine__").text.sourceText';
   }
 
@@ -735,8 +653,6 @@ function createBackgroundFromContext(index, slotKey, mainCompName, targetLayer) 
     "var targetKey = " + JSON.stringify(slotKey) + ";",
     "var bg = (idx && idx[targetKey] !== undefined) ? backgrounds[idx[targetKey]] : null;"
   ].join("\n");
-
-  // 矩形覆盖整个合成：锚点左上角，位置 (0,0)，尺寸为合成宽高
   if (!targetLayer) {
     layer.property("Transform").property("Anchor Point").setValue([0, 0]);
     layer.property("Transform").property("Position").setValue([0, 0]);
@@ -751,8 +667,6 @@ function createBackgroundFromContext(index, slotKey, mainCompName, targetLayer) 
     "!bg ? [0, 0] : [thisComp.width, thisComp.height]"
   ].join("\n");
   transform.property("Rotation").setValue(0);
-
-  // 填色效果：颜色和不透明度从 path 读取
   var fill = shapeGroup
     .property("Contents")
     .addProperty("ADBE Vector Graphic - Fill");
@@ -772,7 +686,7 @@ function createBackgroundFromContext(index, slotKey, mainCompName, targetLayer) 
 }
 
 /**
- * 获取需要替换的颜色函数名列表
+ * Return color function names.
  */
 function getColorFunctionNames() {
   if (typeof functionRegistry !== "undefined" && functionRegistry.colors) {

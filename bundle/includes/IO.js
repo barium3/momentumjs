@@ -1,400 +1,297 @@
-// ----------------------------------------
-// IO - Table / JSON 数据库
-// 当前目标：
-//   1. AE 表达式端提供与前端一致的 loadTable() 入口
-//   2. CSV / TSV / JSON 均由脚本端预读取并直接注入表达式上下文
-//   3. Table 在表达式端表现为可变内存表，而不是 footage 代理
-// ----------------------------------------
+// IO helpers.
 
-// ----------------------------------------
-// 表达式端：生成 loadTable / loadJSON 运行时库
-// ----------------------------------------
+// Expression runtime.
 function getIOLib(deps) {
   if (!deps || (!deps.loadTable && !deps.loadJSON)) return "";
-
-  var lines = [];
-  lines.push("// IO 库");
-  lines.push("var _momentumTableData = _td || {};");
-  lines.push("var _momentumJSONData = _jd || {};");
-  lines.push("function _normalizeIOPath(path) {");
-  lines.push(
-    "  return String(path || '').replace(/\\\\/g, '/').replace(/^\\/+/, '');"
-  );
-  lines.push("}");
-  lines.push("function _rows(rows) {");
-  lines.push("  return rows && rows.length ? rows : [];");
-  lines.push("}");
-  lines.push("function _clone(value) {");
-  lines.push("  if (value === null || value === undefined) return value;");
-  lines.push("  if (typeof value !== 'object') return value;");
-  lines.push(
-    "  if (value.length !== undefined && typeof value !== 'string') {"
-  );
-  lines.push("    var out = [];");
-  lines.push(
-    "    for (var i = 0; i < value.length; i++) out.push(_clone(value[i]));"
-  );
-  lines.push("    return out;");
-  lines.push("  }");
-  lines.push("  var obj = {};");
-  lines.push("  for (var key in value) {");
-  lines.push(
-    "    if (value.hasOwnProperty && value.hasOwnProperty(key)) obj[key] = _clone(value[key]);"
-  );
-  lines.push("  }");
-  lines.push("  return obj;");
-  lines.push("}");
-  lines.push("function _cols(columns, rows) {");
-  lines.push("  if (columns && columns.length) return columns;");
-  lines.push(
-    "  if (rows && rows.length && rows[0] && rows[0].length !== undefined) {"
-  );
-  lines.push("    var result = [];");
-  lines.push(
-    "    for (var i = 0; i < rows[0].length; i++) result.push(String(i));"
-  );
-  lines.push("    return result;");
-  lines.push("  }");
-  lines.push("  return [];");
-  lines.push("}");
-  lines.push("function _col(table, column) {");
-  lines.push("  if (typeof column === 'number') return column;");
-  lines.push("  var key = String(column);");
-  lines.push("  for (var i = 0; i < table.columns.length; i++) {");
-  lines.push("    if (String(table.columns[i]) === key) return i;");
-  lines.push("  }");
-  lines.push("  return -1;");
-  lines.push("}");
-  lines.push("function _esc(source) {");
-  lines.push(
-    "  return String(source || '').replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');"
-  );
-  lines.push("}");
-  lines.push("function _rowsOf(table) {");
-  lines.push("  if (!table) return [];");
-  lines.push("  if (!table.rows) table.rows = [];");
-  lines.push("  if (table._momentumRecord) {");
-  lines.push("    table._momentumRecord.rows = table.rows;");
-  lines.push("  }");
-  lines.push("  return table.rows;");
-  lines.push("}");
-  lines.push("function _readTableCell(table, rowIndex, colIndex) {");
-  lines.push("  if (colIndex < 0 || rowIndex < 0) return null;");
-  lines.push("  var rows = _rowsOf(table);");
-  lines.push("  if (!rows[rowIndex]) return null;");
-  lines.push(
-    "  return rows[rowIndex][colIndex] !== undefined ? rows[rowIndex][colIndex] : null;"
-  );
-  lines.push("}");
-  lines.push("function _sync(table) {");
-  lines.push("  if (!table) return;");
-  lines.push("  table.rowCount = table.rows ? table.rows.length : 0;");
-  lines.push("  table.columnCount = table.columns ? table.columns.length : 0;");
-  lines.push("  if (table._momentumRecord) {");
-  lines.push("    table._momentumRecord.rows = table.rows;");
-  lines.push("    table._momentumRecord.columns = table.columns;");
-  lines.push("    table._momentumRecord.rowCount = table.rowCount;");
-  lines.push("    table._momentumRecord.columnCount = table.columnCount;");
-  lines.push("  }");
-  lines.push("}");
-  lines.push("function _emptyRow(table) {");
-  lines.push("  var row = [];");
-  lines.push(
-    "  var count = table && table.columns ? table.columns.length : 0;"
-  );
-  lines.push("  for (var i = 0; i < count; i++) row.push(null);");
-  lines.push("  return row;");
-  lines.push("}");
-  lines.push("function _setCell(table, rowIndex, colIndex, value) {");
-  lines.push("  if (!table || rowIndex < 0 || colIndex < 0) return null;");
-  lines.push("  var rows = _rowsOf(table);");
-  lines.push("  while (rows.length <= rowIndex) rows.push(_emptyRow(table));");
-  lines.push("  while (table.columns.length <= colIndex) {");
-  lines.push("    table.columns.push(String(table.columns.length));");
-  lines.push("    for (var r = 0; r < rows.length; r++) rows[r].push(null);");
-  lines.push("  }");
-  lines.push(
-    "  while (rows[rowIndex].length < table.columns.length) rows[rowIndex].push(null);"
-  );
-  lines.push("  rows[rowIndex][colIndex] = value;");
-  lines.push("  table.rows = rows;");
-  lines.push("  _sync(table);");
-  lines.push("  return value;");
-  lines.push("}");
-  lines.push("function _rowData(table, source) {");
-  lines.push("  var row = _emptyRow(table);");
-  lines.push("  if (source === null || source === undefined) return row;");
-  lines.push(
-    "  if (source.table && source.index !== undefined && typeof source.arr === 'function') return source.arr();"
-  );
-  lines.push(
-    "  if (source.length !== undefined && typeof source !== 'string') {"
-  );
-  lines.push(
-    "    for (var i = 0; i < row.length && i < source.length; i++) row[i] = source[i];"
-  );
-  lines.push("    return row;");
-  lines.push("  }");
-  lines.push("  if (typeof source === 'object') {");
-  lines.push("    for (var c = 0; c < table.columns.length; c++) {");
-  lines.push("      var key = String(table.columns[c]);");
-  lines.push(
-    "      if (source.hasOwnProperty && source.hasOwnProperty(key)) row[c] = source[key];"
-  );
-  lines.push("    }");
-  lines.push("  }");
-  lines.push("  return row;");
-  lines.push("}");
-  lines.push("function _objAt(table, rowIndex) {");
-  lines.push(
-    "  if (rowIndex < 0 || rowIndex >= table.getRowCount()) return null;"
-  );
-  lines.push("  var obj = {};");
-  lines.push(
-    "  for (var i = 0; i < table.columns.length; i++) obj[String(table.columns[i])] = _readTableCell(table, rowIndex, i);"
-  );
-  lines.push("  return obj;");
-  lines.push("}");
-  lines.push("function _row(table, rowIndex) {");
-  lines.push(
-    "  if (!table || rowIndex < 0 || rowIndex >= table.getRowCount()) return null;"
-  );
-  lines.push("  var row = { table: table, index: rowIndex };");
-  lines.push("  var rowMethods = {");
-  lines.push("    arr: function() {");
-  lines.push("      var rows = _rowsOf(table);");
-  lines.push("      return rows[rowIndex] ? rows[rowIndex].slice(0) : [];");
-  lines.push("    },");
-  lines.push("    obj: function() { return _objAt(table, rowIndex); },");
-  lines.push(
-    "    get: function(column) { return table.get(rowIndex, column); },"
-  );
-  lines.push(
-    "    getString: function(column) { return table.getString(rowIndex, column); },"
-  );
-  lines.push(
-    "    getNum: function(column) { return table.getNum(rowIndex, column); },"
-  );
-  lines.push(
-    "    set: function(column, value) { return table.set(rowIndex, column, value); },"
-  );
-  lines.push(
-    "    setString: function(column, value) { return table.setString(rowIndex, column, value); },"
-  );
-  lines.push(
-    "    setNum: function(column, value) { return table.setNum(rowIndex, column, value); }"
-  );
-  lines.push("  };");
-  lines.push("  for (var methodName in rowMethods) {");
-  lines.push(
-    "    if (rowMethods.hasOwnProperty(methodName)) row[methodName] = rowMethods[methodName];"
-  );
-  lines.push("  }");
-  lines.push("  return row;");
-  lines.push("}");
-  lines.push("function _find(table, matcher, column, useRegex) {");
-  lines.push("  var results = [];");
-  lines.push("  var colIndex = _col(table, column);");
-  lines.push("  if (colIndex < 0) return results;");
-  lines.push("  var regex = null;");
-  lines.push("  if (useRegex) {");
-  lines.push("    try {");
-  lines.push(
-    "      regex = matcher && matcher.test ? matcher : new RegExp(String(matcher || ''));"
-  );
-  lines.push("    } catch (e) {");
-  lines.push("      regex = new RegExp(_esc(String(matcher || '')));");
-  lines.push("    }");
-  lines.push("  }");
-  lines.push("  for (var i = 0; i < table.getRowCount(); i++) {");
-  lines.push("    var value = table.getString(i, colIndex);");
-  lines.push(
-    "    if (useRegex ? regex.test(value) : value === String(matcher)) {"
-  );
-  lines.push("      results.push(_row(table, i));");
-  lines.push("    }");
-  lines.push("  }");
-  lines.push("  return results;");
-  lines.push("}");
-  lines.push("function _createTableObject(record) {");
-  lines.push("  var rows = _rows(record && record.rows);");
-  lines.push(
-    "  var rowCount = record && record.rowCount !== undefined ? record.rowCount : rows.length;"
-  );
-  lines.push("  var columns = _cols(record && record.columns, rows);");
-  lines.push(
-    "  var columnCount = record && record.columnCount !== undefined ? record.columnCount : columns.length;"
-  );
-  lines.push("  var table = {");
-  lines.push("    columns: columns.slice(0),");
-  lines.push("    rows: rows.slice(0),");
-  lines.push("    path: record && record.path ? record.path : '',");
-  lines.push("    fileName: record && record.fileName ? record.fileName : '',");
-  lines.push("    _momentumPath: record && record.path ? record.path : '',");
-  lines.push(
-    "    _momentumOptions: record && record.options ? record.options : {}"
-  );
-  lines.push("  };");
-  lines.push("  table._momentumRecord = record || null;");
-  lines.push("  table.rowCount = rowCount;");
-  lines.push("  table.columnCount = columnCount;");
-  lines.push("  var tableMethods = {");
-  lines.push("    getRowCount: function() { return table.rowCount; },");
-  lines.push("    getColumnCount: function() { return table.columnCount; },");
-  lines.push("    getArray: function() {");
-  lines.push("      var rows = _rowsOf(table);");
-  lines.push("      var out = [];");
-  lines.push(
-    "      for (var i = 0; i < rows.length; i++) out.push(rows[i].slice(0));"
-  );
-  lines.push("      return out;");
-  lines.push("    },");
-  lines.push(
-    "    getObject: function(rowIndex) { return _objAt(table, rowIndex); },"
-  );
-  lines.push("    get: function(rowIndex, column) {");
-  lines.push("      var colIndex = _col(table, column);");
-  lines.push(
-    "      if (colIndex < 0 || rowIndex < 0 || rowIndex >= table.getRowCount()) return null;"
-  );
-  lines.push("      return _readTableCell(table, rowIndex, colIndex);");
-  lines.push("    },");
-  lines.push(
-    "    getRow: function(rowIndex) { return _row(table, rowIndex); },"
-  );
-  lines.push("    getString: function(rowIndex, column) {");
-  lines.push("      var value = table.get(rowIndex, column);");
-  lines.push(
-    "      return value === null || value === undefined ? '' : String(value);"
-  );
-  lines.push("    },");
-  lines.push("    getNum: function(rowIndex, column) {");
-  lines.push("      var raw = table.get(rowIndex, column);");
-  lines.push(
-    "      if (raw === null || raw === undefined || raw === '') return NaN;"
-  );
-  lines.push("      var value = Number(raw);");
-  lines.push("      return isNaN(value) ? NaN : value;");
-  lines.push("    },");
-  lines.push("    getColumn: function(column) {");
-  lines.push("      var colIndex = _col(table, column);");
-  lines.push("      var out = [];");
-  lines.push("      if (colIndex < 0) return out;");
-  lines.push(
-    "      for (var i = 0; i < table.getRowCount(); i++) out.push(_readTableCell(table, i, colIndex));"
-  );
-  lines.push("      return out;");
-  lines.push("    },");
-  lines.push("    findRow: function(value, column) {");
-  lines.push("      var results = _find(table, value, column, false);");
-  lines.push("      return results.length > 0 ? results[0] : null;");
-  lines.push("    },");
-  lines.push(
-    "    findRows: function(value, column) { return _find(table, value, column, false); },"
-  );
-  lines.push("    matchRow: function(pattern, column) {");
-  lines.push("      var results = _find(table, pattern, column, true);");
-  lines.push("      return results.length > 0 ? results[0] : null;");
-  lines.push("    },");
-  lines.push(
-    "    matchRows: function(pattern, column) { return _find(table, pattern, column, true); },"
-  );
-  lines.push("    set: function(rowIndex, column, value) {");
-  lines.push("      var colIndex = _col(table, column);");
-  lines.push("      if (typeof column === 'number') colIndex = column;");
-  lines.push("      if (colIndex < 0) return null;");
-  lines.push("      return _setCell(table, rowIndex, colIndex, value);");
-  lines.push("    },");
-  lines.push("    setString: function(rowIndex, column, value) {");
-  lines.push(
-    "      return table.set(rowIndex, column, value === null || value === undefined ? '' : String(value));"
-  );
-  lines.push("    },");
-  lines.push("    setNum: function(rowIndex, column, value) {");
-  lines.push("      var num = Number(value);");
-  lines.push(
-    "      return table.set(rowIndex, column, isNaN(num) ? NaN : num);"
-  );
-  lines.push("    },");
-  lines.push("    addRow: function(sourceRow) {");
-  lines.push("      var rows = _rowsOf(table);");
-  lines.push("      rows.push(_rowData(table, sourceRow));");
-  lines.push("      table.rows = rows;");
-  lines.push("      _sync(table);");
-  lines.push("      return _row(table, rows.length - 1);");
-  lines.push("    },");
-  lines.push("    removeRow: function(rowIndex) {");
-  lines.push("      var rows = _rowsOf(table);");
-  lines.push("      if (rowIndex < 0 || rowIndex >= rows.length) return null;");
-  lines.push("      rows.splice(rowIndex, 1);");
-  lines.push("      table.rows = rows;");
-  lines.push("      _sync(table);");
-  lines.push("      return table;");
-  lines.push("    },");
-  lines.push("    clearRows: function() {");
-  lines.push("      table.rows = [];");
-  lines.push("      _sync(table);");
-  lines.push("      return table;");
-  lines.push("    },");
-  lines.push("    addColumn: function(title) {");
-  lines.push(
-    "      var name = title === undefined || title === null ? String(table.columns.length) : String(title);"
-  );
-  lines.push("      table.columns.push(name);");
-  lines.push("      var rows = _rowsOf(table);");
-  lines.push("      for (var i = 0; i < rows.length; i++) rows[i].push(null);");
-  lines.push("      table.rows = rows;");
-  lines.push("      _sync(table);");
-  lines.push("      return name;");
-  lines.push("    },");
-  lines.push("    removeColumn: function(column) {");
-  lines.push("      var colIndex = _col(table, column);");
-  lines.push("      if (colIndex < 0) return null;");
-  lines.push("      table.columns.splice(colIndex, 1);");
-  lines.push("      var rows = _rowsOf(table);");
-  lines.push("      for (var i = 0; i < rows.length; i++) {");
-  lines.push(
-    "        if (rows[i] && rows[i].length > colIndex) rows[i].splice(colIndex, 1);"
-  );
-  lines.push("      }");
-  lines.push("      table.rows = rows;");
-  lines.push("      _sync(table);");
-  lines.push("      return table;");
-  lines.push("    }");
-  lines.push("  };");
-  lines.push("  for (var methodName in tableMethods) {");
-  lines.push(
-    "    if (tableMethods.hasOwnProperty(methodName)) table[methodName] = tableMethods[methodName];"
-  );
-  lines.push("  }");
-  lines.push("  return table;");
-  lines.push("}");
-  lines.push("function loadTable(path) {");
-  lines.push("  var key = _normalizeIOPath(path);");
-  lines.push(
-    "  var record = _momentumTableData[key] || _momentumTableData[String(path || '')] || null;"
-  );
-  lines.push(
-    "  if (!record) record = { path: key, columns: [], rows: [], options: {} };"
-  );
-  lines.push("  if (!record.path) record.path = key;");
-  lines.push("  if (!record.rows) record.rows = [];");
-  lines.push("  return _createTableObject(record);");
-  lines.push("}");
-  lines.push("function loadJSON(path) {");
-  lines.push("  var key = _normalizeIOPath(path);");
-  lines.push("  var data = _momentumJSONData[key];");
-  lines.push(
-    "  if (data === undefined) data = _momentumJSONData[String(path || '')];"
-  );
-  lines.push("  return _clone(data);");
-  lines.push("}");
-
-  return lines.join("\n");
+  return [
+    "// ===== IO Runtime =====",
+    "var _momentumTableData = _td || {};",
+    "var _momentumJSONData = _jd || {};",
+    "function _normalizeIOPath(path) {",
+    "  return String(path || '').replace(/\\\\/g, '/').replace(/^\\/+/, '');",
+    "}",
+    "function _rows(rows) {",
+    "  return rows && rows.length ? rows : [];",
+    "}",
+    "function _clone(value) {",
+    "  if (value === null || value === undefined) return value;",
+    "  if (typeof value !== 'object') return value;",
+    "  if (value.length !== undefined && typeof value !== 'string') {",
+    "    var out = [];",
+    "    for (var i = 0; i < value.length; i++) out.push(_clone(value[i]));",
+    "    return out;",
+    "  }",
+    "  var obj = {};",
+    "  for (var key in value) {",
+    "    if (value.hasOwnProperty && value.hasOwnProperty(key)) obj[key] = _clone(value[key]);",
+    "  }",
+    "  return obj;",
+    "}",
+    "function _cols(columns, rows) {",
+    "  if (columns && columns.length) return columns;",
+    "  if (rows && rows.length && rows[0] && rows[0].length !== undefined) {",
+    "    var result = [];",
+    "    for (var i = 0; i < rows[0].length; i++) result.push(String(i));",
+    "    return result;",
+    "  }",
+    "  return [];",
+    "}",
+    "function _col(table, column) {",
+    "  if (typeof column === 'number') return column;",
+    "  var key = String(column);",
+    "  for (var i = 0; i < table.columns.length; i++) {",
+    "    if (String(table.columns[i]) === key) return i;",
+    "  }",
+    "  return -1;",
+    "}",
+    "function _esc(source) {",
+    "  return String(source || '').replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');",
+    "}",
+    "function _rowsOf(table) {",
+    "  if (!table) return [];",
+    "  if (!table.rows) table.rows = [];",
+    "  if (table._momentumRecord) {",
+    "    table._momentumRecord.rows = table.rows;",
+    "  }",
+    "  return table.rows;",
+    "}",
+    "function _readTableCell(table, rowIndex, colIndex) {",
+    "  if (colIndex < 0 || rowIndex < 0) return null;",
+    "  var rows = _rowsOf(table);",
+    "  if (!rows[rowIndex]) return null;",
+    "  return rows[rowIndex][colIndex] !== undefined ? rows[rowIndex][colIndex] : null;",
+    "}",
+    "function _sync(table) {",
+    "  if (!table) return;",
+    "  table.rowCount = table.rows ? table.rows.length : 0;",
+    "  table.columnCount = table.columns ? table.columns.length : 0;",
+    "  if (table._momentumRecord) {",
+    "    table._momentumRecord.rows = table.rows;",
+    "    table._momentumRecord.columns = table.columns;",
+    "    table._momentumRecord.rowCount = table.rowCount;",
+    "    table._momentumRecord.columnCount = table.columnCount;",
+    "  }",
+    "}",
+    "function _emptyRow(table) {",
+    "  var row = [];",
+    "  var count = table && table.columns ? table.columns.length : 0;",
+    "  for (var i = 0; i < count; i++) row.push(null);",
+    "  return row;",
+    "}",
+    "function _setCell(table, rowIndex, colIndex, value) {",
+    "  if (!table || rowIndex < 0 || colIndex < 0) return null;",
+    "  var rows = _rowsOf(table);",
+    "  while (rows.length <= rowIndex) rows.push(_emptyRow(table));",
+    "  while (table.columns.length <= colIndex) {",
+    "    table.columns.push(String(table.columns.length));",
+    "    for (var r = 0; r < rows.length; r++) rows[r].push(null);",
+    "  }",
+    "  while (rows[rowIndex].length < table.columns.length) rows[rowIndex].push(null);",
+    "  rows[rowIndex][colIndex] = value;",
+    "  table.rows = rows;",
+    "  _sync(table);",
+    "  return value;",
+    "}",
+    "function _rowData(table, source) {",
+    "  var row = _emptyRow(table);",
+    "  if (source === null || source === undefined) return row;",
+    "  if (source.table && source.index !== undefined && typeof source.arr === 'function') return source.arr();",
+    "  if (source.length !== undefined && typeof source !== 'string') {",
+    "    for (var i = 0; i < row.length && i < source.length; i++) row[i] = source[i];",
+    "    return row;",
+    "  }",
+    "  if (typeof source === 'object') {",
+    "    for (var c = 0; c < table.columns.length; c++) {",
+    "      var key = String(table.columns[c]);",
+    "      if (source.hasOwnProperty && source.hasOwnProperty(key)) row[c] = source[key];",
+    "    }",
+    "  }",
+    "  return row;",
+    "}",
+    "function _objAt(table, rowIndex) {",
+    "  if (rowIndex < 0 || rowIndex >= table.getRowCount()) return null;",
+    "  var obj = {};",
+    "  for (var i = 0; i < table.columns.length; i++) obj[String(table.columns[i])] = _readTableCell(table, rowIndex, i);",
+    "  return obj;",
+    "}",
+    "function _row(table, rowIndex) {",
+    "  if (!table || rowIndex < 0 || rowIndex >= table.getRowCount()) return null;",
+    "  var row = { table: table, index: rowIndex };",
+    "  var rowMethods = {",
+    "    arr: function() {",
+    "      var rows = _rowsOf(table);",
+    "      return rows[rowIndex] ? rows[rowIndex].slice(0) : [];",
+    "    },",
+    "    obj: function() { return _objAt(table, rowIndex); },",
+    "    get: function(column) { return table.get(rowIndex, column); },",
+    "    getString: function(column) { return table.getString(rowIndex, column); },",
+    "    getNum: function(column) { return table.getNum(rowIndex, column); },",
+    "    set: function(column, value) { return table.set(rowIndex, column, value); },",
+    "    setString: function(column, value) { return table.setString(rowIndex, column, value); },",
+    "    setNum: function(column, value) { return table.setNum(rowIndex, column, value); }",
+    "  };",
+    "  for (var methodName in rowMethods) {",
+    "    if (rowMethods.hasOwnProperty(methodName)) row[methodName] = rowMethods[methodName];",
+    "  }",
+    "  return row;",
+    "}",
+    "function _find(table, matcher, column, useRegex) {",
+    "  var results = [];",
+    "  var colIndex = _col(table, column);",
+    "  if (colIndex < 0) return results;",
+    "  var regex = null;",
+    "  if (useRegex) {",
+    "    try {",
+    "      regex = matcher && matcher.test ? matcher : new RegExp(String(matcher || ''));",
+    "    } catch (e) {",
+    "      regex = new RegExp(_esc(String(matcher || '')));",
+    "    }",
+    "  }",
+    "  for (var i = 0; i < table.getRowCount(); i++) {",
+    "    var value = table.getString(i, colIndex);",
+    "    if (useRegex ? regex.test(value) : value === String(matcher)) {",
+    "      results.push(_row(table, i));",
+    "    }",
+    "  }",
+    "  return results;",
+    "}",
+    "function _createTableObject(record) {",
+    "  var rows = _rows(record && record.rows);",
+    "  var rowCount = record && record.rowCount !== undefined ? record.rowCount : rows.length;",
+    "  var columns = _cols(record && record.columns, rows);",
+    "  var columnCount = record && record.columnCount !== undefined ? record.columnCount : columns.length;",
+    "  var table = {",
+    "    columns: columns.slice(0),",
+    "    rows: rows.slice(0),",
+    "    path: record && record.path ? record.path : '',",
+    "    fileName: record && record.fileName ? record.fileName : '',",
+    "    _momentumPath: record && record.path ? record.path : '',",
+    "    _momentumOptions: record && record.options ? record.options : {}",
+    "  };",
+    "  table._momentumRecord = record || null;",
+    "  table.rowCount = rowCount;",
+    "  table.columnCount = columnCount;",
+    "  var tableMethods = {",
+    "    getRowCount: function() { return table.rowCount; },",
+    "    getColumnCount: function() { return table.columnCount; },",
+    "    getArray: function() {",
+    "      var rows = _rowsOf(table);",
+    "      var out = [];",
+    "      for (var i = 0; i < rows.length; i++) out.push(rows[i].slice(0));",
+    "      return out;",
+    "    },",
+    "    getObject: function(rowIndex) { return _objAt(table, rowIndex); },",
+    "    get: function(rowIndex, column) {",
+    "      var colIndex = _col(table, column);",
+    "      if (colIndex < 0 || rowIndex < 0 || rowIndex >= table.getRowCount()) return null;",
+    "      return _readTableCell(table, rowIndex, colIndex);",
+    "    },",
+    "    getRow: function(rowIndex) { return _row(table, rowIndex); },",
+    "    getString: function(rowIndex, column) {",
+    "      var value = table.get(rowIndex, column);",
+    "      return value === null || value === undefined ? '' : String(value);",
+    "    },",
+    "    getNum: function(rowIndex, column) {",
+    "      var raw = table.get(rowIndex, column);",
+    "      if (raw === null || raw === undefined || raw === '') return NaN;",
+    "      var value = Number(raw);",
+    "      return isNaN(value) ? NaN : value;",
+    "    },",
+    "    getColumn: function(column) {",
+    "      var colIndex = _col(table, column);",
+    "      var out = [];",
+    "      if (colIndex < 0) return out;",
+    "      for (var i = 0; i < table.getRowCount(); i++) out.push(_readTableCell(table, i, colIndex));",
+    "      return out;",
+    "    },",
+    "    findRow: function(value, column) {",
+    "      var results = _find(table, value, column, false);",
+    "      return results.length > 0 ? results[0] : null;",
+    "    },",
+    "    findRows: function(value, column) { return _find(table, value, column, false); },",
+    "    matchRow: function(pattern, column) {",
+    "      var results = _find(table, pattern, column, true);",
+    "      return results.length > 0 ? results[0] : null;",
+    "    },",
+    "    matchRows: function(pattern, column) { return _find(table, pattern, column, true); },",
+    "    set: function(rowIndex, column, value) {",
+    "      var colIndex = _col(table, column);",
+    "      if (typeof column === 'number') colIndex = column;",
+    "      if (colIndex < 0) return null;",
+    "      return _setCell(table, rowIndex, colIndex, value);",
+    "    },",
+    "    setString: function(rowIndex, column, value) {",
+    "      return table.set(rowIndex, column, value === null || value === undefined ? '' : String(value));",
+    "    },",
+    "    setNum: function(rowIndex, column, value) {",
+    "      var num = Number(value);",
+    "      return table.set(rowIndex, column, isNaN(num) ? NaN : num);",
+    "    },",
+    "    addRow: function(sourceRow) {",
+    "      var rows = _rowsOf(table);",
+    "      rows.push(_rowData(table, sourceRow));",
+    "      table.rows = rows;",
+    "      _sync(table);",
+    "      return _row(table, rows.length - 1);",
+    "    },",
+    "    removeRow: function(rowIndex) {",
+    "      var rows = _rowsOf(table);",
+    "      if (rowIndex < 0 || rowIndex >= rows.length) return null;",
+    "      rows.splice(rowIndex, 1);",
+    "      table.rows = rows;",
+    "      _sync(table);",
+    "      return table;",
+    "    },",
+    "    clearRows: function() {",
+    "      table.rows = [];",
+    "      _sync(table);",
+    "      return table;",
+    "    },",
+    "    addColumn: function(title) {",
+    "      var name = title === undefined || title === null ? String(table.columns.length) : String(title);",
+    "      table.columns.push(name);",
+    "      var rows = _rowsOf(table);",
+    "      for (var i = 0; i < rows.length; i++) rows[i].push(null);",
+    "      table.rows = rows;",
+    "      _sync(table);",
+    "      return name;",
+    "    },",
+    "    removeColumn: function(column) {",
+    "      var colIndex = _col(table, column);",
+    "      if (colIndex < 0) return null;",
+    "      table.columns.splice(colIndex, 1);",
+    "      var rows = _rowsOf(table);",
+    "      for (var i = 0; i < rows.length; i++) {",
+    "        if (rows[i] && rows[i].length > colIndex) rows[i].splice(colIndex, 1);",
+    "      }",
+    "      table.rows = rows;",
+    "      _sync(table);",
+    "      return table;",
+    "    }",
+    "  };",
+    "  for (var methodName in tableMethods) {",
+    "    if (tableMethods.hasOwnProperty(methodName)) table[methodName] = tableMethods[methodName];",
+    "  }",
+    "  return table;",
+    "}",
+    "function loadTable(path) {",
+    "  var key = _normalizeIOPath(path);",
+    "  var record = _momentumTableData[key] || _momentumTableData[String(path || '')] || null;",
+    "  if (!record) record = { path: key, columns: [], rows: [], options: {} };",
+    "  if (!record.path) record.path = key;",
+    "  if (!record.rows) record.rows = [];",
+    "  return _createTableObject(record);",
+    "}",
+    "function loadJSON(path) {",
+    "  var key = _normalizeIOPath(path);",
+    "  var data = _momentumJSONData[key];",
+    "  if (data === undefined) data = _momentumJSONData[String(path || '')];",
+    "  return _clone(data);",
+    "}"
+  ].join("\n");
 }
-// ----------------------------------------
-// AE 脚本端：收集并解析 user/ 下的 IO 数据文件
-// ----------------------------------------
+
+// AE script helpers.
 
 function _trim(str) {
   return String(str || "").replace(/^\s+|\s+$/g, "");

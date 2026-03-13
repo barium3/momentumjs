@@ -76,7 +76,7 @@ Common math APIs:
 - `curvePoint(...)`
 - `curveTangent(...)`
 - `curveTightness(v)`
-- `createVector(x, [y], [z])`
+- `createVector(x, [y])`
 
 ---
 
@@ -330,7 +330,7 @@ point(x, y);
 
 ## Vector Helper
 
-### `createVector(x, [y], [z])`
+### `createVector(x, [y])`
 
 Creates a vector object.
 
@@ -340,7 +340,6 @@ Creates a vector object.
 createVector()
 createVector(x)
 createVector(x, y)
-createVector(x, y, z)
 ```
 
 ### Example
@@ -351,7 +350,7 @@ let v = createVector(10, 20);
 
 ### Notes
 
-- Vector support depends on the available p5-style runtime support in the frontend environment.
+- Momentum exposes 2D vector usage only.
 
 ---
 

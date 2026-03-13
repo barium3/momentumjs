@@ -1,13 +1,12 @@
 /**
- * 代码预处理器
- * 在分析/执行前对用户代码进行预处理
+ * Code preprocessor used before analysis and execution.
  */
 window.codePreprocessor = (function () {
   /**
-   * 移除代码中的注释，避免 Acorn 解析时因注释中的 Unicode 字符报错
-   * 正确处理字符串内的 // 和 /*（如 "http://"、'// not comment'）
-   * @param {string} code - 原始代码
-   * @returns {string} 移除注释后的代码
+   * Strip comments while preserving string literals such as "http://" or '// not comment'.
+   * This keeps Acorn away from stray Unicode characters inside comments.
+   * @param {string} code - Raw source code.
+   * @returns {string} Source code with comments removed.
    */
   function stripComments(code) {
     let result = "";

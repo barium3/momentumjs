@@ -1,18 +1,13 @@
-// ----------------------------------------
-// Image helpers
-// ----------------------------------------
-// 负责两件事：
-// 1. 生成 engine 侧的 image/loadImage/imageMode/tint 运行时
-// 2. 在 AE 侧导入图片素材并创建对应图层
+// Image helpers.
 
 /**
- * 生成 image 表达式库。
+ * Build image helpers for expressions.
  */
 function getImageLib(deps) {
   if (!deps || !deps.image) return "";
 
   return [
-    "// Image runtime",
+    "// ===== Image Runtime =====",
     "var _momentumImageMetadata = _imd || {};",
     "function _sanitizeImageSampleKey(path) {",
     "  return String(path || '').replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\\d)/, '_$1');",
@@ -297,7 +292,7 @@ function ensureImageSampleLayers(imageMetadata, compFolder, targetComp) {
 }
 
 /**
- * 为 image shape 创建 AE 图层并绑定表达式。
+ * Create an AE layer for an image shape.
  */
 function createImageFromContext(
   index,
@@ -375,7 +370,7 @@ function createImageFromContext(
   tintEffect.property(3).setValue(100);
 }
 
-// 获取扩展内 user/ 目录。
+// Resolve the extension user directory.
 function _getUserDirectory() {
   var scriptFile = new File($.fileName);
   var dir = scriptFile;
@@ -389,7 +384,7 @@ function _getUserDirectory() {
   }
 }
 
-// 优先按绝对路径复用已导入素材，避免重复导入。
+// Reuse imported footage by absolute path when possible.
 function _getOrImportFootage(file, compFolder) {
   var name = file.name;
   var targetPath = String(file.fsName || "").replace(/\\/g, "/");

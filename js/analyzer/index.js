@@ -8,7 +8,9 @@ class P5Analyzer {
   }
 
   async fullAnalyze(code, staticAnalysis, compiledDependencies) {
-    const renderResult = await this.runtime.execute(code, staticAnalysis);
+    const renderResult = await this.runtime.execute(code, staticAnalysis, {
+      suppressConsole: true,
+    });
     const depsResult =
       compiledDependencies || (await this.analyzeDependencies(code));
 
@@ -37,6 +39,9 @@ class P5Analyzer {
       drawFullCode,
       preloadFullCode,
       staticAnalysis,
+      {
+        suppressConsole: false,
+      },
     );
 
     const setupRenderLayers = (result.setupResult.renderOrder || []).slice();

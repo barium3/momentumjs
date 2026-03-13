@@ -11,11 +11,9 @@ var m = {};
     } catch (e) {}
   };
 
-  // Core includes
 
   #include "includes/registry.js";
 
-  // Processing-style modules (must be before core.js)
   #include "includes/math.js";
   #include "includes/DATA.js";
   #include "includes/transformation.js";

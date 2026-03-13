@@ -1,13 +1,8 @@
-// ----------------------------------------
-// DATA - p5.js data helper functions
-// 当前目标：
-//   1. 在 AE 表达式端提供与 p5.js 一致的 Data 数组辅助函数与转换函数
-//   2. 尽量保持“原地修改 + 返回结果”的调用语义
-// ----------------------------------------
+// Data helpers.
 
 function _getDataCoreLib() {
   return [
-    "// DATA 库",
+    "// ===== Data Helpers =====",
     "function _dataIsArray(value) {",
     "  return Object.prototype.toString.call(value) === '[object Array]';",
     "}",
@@ -161,28 +156,24 @@ function _getDataCoreLib() {
     "  if (value === null || value === undefined) return '';",
     "  return String(value);",
     "}"
-  ];
+  ].join("\n");
 }
 
-function _getDataOptionalLib(deps) {
-  var lines = [];
-
-  function pushBlock(block) {
-    lines.push.apply(lines, block);
-  }
+function _getDataArrayLib(deps) {
+  var lib = [];
 
   if (deps.append) {
-    pushBlock([
+    lib.push([
       "function append(list, value) {",
       "  if (!_dataIsArray(list)) return [value];",
       "  list.push(value);",
       "  return list;",
       "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.arrayCopy) {
-    pushBlock([
+    lib.push([
       "function arrayCopy(src, srcPosition, dst, dstPosition, length) {",
       "  if (!_dataIsArray(src)) return _dataIsArray(dst) ? dst : [];",
       "  var fromIndex = 0;",
@@ -204,221 +195,50 @@ function _getDataOptionalLib(deps) {
       "  }",
       "  return target;",
       "}"
-    ]);
-  }
-
-  if (deps["boolean"]) {
-    pushBlock([
-      "function _data_boolean(value) {",
-      "  return _dataIsArray(value) ? _dataMapArray(value, _dataBoolSingle) : _dataBoolSingle(value);",
-      "}"
-    ]);
-  }
-
-  if (deps["byte"]) {
-    pushBlock([
-      "function _data_byte(value) {",
-      "  return _dataIsArray(value) ? _dataMapArray(value, _dataByteSingle) : _dataByteSingle(value);",
-      "}"
-    ]);
-  }
-
-  if (deps["char"]) {
-    pushBlock([
-      "function _data_char(value) {",
-      "  return _dataIsArray(value) ? _dataMapArray(value, _dataCharSingle) : _dataCharSingle(value);",
-      "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.concat) {
-    pushBlock([
+    lib.push([
       "function concat(list0, list1) {",
       "  var left = _dataIsArray(list0) ? list0 : [];",
       "  var right = _dataIsArray(list1) ? list1 : [];",
       "  return left.concat(right);",
       "}"
-    ]);
-  }
-
-  if (deps["float"]) {
-    pushBlock([
-      "function _data_float(value) {",
-      "  return _dataIsArray(value) ? _dataMapArray(value, _dataFloatSingle) : _dataFloatSingle(value);",
-      "}"
-    ]);
-  }
-
-  if (deps["hex"]) {
-    pushBlock([
-      "function _data_hex(value, digits) {",
-      "  if (_dataIsArray(value)) {",
-      "    return _dataMapArray(value, function(item) { return _dataHexSingle(item, digits); });",
-      "  }",
-      "  return _dataHexSingle(value, digits);",
-      "}"
-    ]);
-  }
-
-  if (deps["int"]) {
-    pushBlock([
-      "function _data_int(value, radix) {",
-      "  if (_dataIsArray(value)) {",
-      "    return _dataMapArray(value, function(item) { return _dataIntSingle(item, radix); });",
-      "  }",
-      "  return _dataIntSingle(value, radix);",
-      "}"
-    ]);
-  }
-
-  if (deps.join) {
-    pushBlock([
-      "function join(list, separator) {",
-      "  if (!_dataIsArray(list)) return '';",
-      "  return list.join(separator === undefined ? '' : String(separator));",
-      "}"
-    ]);
-  }
-
-  if (deps.match) {
-    pushBlock([
-      "function match(str, reg) {",
-      "  var source = String(str === null || str === undefined ? '' : str);",
-      "  var regex = _dataRegex(reg, false);",
-      "  return source.match(regex);",
-      "}"
-    ]);
-  }
-
-  if (deps.matchAll) {
-    pushBlock([
-      "function matchAll(str, reg) {",
-      "  var source = String(str === null || str === undefined ? '' : str);",
-      "  var regex = _dataRegex(reg, true);",
-      "  var result = [];",
-      "  var found;",
-      "  while ((found = regex.exec(source)) !== null) {",
-      "    result.push(found);",
-      "    if (found[0] === '') regex.lastIndex++;",
-      "  }",
-      "  return result.length ? result : null;",
-      "}"
-    ]);
-  }
-
-  if (deps.nf) {
-    pushBlock([
-      "function nf(value, left, right) {",
-      "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'none'); });",
-      "  return _dataNFSingle(value, left, right, 'none');",
-      "}"
-    ]);
-  }
-
-  if (deps.nfc) {
-    pushBlock([
-      "function nfc(value, right) {",
-      "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFCSingle(item, right); });",
-      "  return _dataNFCSingle(value, right);",
-      "}"
-    ]);
-  }
-
-  if (deps.nfp) {
-    pushBlock([
-      "function nfp(value, left, right) {",
-      "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'plus'); });",
-      "  return _dataNFSingle(value, left, right, 'plus');",
-      "}"
-    ]);
-  }
-
-  if (deps.nfs) {
-    pushBlock([
-      "function nfs(value, left, right) {",
-      "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'space'); });",
-      "  return _dataNFSingle(value, left, right, 'space');",
-      "}"
-    ]);
-  }
-
-  if (deps.print) {
-    pushBlock([
-      "function print() {",
-      "  if (typeof _ctx !== 'undefined' && _ctx && _ctx.globals) {",
-      "    if (!_ctx.globals.__printLogs) _ctx.globals.__printLogs = [];",
-      "    var parts = [];",
-      "    for (var i = 0; i < arguments.length; i++) parts.push(String(arguments[i]));",
-      "    _ctx.globals.__printLogs.push(parts.join(' '));",
-      "  }",
-      "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.reverse) {
-    pushBlock([
+    lib.push([
       "function reverse(list) {",
       "  if (!_dataIsArray(list)) return [];",
       "  return list.reverse();",
       "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.shorten) {
-    pushBlock([
+    lib.push([
       "function shorten(list) {",
       "  if (!_dataIsArray(list)) return [];",
       "  if (list.length > 0) list.pop();",
       "  return list;",
       "}"
-    ]);
-  }
-
-  if (deps.split) {
-    pushBlock([
-      "function split(str, delim) {",
-      "  var source = String(str === null || str === undefined ? '' : str);",
-      "  return source.split(delim === undefined ? '' : String(delim));",
-      "}"
-    ]);
-  }
-
-  if (deps.splitTokens) {
-    pushBlock([
-      "function splitTokens(str, tokens) {",
-      "  var source = String(str === null || str === undefined ? '' : str);",
-      "  var delims = tokens === undefined ? ' \\n\\t\\r\\f' : String(tokens);",
-      "  var esc = delims.replace(/[\\\\\\]\\-\\^]/g, '\\\\$&');",
-      "  var parts = source.split(new RegExp('[' + esc + ']+'));",
-      "  var out = [];",
-      "  for (var i = 0; i < parts.length; i++) {",
-      "    if (parts[i] !== '') out.push(parts[i]);",
-      "  }",
-      "  return out;",
-      "}"
-    ]);
-  }
-
-  if (deps.str) {
-    pushBlock([
-      "function str(value) {",
-      "  return _dataIsArray(value) ? _dataMapArray(value, _dataStrSingle) : _dataStrSingle(value);",
-      "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.shuffle) {
-    pushBlock([
+    lib.push([
       "function shuffle(list, modify) {",
       "  var target = _dataIsArray(list) ? list : [];",
       "  if (!modify) target = _dataCloneArray(target);",
       "  return _dataShuffle(target);",
       "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.sort) {
-    pushBlock([
+    lib.push([
       "function sort(list, count) {",
       "  if (!_dataIsArray(list)) return [];",
       "  var target = _dataCloneArray(list);",
@@ -432,11 +252,11 @@ function _getDataOptionalLib(deps) {
       "  for (var i = 0; i < head.length; i++) target[i] = head[i];",
       "  return target;",
       "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.splice) {
-    pushBlock([
+    lib.push([
       "function splice(list, value, index) {",
       "  if (!_dataIsArray(list)) return [];",
       "  var insertAt = _dataClampIndex(index, list.length);",
@@ -446,11 +266,11 @@ function _getDataOptionalLib(deps) {
       "  list.splice.apply(list, args);",
       "  return list;",
       "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.subset) {
-    pushBlock([
+    lib.push([
       "function subset(list, start, count) {",
       "  if (!_dataIsArray(list)) return [];",
       "  var begin = Math.max(0, Math.floor(Number(start) || 0));",
@@ -458,34 +278,223 @@ function _getDataOptionalLib(deps) {
       "  var size = Math.max(0, Math.floor(Number(count) || 0));",
       "  return list.slice(begin, begin + size);",
       "}"
-    ]);
+    ].join("\n"));
   }
 
-  if (deps.trim) {
-    pushBlock([
-      "function trim(value) {",
-      "  return _dataIsArray(value) ? _dataMapArray(value, _dataTrimSingle) : _dataTrimSingle(value);",
+  return lib.join("\n");
+}
+
+function _getDataConversionLib(deps) {
+  var lib = [];
+
+  if (deps["float"]) {
+    lib.push([
+      "function _data_float(value) {",
+      "  return _dataIsArray(value) ? _dataMapArray(value, _dataFloatSingle) : _dataFloatSingle(value);",
       "}"
-    ]);
+    ].join("\n"));
+  }
+
+  if (deps["hex"]) {
+    lib.push([
+      "function _data_hex(value, digits) {",
+      "  if (_dataIsArray(value)) {",
+      "    return _dataMapArray(value, function(item) { return _dataHexSingle(item, digits); });",
+      "  }",
+      "  return _dataHexSingle(value, digits);",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps["int"]) {
+    lib.push([
+      "function _data_int(value, radix) {",
+      "  if (_dataIsArray(value)) {",
+      "    return _dataMapArray(value, function(item) { return _dataIntSingle(item, radix); });",
+      "  }",
+      "  return _dataIntSingle(value, radix);",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps["boolean"]) {
+    lib.push([
+      "function _data_boolean(value) {",
+      "  return _dataIsArray(value) ? _dataMapArray(value, _dataBoolSingle) : _dataBoolSingle(value);",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps["byte"]) {
+    lib.push([
+      "function _data_byte(value) {",
+      "  return _dataIsArray(value) ? _dataMapArray(value, _dataByteSingle) : _dataByteSingle(value);",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps["char"]) {
+    lib.push([
+      "function _data_char(value) {",
+      "  return _dataIsArray(value) ? _dataMapArray(value, _dataCharSingle) : _dataCharSingle(value);",
+      "}"
+    ].join("\n"));
   }
 
   if (deps.unchar) {
-    pushBlock([
+    lib.push([
       "function _data_unchar(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataUncharSingle) : _dataUncharSingle(value);",
       "}"
-    ]);
+    ].join("\n"));
   }
 
   if (deps.unhex) {
-    pushBlock([
+    lib.push([
       "function _data_unhex(value) {",
       "  return _dataIsArray(value) ? _dataMapArray(value, _dataUnhexSingle) : _dataUnhexSingle(value);",
       "}"
-    ]);
+    ].join("\n"));
   }
 
-  return lines;
+  return lib.join("\n");
+}
+
+function _getDataStringLib(deps) {
+  var lib = [];
+
+  if (deps.join) {
+    lib.push([
+      "function join(list, separator) {",
+      "  if (!_dataIsArray(list)) return '';",
+      "  return list.join(separator === undefined ? '' : String(separator));",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.match) {
+    lib.push([
+      "function match(str, reg) {",
+      "  var source = String(str === null || str === undefined ? '' : str);",
+      "  var regex = _dataRegex(reg, false);",
+      "  return source.match(regex);",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.matchAll) {
+    lib.push([
+      "function matchAll(str, reg) {",
+      "  var source = String(str === null || str === undefined ? '' : str);",
+      "  var regex = _dataRegex(reg, true);",
+      "  var result = [];",
+      "  var found;",
+      "  while ((found = regex.exec(source)) !== null) {",
+      "    result.push(found);",
+      "    if (found[0] === '') regex.lastIndex++;",
+      "  }",
+      "  return result.length ? result : null;",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.split) {
+    lib.push([
+      "function split(str, delim) {",
+      "  var source = String(str === null || str === undefined ? '' : str);",
+      "  return source.split(delim === undefined ? '' : String(delim));",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.splitTokens) {
+    lib.push([
+      "function splitTokens(str, tokens) {",
+      "  var source = String(str === null || str === undefined ? '' : str);",
+      "  var delims = tokens === undefined ? ' \\n\\t\\r\\f' : String(tokens);",
+      "  var esc = delims.replace(/[\\\\\\]\\-\\^]/g, '\\\\$&');",
+      "  var parts = source.split(new RegExp('[' + esc + ']+'));",
+      "  var out = [];",
+      "  for (var i = 0; i < parts.length; i++) {",
+      "    if (parts[i] !== '') out.push(parts[i]);",
+      "  }",
+      "  return out;",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.str) {
+    lib.push([
+      "function str(value) {",
+      "  return _dataIsArray(value) ? _dataMapArray(value, _dataStrSingle) : _dataStrSingle(value);",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.trim) {
+    lib.push([
+      "function trim(value) {",
+      "  return _dataIsArray(value) ? _dataMapArray(value, _dataTrimSingle) : _dataTrimSingle(value);",
+      "}"
+    ].join("\n"));
+  }
+
+  return lib.join("\n");
+}
+
+function _getDataFormatLib(deps) {
+  var lib = [];
+
+  if (deps.nf) {
+    lib.push([
+      "function nf(value, left, right) {",
+      "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'none'); });",
+      "  return _dataNFSingle(value, left, right, 'none');",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.nfc) {
+    lib.push([
+      "function nfc(value, right) {",
+      "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFCSingle(item, right); });",
+      "  return _dataNFCSingle(value, right);",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.nfp) {
+    lib.push([
+      "function nfp(value, left, right) {",
+      "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'plus'); });",
+      "  return _dataNFSingle(value, left, right, 'plus');",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.nfs) {
+    lib.push([
+      "function nfs(value, left, right) {",
+      "  if (_dataIsArray(value)) return _dataMapArray(value, function(item) { return _dataNFSingle(item, left, right, 'space'); });",
+      "  return _dataNFSingle(value, left, right, 'space');",
+      "}"
+    ].join("\n"));
+  }
+
+  if (deps.print) {
+    lib.push([
+      "function print() {",
+      "  if (typeof _ctx !== 'undefined' && _ctx && _ctx.globals) {",
+      "    if (!_ctx.globals.__printLogs) _ctx.globals.__printLogs = [];",
+      "    var parts = [];",
+      "    for (var i = 0; i < arguments.length; i++) parts.push(String(arguments[i]));",
+      "    _ctx.globals.__printLogs.push(parts.join(' '));",
+      "  }",
+      "}"
+    ].join("\n"));
+  }
+
+  return lib.join("\n");
 }
 
 function getDataLib(deps) {
@@ -500,5 +509,16 @@ function getDataLib(deps) {
   }
   if (!needsAny) return "";
 
-  return _getDataCoreLib().concat(_getDataOptionalLib(deps)).join("\n");
+  var lib = [
+    _getDataCoreLib(),
+    _getDataArrayLib(deps),
+    _getDataConversionLib(deps),
+    _getDataStringLib(deps),
+    _getDataFormatLib(deps)
+  ];
+  var out = [];
+  for (var i = 0; i < lib.length; i++) {
+    if (lib[i]) out.push(lib[i]);
+  }
+  return out.join("\n");
 }

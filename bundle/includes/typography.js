@@ -1,21 +1,13 @@
-// ----------------------------------------
-// Typography / Text helpers
-// ----------------------------------------
-// 负责两件事：
-// 1. 在 engine 表达式内维护 p5 风格的文本状态与排版函数
-// 2. 在 AE 侧创建文本图层，并只消费 engine 预计算后的文本结果
+// Typography helpers.
 
-/**
- * 生成文本状态和排版辅助函数。
- */
 function getTextStateLib() {
   return [
-    "// Text state",
+    "// ===== Text State =====",
     "var _textSize = 12;",
     "var _textLeading = _textSize * 1.2;",
     "var _textLeadingExplicit = false;",
     "",
-    "// Font state",
+    "// ===== Font State =====",
     'var _textFontName = "ArialMT";',
     'var _textFontFamily = "Arial";',
     'var _textStyle = "NORMAL";',
@@ -301,9 +293,7 @@ function getTextStateLib() {
   ].join("\n");
 }
 
-/**
- * 生成 engine 侧的 `_text()`，负责把文本排版结果写入 `_shapes`。
- */
+// Text runtime.
 function getTextShapeLib() {
   return [
     "function _text() {",
@@ -320,7 +310,6 @@ function getTextShapeLib() {
     "  var ref = _nextShapeRef('text', callsiteId);",
     "  var slotKey = ref.slotKey;",
     "  ",
-    "  // 统一转成左上角 + 盒子尺寸，供 engine 侧换行/裁剪使用",
     "  var finalX = x;",
     "  var finalY = y;",
     "  var finalWH = null;",
@@ -334,25 +323,21 @@ function getTextShapeLib() {
     "    if (!(h===h)) h = 0;",
     "    var boxW = w, boxH = h;",
     "    if (rectMode === 0) {",
-    "      // CENTER: x,y 是中心，w,h 是宽高",
-    "      finalX = x - w * 0.5;",
+      "      finalX = x - w * 0.5;",
     "      finalY = y - h * 0.5;",
     "      boxW = w; boxH = h;",
     "    } else if (rectMode === 1) {",
-    "      // RADIUS: x,y 是中心，w,h 是半宽/半高",
-    "      finalX = x - w;",
+      "      finalX = x - w;",
     "      finalY = y - h;",
     "      boxW = w * 2; boxH = h * 2;",
     "    } else if (rectMode === 3) {",
-    "      // CORNERS: x,y 是一个角，w,h 是另一个角(x2,y2)",
-    "      var x1 = x, y1 = y, x2 = w, y2 = h;",
+      "      var x1 = x, y1 = y, x2 = w, y2 = h;",
     "      finalX = Math.min(x1, x2);",
     "      finalY = Math.min(y1, y2);",
     "      boxW = Math.abs(x2 - x1);",
     "      boxH = Math.abs(y2 - y1);",
     "    } else {",
-    "      // CORNER(2): x,y 是左上角，w,h 是宽高",
-    "      finalX = x;",
+      "      finalX = x;",
     "      finalY = y;",
     "      boxW = w; boxH = h;",
     "    }",
@@ -427,10 +412,7 @@ function getTextShapeLib() {
   ].join("\n");
 }
 
-/**
- * 文本 Position 表达式。
- * 带 `wh` 时按伪 box 处理；否则保留点文本的 rectMode 语义。
- */
+// Text position expression.
 function _getTextPositionExpr(indexFind) {
   return [
     indexFind,
@@ -467,10 +449,7 @@ function _getTextPositionExpr(indexFind) {
   ].join("\n");
 }
 
-/**
- * 文本 Anchor Point 表达式。
- * 带 `wh` 时对齐到文本内容；否则保留 AE 点文本默认锚点。
- */
+// Text anchor expression.
 function _getAnchorPointExpr(indexFind) {
   return [
     indexFind,
@@ -493,27 +472,11 @@ function _getAnchorPointExpr(indexFind) {
   ].join("\n");
 }
 
-/**
- * 排版/文本相关表达式库（按需注入）
- *
- * 目前职责：
- * - 在使用 text() 或 textSize 或 textLeading 时注入：
- *   - 文本状态 textSize、textLeading 及内部状态变量
- *   - _text 渲染函数（向 _shapes 推入 text 语义对象）
- *
- * 依赖：
- * - 需要在 getShapeLib 之后执行，以便复用其中的 slotKey 绑定辅助函数。
- *
- * @param {Object} deps - 依赖对象：
- *   - deps.text: 是否使用了 text() 形状
- *   - deps.textSize: 是否使用了 textSize 函数
- *   - deps.textLeading: 是否使用了 textLeading 函数
- */
+// Expression runtime.
 function getTypographyLib(deps) {
   if (!deps) deps = {};
-  var parts = [];
+  var lib = [];
 
-  // 只要用到 text() 或相关文本函数，就注入文本状态
   if (
     deps.text ||
     deps.textSize ||
@@ -534,20 +497,17 @@ function getTypographyLib(deps) {
     deps.BOTTOM ||
     deps.BASELINE
   ) {
-    parts.push(getTextStateLib());
+    lib.push(getTextStateLib());
   }
 
-  // 只要用到 text()，就注入 _text 形状渲染函数
   if (deps.text) {
-    parts.push(getTextShapeLib());
+    lib.push(getTextShapeLib());
   }
 
-  return parts.join("\n");
+  return lib.join("\n");
 }
 
-/**
- * 创建 AE 文本图层，并绑定内容、位置和样式表达式。
- */
+// AE text layer.
 function createTextLayerFromContext(index, slotKey, mainCompName) {
   if (typeof engineComp === "undefined" || !engineComp || !engineComp.layers) {
     return null;
@@ -557,44 +517,29 @@ function createTextLayerFromContext(index, slotKey, mainCompName) {
 
   layer.name = "Text_" + index;
 
-  // 统一文字图层的 Fill/Stroke 绘制顺序，避免继承用户上一次手动创建文本的设置。
   try {
     var textGroup = layer.property("Text");
     if (textGroup) {
       var fillStrokeProp = null;
 
-      fillStrokeProp =
-        textGroup.property("Fill & Stroke") ||
-        textGroup.property("Fill and Stroke") ||
-        textGroup.property("填充和描边") ||
-        textGroup.property("ADBE Text Fill and Stroke");
+      fillStrokeProp = textGroup.property("ADBE Text Fill and Stroke");
 
       if (!fillStrokeProp) {
-        var moreOptions =
-          textGroup.property("More Options") ||
-          textGroup.property("更多选项") ||
-          textGroup.property("ADBE Text More Options");
+        var moreOptions = textGroup.property("More Options");
         if (moreOptions) {
-          fillStrokeProp =
-            moreOptions.property("Fill & Stroke") ||
-            moreOptions.property("Fill and Stroke") ||
-            moreOptions.property("填充和描边") ||
-            moreOptions.property("ADBE Text Fill and Stroke");
+          fillStrokeProp = moreOptions.property("Fill & Stroke");
         }
       }
-
       if (fillStrokeProp && fillStrokeProp.setValue) {
         fillStrokeProp.setValue(2);
       }
     }
   } catch (e) {
-    // 老版本或精简版 AE 可能没有该属性，忽略即可。
   }
 
   var textProp = layer.property("Source Text");
   var transform = layer.property("Transform");
 
-  // 清理段落边距，避免继承用户手动创建文本时留下的缩进配置。
   try {
     if (textProp && textProp.value !== undefined) {
       var baseDoc = textProp.value;
@@ -609,12 +554,10 @@ function createTextLayerFromContext(index, slotKey, mainCompName) {
       }
     }
   } catch (e) {
-    // 某些环境不支持这些字段，忽略即可。
   }
 
   var indexFind = _getSlotFindExpr(slotKey, mainCompName);
 
-  // 文本内容和排版已在 engine 侧预计算，这里只消费最终结果。
   textProp.expression = [
     indexFind,
     "var t = shape && shape.text;",
@@ -658,45 +601,19 @@ function createTextLayerFromContext(index, slotKey, mainCompName) {
   transform.property("Anchor Point").expression =
     _getAnchorPointExpr(indexFind);
 
-  // 样式（填充/描边）
   attachTextStyleExpressions(layer, slotKey, mainCompName);
 
   return layer;
 }
 
-/**
- * text 数据结构：
- * {
- *   slotKey,
- *   type: "text",
- *   pos,                // [x, y] 根据 rectMode 计算后的位置（用于 CORNER 模式）
- *   originalPos,        // [x, y] 原始位置（用于 CENTER 模式）
- *   text,               // 文本内容
- *   size,               // 文本字号
- *   wh,                 // 伪文本框尺寸 [width, height]（用于 engine 侧换行/裁剪）
- *   rectMode,           // rectMode 值（0=CENTER, 1=RADIUS, 2=CORNER, 3=CORNERS）
- *   leading,            // 行距
- *   fontFamily,         // 字体 family 名（用于 fontMetrics 查表）
- *   fontName,           // 传给 AE style.setFont 的具体字体名称（推荐 PostScript name）
- *   fontSize,           // 文本字号（与 size 一致，用于 baseline shift 计算）
- *   fontStyle,          // p5 风格样式：NORMAL / BOLD / ITALIC / BOLDITALIC
- *   fauxBold, fauxItalic, // AE 假粗体 / 假斜体开关（由 textStyle 控制）
- *   fillColor, strokeColor,
- *   fillOpacity, strokeOpacity,
- *   strokeWeight
- * }
- *
- * 作为 shape.js 的统一入口函数，被 shapeCreators.text 调用。
- */
+// Text layer entry.
 function createTextFromContext(index, slotKey, mainCompName) {
   if (typeof createTextLayerFromContext === "function") {
     return createTextLayerFromContext(index, slotKey, mainCompName);
   }
 }
 
-/**
- * 为文本图层挂载填充与描边表达式。
- */
+// Text style expressions.
 function attachTextStyleExpressions(layer, slotKey, mainCompName) {
   if (!layer || !layer.property) {
     return;
@@ -721,7 +638,6 @@ function attachTextStyleExpressions(layer, slotKey, mainCompName) {
   try {
     animator.name = "Momentum_ColorStroke";
   } catch (e) {
-    // 部分版本不允许改名，忽略即可。
   }
 
   var selectorsGroup = animator.property("ADBE Text Selectors");

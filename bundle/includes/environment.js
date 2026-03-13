@@ -1,13 +1,7 @@
-// ----------------------------------------
-// Environment Configuration
-// 处理 createCanvas / frameRate / duration 这类工程级配置
-// ----------------------------------------
+// Environment helpers.
 
 /**
- * 从代码中提取画布大小参数
- * 格式: createCanvas(width, height)
- * @param {string} code - 代码
- * @returns {object|null} - {width, height} 或 null
+ * Extract createCanvas() dimensions.
  */
 function extractSizeParams(code) {
   var sizePattern = /createCanvas\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/;
@@ -19,10 +13,7 @@ function extractSizeParams(code) {
 }
 
 /**
- * 从代码中提取 frameRate() 函数参数
- * 格式: frameRate(fps)
- * @param {string} code - 代码
- * @returns {number|null} - 帧率或 null
+ * Extract frameRate().
  */
 function extractFrameRateParam(code) {
   var frameRatePattern = /frameRate\s*\(\s*(\d+)\s*\)/;
@@ -102,10 +93,7 @@ function extractDurationParam(code, fps) {
 }
 
 /**
- * 从代码中提取文件名（用于合成名称）
- * @param {string} code - 代码
- * @param {string} defaultName - 默认名称
- * @returns {string} - 文件名
+ * Extract the filename hint from source.
  */
 function extractFileNameFromCode(code, defaultName) {
   var fileNamePattern = /\/\/\s*@filename[:\s]*([^\n]+)/;
@@ -117,13 +105,7 @@ function extractFileNameFromCode(code, defaultName) {
 }
 
 /**
- * 从代码中提取环境配置
- * @param {string} setupCode - setup 函数代码
- * @param {string} compName - 默认合成名
- * @param {number} defaultWidth - 默认宽度
- * @param {number} defaultHeight - 默认高度
- * @param {number} defaultFrameRate - 默认帧率
- * @returns {object} - 环境配置对象
+ * Build environment config from source.
  */
 function extractEnvironmentConfig(
   setupCode,
@@ -150,10 +132,7 @@ function extractEnvironmentConfig(
 }
 
 /**
- * 移除配置性函数调用（createCanvas, frameRate 等）
- * 这些函数只在 setup 阶段执行，不需要在表达式中出现
- * @param {string} code - 代码
- * @returns {string} - 移除配置函数后的代码
+ * Remove config-only calls from runtime code.
  */
 function removeConfigFunctions(code) {
   code = code.replace(/createCanvas\s*\([^)]*\)\s*;?/g, "");
@@ -162,44 +141,34 @@ function removeConfigFunctions(code) {
   return code;
 }
 
-// ----------------------------------------
-// 环境变量定义（供前端识别）
-// ----------------------------------------
+// Environment variables.
 
 /**
- * 环境变量定义
- * 这些变量会被前端代码分析器识别为全局可用变量
- * 内部实现使用不同的命名（currentFrame, fps 等）
+ * Environment globals.
  */
-var frameCount; // 当前帧号，内部映射到 currentFrame
-var width; // 合成宽度，内部映射到 thisComp.width
-var height; // 合成高度，内部映射到 thisComp.height
+var frameCount;
+var width;
+var height;
 
 /**
- * 获取环境变量到内部变量的映射关系
- * @returns {Object} 映射对象
+ * Return environment variable mappings.
  */
 function getEnvironmentVariableMapping() {
   return {
-    frameCount: "currentFrame", // frameCount 对应内部的 currentFrame
-    width: "width", // width 直接对应
-    height: "height", // height 直接对应
+    frameCount: "currentFrame",
+    width: "width",
+    height: "height"
   };
 }
 
 /**
- * 生成环境变量库代码（按需注入）
- * 与 getMathLib 风格统一，每个常量/变量单独判断
- * @param {Object} deps - 依赖对象 {frameCount: true, width: true, height: true}
- * @returns {string} - 环境变量定义代码
+ * Build environment helpers for expressions.
  */
 function getEnvironmentLib(deps) {
   if (!deps) return "";
 
-  var lines = [];
+  var lib = [];
   var hasAny = false;
-
-  // 检查是否有任何环境变量被使用
   for (var key in deps) {
     if (deps.hasOwnProperty(key) && deps[key]) {
       hasAny = true;
@@ -209,54 +178,36 @@ function getEnvironmentLib(deps) {
 
   if (!hasAny) return "";
 
-  lines.push("// Environment Variables");
-
-  // 常量（width, height）
+  lib.push("// ===== Environment Variables =====");
   if (deps.width) {
-    lines.push("const width = thisComp.width;");
+    lib.push("const width = thisComp.width;");
   }
   if (deps.height) {
-    lines.push("const height = thisComp.height;");
+    lib.push("const height = thisComp.height;");
   }
-
-  // 变量（frameCount）
   if (deps.frameCount) {
-    lines.push("var frameCount = currentFrame;");
+    lib.push("var frameCount = currentFrame;");
   }
-
   if (deps.isLooping) {
-    lines.push("function isLooping() { return _ctx._looping !== false; }");
+    lib.push("function isLooping() { return _ctx._looping !== false; }");
   }
-
   if (deps.loop) {
-    lines.push("function loop() { _ctx._looping = true; }");
+    lib.push("function loop() { _ctx._looping = true; }");
   }
-
   if (deps.noLoop) {
-    lines.push("function noLoop() { _ctx._looping = false; }");
+    lib.push("function noLoop() { _ctx._looping = false; }");
   }
-
   if (deps.redraw) {
-    lines.push("function redraw() { _ctx._redrawRequested = true; }");
+    lib.push("function redraw() { _ctx._redrawRequested = true; }");
   }
 
-  return lines.join("\n");
+  return lib.join("\n");
 }
 
-// ----------------------------------------
-// Echo Effect (拖尾效果)
-// ----------------------------------------
+// Echo effect.
 
 /**
- * 添加Echo效果来模拟draw中的透明background拖尾效果
- * 如果没有background，Decay=1（完全保留之前画面）
- * 如果有透明background，Decay=1-alpha（根据透明度保留）
- * 表达式会动态从engine读取最新的background的alpha值
- * 衰减只会受draw中的background影响，不会受setup中的影响
- * @param {Object} drawLayer - draw图层对象
- * @param {Object} engineComp - 主合成对象
- * @param {string} uniqueMainCompName - 主合成名称（用于表达式引用）
- * @param {number} drawBackgroundCount - draw中background的数量
+ * Add the echo effect used by draw playback.
  */
 function addEchoEffect(
   drawLayer,
@@ -265,21 +216,12 @@ function addEchoEffect(
   drawBackgroundCount
 ) {
   try {
-    // 获取效果容器
     var effectParade = drawLayer.property("ADBE Effect Parade");
 
     if (effectParade) {
-      // 添加 Echo 效果
       var echoEffect = effectParade.addProperty("ADBE Echo");
 
       if (echoEffect) {
-        // 根据属性索引直接访问（属性顺序已确认）：
-        // 1: 残影时间（秒）
-        // 2: 残影数量
-        // 3: 起始强度
-        // 4: 衰减
-        // 5: 残影运算符
-        // 6: 合成选项
         var propCount = echoEffect.numProperties;
         var echoTimeProp = null;
         var numEchoesProp = null;
@@ -287,41 +229,36 @@ function addEchoEffect(
         var decayProp = null;
         var compositeOperatorProp = null;
 
-        // 通过索引直接访问属性
         if (propCount >= 1) {
           try {
-            echoTimeProp = echoEffect.property(1); // 残影时间（秒）
+            echoTimeProp = echoEffect.property(1);
           } catch (e) {}
         }
 
         if (propCount >= 2) {
           try {
-            numEchoesProp = echoEffect.property(2); // 残影数量
+            numEchoesProp = echoEffect.property(2);
           } catch (e) {}
         }
 
         if (propCount >= 3) {
           try {
-            startingIntensityProp = echoEffect.property(3); // 起始强度
+            startingIntensityProp = echoEffect.property(3);
           } catch (e) {}
         }
 
         if (propCount >= 4) {
           try {
-            decayProp = echoEffect.property(4); // 衰减
+            decayProp = echoEffect.property(4);
           } catch (e) {}
         }
 
         if (propCount >= 5) {
           try {
-            compositeOperatorProp = echoEffect.property(5); // 残影运算符
+            compositeOperatorProp = echoEffect.property(5);
           } catch (e) {}
         }
 
-        // 设置 Number of Echoes 表达式：
-        //  - 默认等于 timeToFrames(time)，产生标准残影长度
-        //  - 如果 draw 中存在最后一个 background 且 explicitAlpha === false（没有透明度参数的实心背景），
-        //    则返回 0，彻底关闭残影，从而避免在这种场景下白白计算 Echo
         if (numEchoesProp) {
           var escapedMainCompNameForEcho = uniqueMainCompName.replace(
             /"/g,
@@ -346,8 +283,6 @@ function addEchoEffect(
             "    }",
             "  }",
             "}",
-            "// 如果最后一个 draw 中的 background 没有显式透明度参数（explicitAlpha === false），",
-            "// 说明用户每帧用实心背景清屏，此时完全不需要 Echo 残影，返回 0 减少计算负担。",
             "if (lastDrawBg && lastDrawBg.explicitAlpha === false) {",
             "  0;",
             "} else {",
@@ -359,20 +294,11 @@ function addEchoEffect(
 
         if (startingIntensityProp) {
           try {
-            startingIntensityProp.setValue(1); // Starting Intensity 范围是 0-1，1 表示 100%
-          } catch (e4) {
-            // 静默处理：忽略错误
-          }
+            startingIntensityProp.setValue(1);
+          } catch (e4) {}
         }
 
         if (decayProp) {
-          // 使用表达式从engine读取最新的background的alpha值
-          // Decay = 1 - alpha（alpha是归一化的0-1值）
-          // 如果background的alpha=0.392，则Decay=0.608，模拟透明background的拖尾效果
-          // 如果没有draw中的background（alpha=0），则Decay=1，完全保留之前画面
-          // 如果存在draw中的background且显式指定 alpha=1，则Decay=0，不产生拖尾
-          // 额外规则：如果 draw 中的 background 没有显式透明度参数（explicitAlpha === false），也视为 alpha=1，不产生拖尾
-          // 衰减只会受draw中的background影响，不会受setup中的影响
           var escapedMainCompNameForDecay = uniqueMainCompName.replace(
             /"/g,
             '\\"'
@@ -382,71 +308,45 @@ function addEchoEffect(
             'var raw = comp("' +
               escapedMainCompNameForDecay +
               '").layer("__engine__").text.sourceText;',
+            "// ===== Echo Decay =====",
             "var json = raw && raw.toString ? raw.toString() : raw;",
             "var data = JSON.parse(json);",
             "var backgrounds = data.backgrounds || [];",
-            "var alpha = 0; // 默认值：如果没有background，alpha=0，Decay=1（完全保留）",
-            "// 只考虑draw中的background，忽略setup中的background",
-            "var drawBgCount = " +
-              drawBgCount +
-              "; // draw中background的数量（每帧调用次数）",
+            "var alpha = 0;",
+            "var drawBgCount = " + drawBgCount + ";",
             "if (drawBgCount > 0 && backgrounds.length > 0) {",
-            "  // backgrounds数组顺序：setup在前（如果有，只添加一次），draw在后（每帧都添加）",
-            "  // 由于draw每帧都会添加background，所以draw中的background在数组末尾",
-            "  // 关键：需要找到draw中的最后一个background（当前帧draw中的最后一个background）",
-            "  // 如果draw中有多个background调用，需要取当前帧draw中的最后一个",
-            "  // 解决方案：从后往前查找，取最后drawBgCount个background中的最后一个",
-            "  // 这样可以确保取到的是当前帧draw中的最后一个background，而不是setup中的",
-            "  // 由于draw每帧都执行，最后一个background就是当前帧draw中的最后一个",
-            "  // 但如果draw中有多个background调用，需要取当前帧draw中的最后一个",
-            "  // 从后往前查找，跳过setup中的background（如果有），找到draw中的最后一个",
             "  var lastDrawBg = null;",
-            "  // 从后往前查找，取最后drawBgCount个background中的最后一个",
-            "  // 这样可以确保取到的是当前帧draw中的最后一个background",
             "  var startIndex = Math.max(0, backgrounds.length - drawBgCount);",
             "  for (var i = backgrounds.length - 1; i >= startIndex; i--) {",
             "    if (backgrounds[i] && backgrounds[i].color && backgrounds[i].color.length >= 4) {",
             "      lastDrawBg = backgrounds[i];",
-            "      break; // 找到最后一个draw中的background",
+            "      break;",
             "    }",
             "  }",
             "  if (lastDrawBg) {",
             "    alpha = lastDrawBg.color[3] !== undefined ? lastDrawBg.color[3] : 1;",
-            "    // 如果 draw 中的 background 没有显式透明度参数（explicitAlpha === false），视为 alpha=1，不产生拖尾",
             "    if (lastDrawBg.explicitAlpha === false) {",
             "      alpha = 1;",
             "    }",
             "  }",
             "}",
-            "// Decay = 1 - alpha",
-            "// 如果没有draw中的background（alpha=0），则Decay=1，完全保留之前画面",
-            "// 如果alpha=0.392（透明），则Decay=0.608，产生拖尾效果",
-            "// 如果alpha=1（不透明），则Decay=0，不产生拖尾",
             "1 - alpha"
           ].join("\n");
 
           decayProp.expression = decayExpr;
         }
 
-        // 通过表达式绑定到主合成的一帧时间，主合成参数修改后会自动更新
-        // 转义合成名称中的引号
-        // 注意：Echo Time 使用负值，这样每个残影会显示更早一帧的内容
-        // 这样残影就会"留在经过的地方"，而不是"被拖着走"
         var escapedMainCompName = uniqueMainCompName.replace(/"/g, '\\"');
         var echoTimeExpr = '-comp("' + escapedMainCompName + '").frameDuration';
 
-        // 设置 Echo Time 表达式
         if (echoTimeProp) {
           echoTimeProp.expression = echoTimeExpr;
         }
 
-        // 设置 Composite Operator 为从后向前组合 (Back to Front)
         if (compositeOperatorProp) {
           compositeOperatorProp.setValue(6);
         }
       }
     }
-  } catch (e) {
-    // 静默处理：Echo效果添加失败时忽略
-  }
+  } catch (e) {}
 }

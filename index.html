@@ -31,7 +31,7 @@
         </div>
 
         <div class="toolbar-right">
-          <button id="runEditorScript" class="icon-button">
+          <button id="runEditorScript" class="icon-button" hidden>
             <i class="fas fa-play"></i>
           </button>
         </div>
@@ -58,8 +58,8 @@
     </div>
 
     <!-- Module JS Files -->
-    <script src="js/utils/console.js"></script>
-    <script src="js/utils/preprocessor.js"></script>
+    <script src="js/ui/console/manager.js"></script>
+    <script src="js/ui/editor/runtime/preprocessor.js"></script>
     <!-- Registry (must be loaded before Runtime) -->
     <script src="bundle/includes/registry.js"></script>
     <!-- Compiler -->
@@ -83,9 +83,9 @@
     <script src="js/compiler/rewriters/callsiteInstrumentation.js"></script>
     <script src="js/compiler/rewriters/reservedData.js"></script>
     <script src="js/compiler/compilerPipeline.js"></script>
-    <script src="js/utils/codeExecutor.js"></script>
-    <script src="js/ui/fileTreeUI.js"></script>
-    <script src="js/fileSystem/fileManager.js"></script>
+    <script src="js/ui/editor/runtime/codeExecutor.js"></script>
+    <script src="js/ui/files/fileTree.js"></script>
+    <script src="js/ui/files/fileManager.js"></script>
     <!-- Analyzer: shared -->
     <script src="js/analyzer/shared/ast.js"></script>
     <script src="js/analyzer/shared/registry.js"></script>
@@ -104,8 +104,12 @@
     <script src="js/analyzer/assets/images.js"></script>
     <!-- Analyzer facade -->
     <script src="js/analyzer/index.js"></script>
-    <script src="js/core/editor.js"></script>
-    <script src="js/core/init.js"></script>
-    <script src="js/main.js"></script>
+    <script src="js/ui/editor/features/validation.js"></script>
+    <script src="js/ui/editor/features/autocomplete.js"></script>
+    <script src="js/ui/editor/features/interactions.js"></script>
+    <script src="js/ui/editor/core/manager.js"></script>
+    <script src="js/ui/editor/index.js"></script>
+    <script src="js/ui/app/host.js"></script>
+    <script src="js/ui/app/bootstrap.js"></script>
   </body>
 </html>

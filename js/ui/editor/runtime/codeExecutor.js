@@ -1,4 +1,4 @@
-// Frontend code executor:
+// Frontend execution pipeline:
 // preprocess code, run analyzer passes, then invoke AE with parsed arguments.
 window.codeExecutor = (function () {
   const ERROR_PREFIX = "ERROR:";
@@ -235,9 +235,7 @@ window.codeExecutor = (function () {
     return p5Analyzer;
   }
 
-  // ----------------------------------------
-  // Analyzer passes
-  // ----------------------------------------
+  // Runtime analysis runs in two modes: full-program and setup/draw separation.
   async function fullAnalyzeAsync(code, staticAnalysis, compiledDependencies) {
     const analyzer = getP5Analyzer();
     if (!analyzer) {
@@ -458,7 +456,7 @@ window.codeExecutor = (function () {
         }
         const plan = buildExecutionPlan(compiled);
 
-        // Images must be ready before runtime analysis so preload() can resolve them.
+        // Images must be loaded before runtime analysis so preload() can resolve them.
         const loadedImagesMap = await collectAndLoadImages(
           compiled.code || code,
           compiled,

@@ -1,6 +1,8 @@
 document.addEventListener("DOMContentLoaded", function () {
   window.consoleManager.initConsole();
   window.editorManager.initEditor();
+  window.editorManager.setRunEnabled(false);
+  window.fileManager.initializeDraftSession();
 
   document
     .getElementById("newFile")
@@ -13,6 +15,4 @@ document.addEventListener("DOMContentLoaded", function () {
   document
     .getElementById("runEditorScript")
     .addEventListener("click", window.editorManager.runScript);
-
-  // CSInterface already initialized in init.js
 });

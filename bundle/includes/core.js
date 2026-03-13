@@ -542,7 +542,7 @@ function createEngineLayer(
     globalVarNamesParam
   );
 
-  textProp.expression = expr.join("\n");
+  textProp.expression = expr;
   ctxLayer.shy = true;
   ctxLayer.enabled = false;
   ctxLayer.moveToEnd();
@@ -653,14 +653,20 @@ function buildShapeDepsFromRegistry(shapeCounts) {
   return result;
 }
 
-function pushLib(expr, label, code) {
+function pushLib(parts, label, code) {
   if (!code) return;
-  expr.push("// " + label);
-  expr.push(code);
+  parts.push(["// " + label, code].join("\n"));
 }
 
-function pushEngineState(
-  expr,
+function getCorePreludeLib() {
+  return [
+    "var fps = 1 / thisComp.frameDuration;",
+    "var currentFrame = timeToFrames(time);",
+    "var currentTime = time;"
+  ].join("\n");
+}
+
+function getEngineStateLib(
   fontMetricsParam,
   imageMetadataParam,
   tableDataParam,
@@ -683,29 +689,51 @@ function pushEngineState(
     jsonDataParam && typeof jsonDataParam === "object" ? jsonDataParam : {}
   );
 
-  expr.push("var _ctx = {");
-  expr.push("  version: 1,");
-  expr.push("  fps: fps,");
-  expr.push("  frame: currentFrame,");
-  expr.push("  time: currentTime,");
-  expr.push(
+  return [
+    "var _ctx = {",
+    "  version: 1,",
+    "  fps: fps,",
+    "  frame: currentFrame,",
+    "  time: currentTime,",
     "  env: { frameCount: currentFrame, width: thisComp.width, height: thisComp.height },"
-  );
-  expr.push("  shapes: [],");
-  expr.push("  backgrounds: [],");
-  expr.push("  globals: {},");
-  expr.push("  controllers: [],");
-  expr.push("  _lastComputedFrame: -1,");
-  expr.push("  _looping: true,");
-  expr.push("  _redrawRequested: false");
-  expr.push("};");
-  expr.push("var _fm = " + fontMetricsJson + ";");
-  expr.push("var _imd = " + imageMetadataJson + ";");
-  expr.push("var _td = " + tableDataJson + ";");
-  expr.push("var _jd = " + jsonDataJson + ";");
-  expr.push("var __momentumPhase = 'global';");
-  expr.push("var _shapes = _ctx.shapes;");
-  expr.push("var _backgrounds = _ctx.backgrounds;");
+    ,
+    "  shapes: [],",
+    "  backgrounds: [],",
+    "  globals: {},",
+    "  controllers: [],",
+    "  _lastComputedFrame: -1,",
+    "  _looping: true,",
+    "  _redrawRequested: false",
+    "};",
+    "var _fm = " + fontMetricsJson + ";",
+    "var _imd = " + imageMetadataJson + ";",
+    "var _td = " + tableDataJson + ";",
+    "var _jd = " + jsonDataJson + ";",
+    "var __momentumPhase = 'global';",
+    "var _shapes = _ctx.shapes;",
+    "var _backgrounds = _ctx.backgrounds;"
+  ].join("\n");
+}
+
+function getMainCompGlobalsBridgeLib(mainCompNameParam) {
+  if (!mainCompNameParam) return "";
+  return [
+    "// Main comp globals bridge",
+    "function _getMainCompGlobalVar(varName) {",
+    "  try {",
+    '    var mainComp = comp("' + mainCompNameParam + '");',
+    '    var engineLayer = mainComp.layer("__engine__");',
+    '    var ctxJson = engineLayer.property("Source Text").value;',
+    "    var ctx = JSON.parse(ctxJson);",
+    "    if (ctx.globals && ctx.globals.hasOwnProperty(varName)) {",
+    "      return ctx.globals[varName];",
+    "    }",
+    "    return undefined;",
+    "  } catch (e) {",
+    "    return undefined;",
+    "  }",
+    "}"
+  ].join("\n");
 }
 
 function buildExpression(
@@ -764,49 +792,50 @@ function buildExpression(
     }
   }
 
-  var expr = [];
-  expr.push("var fps = 1 / thisComp.frameDuration;");
-  expr.push("var currentFrame = timeToFrames(time);");
-  expr.push("var currentTime = time;");
+  var parts = [];
+  parts.push(getCorePreludeLib());
   pushLib(
-    expr,
+    parts,
     "Environment",
     hasKeys(envDeps) ? getEnvironmentLib(envDeps) : ""
   );
-  pushEngineState(
-    expr,
-    fontMetricsParam,
-    imageMetadataParam,
-    tableDataParam,
-    jsonDataParam
+  pushLib(
+    parts,
+    "Engine State",
+    getEngineStateLib(
+      fontMetricsParam,
+      imageMetadataParam,
+      tableDataParam,
+      jsonDataParam
+    )
   );
 
   pushLib(
-    expr,
+    parts,
     "Controllers",
     hasKeys(controllerDeps)
       ? getControllerLib(buildDepsFromRegistry(controllerDeps, "controllers"))
       : ""
   );
   pushLib(
-    expr,
+    parts,
     "Math",
     hasKeys(mathDeps)
       ? getMathLib(buildDepsFromRegistry(mathDeps, "math"))
       : ""
   );
   pushLib(
-    expr,
+    parts,
     "Data",
     hasKeys(dataDeps)
       ? getDataLib(buildDepsFromRegistry(dataDeps, "data"))
       : ""
   );
   if (hasShapes) {
-    pushLib(expr, "Transform State", getTransformationLib({ state: true }));
+    pushLib(parts, "Transform State", getTransformationLib({ state: true }));
   }
   pushLib(
-    expr,
+    parts,
     "Transforms",
     hasKeys(transformDeps)
       ? getTransformationLib(buildDepsFromRegistry(transformDeps, "transforms"))
@@ -814,10 +843,10 @@ function buildExpression(
   );
 
   if (hasShapes) {
-    pushLib(expr, "Color State", getColorLib({ state: true }));
+    pushLib(parts, "Color State", getColorLib({ state: true }));
   }
   pushLib(
-    expr,
+    parts,
     "Colors",
     hasKeys(colorDeps)
       ? getColorLib(buildDepsFromRegistry(colorDeps, "colors"))
@@ -826,7 +855,7 @@ function buildExpression(
 
   if (hasShapes) {
     pushLib(
-      expr,
+      parts,
       "Shapes",
       getShapeLib(buildShapeDepsFromRegistry(shapeCounts))
     );
@@ -835,11 +864,11 @@ function buildExpression(
   if (shapeCounts && shapeCounts.image > 0) {
     if (!colorDeps.color) colorDeps = colorDeps || {};
     colorDeps.color = true;
-    pushLib(expr, "Images", getImageLib({ image: true }));
+    pushLib(parts, "Images", getImageLib({ image: true }));
   }
 
   pushLib(
-    expr,
+    parts,
     "IO",
     hasKeys(tableDeps)
       ? getIOLib(buildDepsFromRegistry(tableDeps, "tables"))
@@ -870,35 +899,17 @@ function buildExpression(
       BOTTOM: !!typographyDeps.BOTTOM,
       BASELINE: !!typographyDeps.BASELINE
     };
-    pushLib(expr, "Typography", getTypographyLib(typoDepsForLib));
+    pushLib(parts, "Typography", getTypographyLib(typoDepsForLib));
   }
 
-  if (mainCompNameParam) {
-    expr.push("// Main comp globals bridge");
-    expr.push("function _getMainCompGlobalVar(varName) {");
-    expr.push("  try {");
-    expr.push('    var mainComp = comp("' + mainCompNameParam + '");');
-    expr.push('    var engineLayer = mainComp.layer("__engine__");');
-    expr.push('    var ctxJson = engineLayer.property("Source Text").value;');
-    expr.push("    var ctx = JSON.parse(ctxJson);");
-    expr.push("    if (ctx.globals && ctx.globals.hasOwnProperty(varName)) {");
-    expr.push("      return ctx.globals[varName];");
-    expr.push("    }");
-    expr.push("    return undefined;");
-    expr.push("  } catch (e) {");
-    expr.push("    return undefined;");
-    expr.push("  }");
-    expr.push("}");
-    expr.push("");
-  }
+  pushLib(parts, "Main Comp Bridge", getMainCompGlobalsBridgeLib(mainCompNameParam));
 
   var globalVarNames =
     globalVarNamesParam && isArray(globalVarNamesParam)
       ? globalVarNamesParam
       : [];
 
-  expr.push.apply(
-    expr,
+  parts.push(
     buildUserScope(
       processedGlobal,
       processedPreloadFull,
@@ -908,15 +919,14 @@ function buildExpression(
       hasDraw,
       globalVarNames,
       !!mainCompNameParam
-    )
+    ).join("\n")
   );
 
-  expr.push.apply(
-    expr,
-    buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps)
+  parts.push(
+    buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps).join("\n")
   );
 
-  expr.push(buildPathCreation());
+  parts.push(buildPathCreation());
 
-  return expr;
+  return parts.join("\n\n");
 }

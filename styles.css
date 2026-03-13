@@ -14,6 +14,10 @@ html {
   background-color: #1a1a19;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 #container {
   display: flex;
   flex-direction: column;
@@ -227,7 +231,7 @@ html {
   overflow-y: auto;
   padding: 10px 0 10px 0;
   font-family: monospace;
-  font-size: 11px;
+  font-size: 12px;
   border-top: 1px solid #333332;
   display: flex;
   flex-direction: column;
@@ -250,7 +254,7 @@ html {
 #console-output {
   overflow-y: auto;
   flex: 1;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
   padding-right: 10px;
   padding-left: 10px;
@@ -349,11 +353,45 @@ html {
 }
 
 .console-line.console-error-line {
-  color: #ff6b6b;
+  color: #ff5b4d;
 }
 
 .console-line.console-warn-line {
-  color: #ffd93d;
+  color: #ffff00;
+}
+
+.console-line.console-error-line .console-string,
+.console-line.console-error-line .console-number,
+.console-line.console-error-line .console-boolean,
+.console-line.console-error-line .console-null,
+.console-line.console-error-line .console-undefined,
+.console-line.console-error-line .console-function,
+.console-line.console-error-line .console-object-ref,
+.console-line.console-error-line .console-array,
+.console-line.console-error-line .console-object,
+.console-line.console-error-line .console-expandable-ref,
+.console-line.console-error-line .console-key,
+.console-line.console-error-line .console-more,
+.console-line.console-error-line .console-details-value,
+.console-line.console-error-line .console-details-key {
+  color: inherit;
+}
+
+.console-line.console-warn-line .console-string,
+.console-line.console-warn-line .console-number,
+.console-line.console-warn-line .console-boolean,
+.console-line.console-warn-line .console-null,
+.console-line.console-warn-line .console-undefined,
+.console-line.console-warn-line .console-function,
+.console-line.console-warn-line .console-object-ref,
+.console-line.console-warn-line .console-array,
+.console-line.console-warn-line .console-object,
+.console-line.console-warn-line .console-expandable-ref,
+.console-line.console-warn-line .console-key,
+.console-line.console-warn-line .console-more,
+.console-line.console-warn-line .console-details-value,
+.console-line.console-warn-line .console-details-key {
+  color: inherit;
 }
 
 .console-timestamp {
@@ -363,6 +401,15 @@ html {
 
 .console-message {
   color: #d4d4d4;
+}
+
+.console-line.console-error-line .console-message,
+.console-line.console-warn-line .console-message {
+  color: inherit;
+}
+
+.console-warn {
+  color: #ffff00;
 }
 
 /* Value type colors */

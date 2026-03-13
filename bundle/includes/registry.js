@@ -1,11 +1,5 @@
-/**
- * Momentum 函数注册中心
- *
- * 目标：
- * 1. 单一数据源：函数名、内部映射、签名、返回类型都定义在 entry 上
- * 2. 编译器 / 运行时 / 表达式侧共享同一份结构
- * 3. 对外保留稳定查询接口，便于调用方逐步演进
- */
+// Momentum function registry
+
 
 var functionRegistry = {};
 
@@ -139,7 +133,10 @@ functionRegistry.shapes = {
   }),
   point: entry("_point", {
     baseType: "point",
-    signatures: [signature(2, 2)],
+    signatures: [
+      signature(1, 1),
+      signature(2, 2),
+    ],
   }),
   background: entry("_background", {
     baseType: "background",
@@ -183,8 +180,8 @@ functionRegistry.shapes = {
 functionRegistry.transforms = {
   translate: entry("translate", {
     signatures: [
+      signature(1, 1),
       signature(2, 2),
-      signature(3, 3),
     ],
   }),
   rotate: entry("rotate", {
@@ -194,7 +191,6 @@ functionRegistry.transforms = {
     signatures: [
       signature(1, 1),
       signature(2, 2),
-      signature(3, 3),
     ],
   }),
   push: entry("push"),
@@ -396,7 +392,7 @@ functionRegistry.math = {
   }),
   p5: namespace("p5"),
   createVector: entry("createVector", {
-    signatures: [signature(0, 3)],
+    signatures: [signature(0, 2)],
     returns: "object",
   }),
   DEGREES: constant("DEGREES", { valueType: "string" }),
