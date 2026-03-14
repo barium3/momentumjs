@@ -348,9 +348,7 @@ class P5Runtime {
     if (typeof window.preload !== "function") {
       return;
     }
-    try {
-      window.preload();
-    } catch (preloadErr) {}
+    window.preload();
   }
 
   _setRuntimePhase(phase) {
@@ -483,7 +481,14 @@ class P5Runtime {
 
         const shouldRunSetup = entryPoint === "setup" || entryPoint === null;
         const shouldRunDraw = entryPoint === "draw" || entryPoint === null;
-        self._runPreload();
+        try {
+          self._runPreload();
+        } catch (err) {
+          restoreRuntimeConsole(state);
+          self._cleanupAfterExecution();
+          reject(err);
+          return;
+        }
 
         collectLoadPromises(state)
           .then(function () {
@@ -598,7 +603,15 @@ class P5Runtime {
           reject(err);
           return;
         }
-        self._runPreload();
+        try {
+          self._runPreload();
+        } catch (err) {
+          restoreRuntimeConsole(drawState);
+          restoreRuntimeConsole(setupState);
+          self._cleanupAfterExecution();
+          reject(err);
+          return;
+        }
 
         collectLoadPromises(setupState)
           .then(function () {

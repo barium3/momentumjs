@@ -112,6 +112,10 @@ window.compilerPipeline = (function () {
     );
     addPassDiagnostics(
       ctx,
+      runPass(window.compilerAssetValidationPass, "analyze", [ctx.ast]),
+    );
+    addPassDiagnostics(
+      ctx,
       runPass(window.compilerCallValidationPass, "analyze", [ctx.ast]),
     );
   }

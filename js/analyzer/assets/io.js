@@ -180,8 +180,10 @@ function makeLoadWrapper(options) {
     args[0] = sourceInfo.resolvedUrl;
 
     var resolveLoad = null;
-    var loadPromise = new Promise(function (resolve) {
+    var rejectLoad = null;
+    var loadPromise = new Promise(function (resolve, reject) {
       resolveLoad = resolve;
+      rejectLoad = reject;
     });
 
     function finalizeLoadedValue(value) {
@@ -198,9 +200,12 @@ function makeLoadWrapper(options) {
       return value;
     }
 
-    function finalizeLoadFailure() {
-      if (resolveLoad) {
-        resolveLoad(null);
+    function finalizeLoadFailure(err) {
+      if (relativePath) {
+        delete cache[relativePath];
+      }
+      if (rejectLoad) {
+        rejectLoad(toLoadError(path, sourceInfo, err));
       }
     }
 
@@ -212,7 +217,7 @@ function makeLoadWrapper(options) {
     };
 
     var wrappedError = function (err) {
-      finalizeLoadFailure();
+      finalizeLoadFailure(err);
       if (typeof errorCallback === "function") {
         errorCallback(err);
       }
@@ -239,6 +244,25 @@ function makeLoadWrapper(options) {
     }
     return value;
   };
+}
+
+function toLoadError(path, sourceInfo, err) {
+  if (err instanceof Error) {
+    return err;
+  }
+
+  var label =
+    sourceInfo && sourceInfo.relativePath
+      ? sourceInfo.relativePath
+      : String(path || "");
+  var detail =
+    err && err.message
+      ? err.message
+      : typeof err === "string" && err
+        ? err
+        : "File not found or failed to load";
+
+  return new Error('Failed to load asset "' + label + '": ' + detail);
 }
 
 function createMomentumLoadTableWrapper(p, original, tableLoadTracker) {

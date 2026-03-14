@@ -3,6 +3,7 @@
 class FontAnalyzer {
   constructor() {
     this.fontMap = {};
+    this.fontEntries = [];
     this.reverseMap = {};
     this.metricsCache = {};
     this.textWidthCache = {};
@@ -132,18 +133,61 @@ class FontAnalyzer {
     this.loading = true;
 
     try {
-      const map = await this.loadFontMapFromAE();
-      if (map) {
-        this.fontMap = map;
-        for (const [displayName, psName] of Object.entries(map)) {
-          this.reverseMap[psName] = displayName;
-        }
-        this.isLoaded = true;
-      }
+      this._applyFontCatalog(await this.loadFontCatalogFromAE());
     } catch (e) {
     } finally {
       this.loading = false;
     }
+  }
+
+  _getCepInterface() {
+    return typeof window !== "undefined" ? window.csInterface || null : null;
+  }
+
+  _parseFontEntries(result) {
+    try {
+      const entries = JSON.parse(result || "[]");
+      return Array.isArray(entries) ? entries : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  _applyFontCatalog(entries) {
+    const nextEntries = Array.isArray(entries) ? entries.filter(Boolean) : [];
+    const nextMap = {};
+    const nextReverseMap = {};
+
+    function remember(label, psName) {
+      if (!label || !psName || nextMap[label]) {
+        return;
+      }
+      nextMap[label] = psName;
+    }
+
+    nextEntries.forEach((entry) => {
+      const family = entry.family || "";
+      const style = entry.style || "";
+      const displayName = entry.displayName || family || entry.postScriptName || "";
+      const postScriptName = entry.postScriptName || "";
+
+      remember(displayName, postScriptName);
+      remember(family, postScriptName);
+
+      if (family && style) {
+        remember(`${family} ${style}`, postScriptName);
+        remember(`${family}-${style.replace(/\s+/g, "")}`, postScriptName);
+      }
+
+      if (postScriptName && !nextReverseMap[postScriptName]) {
+        nextReverseMap[postScriptName] = displayName;
+      }
+    });
+
+    this.fontEntries = nextEntries;
+    this.fontMap = nextMap;
+    this.reverseMap = nextReverseMap;
+    this.isLoaded = nextEntries.length > 0 || Object.keys(nextMap).length > 0;
   }
 
   async getFontMetrics(fontName, fontSize) {
@@ -226,66 +270,128 @@ class FontAnalyzer {
     return this.metricsCache[key] || null;
   }
 
-  loadFontMapFromAE() {
+  loadFontCatalogFromAE() {
     return new Promise((resolve) => {
-      // Query the AE font catalog once and cache the displayName -> postScriptName map.
-      const script = `
+      const cep = this._getCepInterface();
+      const fallbackScript = `
         (function() {
           try {
             if (!app.fonts || !app.fonts.allFonts) {
-              return JSON.stringify({});
+              return JSON.stringify([]);
             }
 
-            var map = {};
+            var entries = [];
+            var seen = {};
             var groups = app.fonts.allFonts;
+
+            function remember(entry) {
+              var key = [
+                entry.family || "",
+                entry.style || "",
+                entry.displayName || "",
+                entry.postScriptName || ""
+              ].join("|");
+
+              if (!entry.displayName || !entry.postScriptName || seen[key]) {
+                return;
+              }
+
+              seen[key] = true;
+              entries.push(entry);
+            }
 
             for (var i = 0; i < groups.length; i++) {
               var group = groups[i];
-              if (group && group.length > 0) {
-                var font = group[0];
-                var displayName = font.familyName;
-                var psName = font.postScriptName;
+              if (!group || !group.length) {
+                continue;
+              }
 
-                if (displayName && psName && !map[displayName]) {
-                  map[displayName] = psName;
+              for (var j = 0; j < group.length; j++) {
+                var font = group[j];
+                if (!font) {
+                  continue;
                 }
+
+                var familyName = font.familyName || "";
+                var styleName = font.styleName || "";
+                var postScriptName = font.postScriptName || "";
+                var displayName = familyName;
+
+                if (familyName && styleName) {
+                  displayName = familyName + " " + styleName;
+                } else if (!displayName) {
+                  displayName = postScriptName;
+                }
+
+                remember({
+                  family: familyName,
+                  style: styleName,
+                  displayName: displayName,
+                  postScriptName: postScriptName
+                });
               }
             }
 
-            return JSON.stringify(map);
+            return JSON.stringify(entries);
           } catch (e) {
-            return JSON.stringify({});
+            return JSON.stringify([]);
           }
         })();
       `;
 
-      if (typeof csInterface !== "undefined") {
-        csInterface.evalScript(script, (result) => {
-          try {
-            const map = JSON.parse(result || "{}");
-            resolve(map);
-          } catch (e) {
-            resolve({});
-          }
-        });
+      if (cep && typeof cep.evalScript === "function") {
+        cep.evalScript(
+          "typeof getAvailableFontCatalog === 'function' ? getAvailableFontCatalog() : '[]'",
+          (result) => {
+            const entries = this._parseFontEntries(result);
+            if (entries.length > 0) {
+              resolve(entries);
+              return;
+            }
+
+            cep.evalScript(fallbackScript, (fallbackResult) => {
+              resolve(this._parseFontEntries(fallbackResult));
+            });
+          },
+        );
       } else {
-        resolve({});
+        resolve([]);
       }
     });
   }
 
+  loadFontMapFromAE() {
+    return this.loadFontCatalogFromAE().then((entries) => {
+      const map = {};
+      (entries || []).forEach((entry) => {
+        if (entry && entry.displayName && entry.postScriptName && !map[entry.displayName]) {
+          map[entry.displayName] = entry.postScriptName;
+        }
+      });
+      return map;
+    });
+  }
+
+  async refreshFontMap() {
+    try {
+      this._applyFontCatalog(await this.loadFontCatalogFromAE());
+    } catch (e) {
+    }
+    return { ...this.fontMap };
+  }
+
   async getPostScriptName(displayName) {
     if (!displayName) return null;
+
+    if (this.fontMap[displayName]) {
+      return this.fontMap[displayName];
+    }
 
     const psName = await this.querySingleFont(displayName);
     if (psName) {
       this.fontMap[displayName] = psName;
       this.reverseMap[psName] = displayName;
       return psName;
-    }
-
-    if (this.fontMap[displayName]) {
-      return this.fontMap[displayName];
     }
 
     if (!this.isLoaded && !this.loading) {
@@ -298,6 +404,7 @@ class FontAnalyzer {
 
   querySingleFont(displayName) {
     return new Promise((resolve) => {
+      const cep = this._getCepInterface();
       const escapedName = displayName.replace(/"/g, '\\"');
 
       const script = `
@@ -307,10 +414,30 @@ class FontAnalyzer {
               return null;
             }
 
+            var name = "${escapedName}";
+            var dashIndex = name.lastIndexOf("-");
+            var familyName = name;
             var styles = ["Regular", "Bold", "Italic", "Bold Italic", ""];
 
-            for (var i = 0; i < styles.length; i++) {
-              var fonts = app.fonts.getFontsByFamilyNameAndStyleName("${escapedName}", styles[i]);
+            if (dashIndex > 0) {
+              familyName = name.slice(0, dashIndex);
+              styles.unshift(name.slice(dashIndex + 1).replace(/([a-z])([A-Z])/g, "$1 $2"));
+            } else if (name.indexOf(" ") > 0) {
+              var parts = name.split(/\\s+/);
+              for (var i = parts.length - 1; i > 0; i--) {
+                var testFamily = parts.slice(0, i).join(" ");
+                var testStyle = parts.slice(i).join(" ");
+                if (testStyle) {
+                  var matchedFonts = app.fonts.getFontsByFamilyNameAndStyleName(testFamily, testStyle);
+                  if (matchedFonts && matchedFonts.length > 0) {
+                    return matchedFonts[0].postScriptName;
+                  }
+                }
+              }
+            }
+
+            for (var j = 0; j < styles.length; j++) {
+              var fonts = app.fonts.getFontsByFamilyNameAndStyleName(familyName, styles[j]);
               if (fonts && fonts.length > 0) {
                 return fonts[0].postScriptName;
               }
@@ -323,9 +450,13 @@ class FontAnalyzer {
         })();
       `;
 
-      if (typeof csInterface !== "undefined") {
-        csInterface.evalScript(script, (result) => {
-          resolve(result && result !== "null" ? result : null);
+      if (cep && typeof cep.evalScript === "function") {
+        cep.evalScript(script, (result) => {
+          try {
+            resolve(result && result !== "null" ? result : null);
+          } catch (e) {
+            resolve(null);
+          }
         });
       } else {
         resolve(null);
@@ -339,6 +470,10 @@ class FontAnalyzer {
 
   getAllFonts() {
     return { ...this.fontMap };
+  }
+
+  getAllFontEntries() {
+    return this.fontEntries.map((entry) => ({ ...entry }));
   }
 
   /**

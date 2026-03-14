@@ -17,6 +17,9 @@ Use this as a short prompt for AI code generation.
 - Put external files under `user/`.
 - In code, write file paths relative to `user/`.
 - Do not write paths with a `user/` prefix.
+- Do not use `loadFont(...)`.
+- Fonts must be installed on the computer before use.
+- Use `textFont(...)` for font selection, and prefer names from the editor dropdown/autocomplete list.
 
 ## Render Structure Rule
 
@@ -89,6 +92,7 @@ Do not generate methods such as:
 - Momentum text is rendered through AE text layers.
 - Boxed text uses custom line breaking, not native web text layout.
 - `text(str, x, y, maxWidth, maxHeight)` is affected by `rectMode()`.
+- Do not generate `loadFont(...)` workflows.
 
 ## Minimal Safe Template
 

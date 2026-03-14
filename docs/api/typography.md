@@ -2,6 +2,7 @@
 
 Typography APIs control text content, font settings, layout, alignment, and text measurement.
 
+Because of limitations in the After Effects environment, Momentum does not support loading fonts with `loadFont()`. Fonts must be installed on the computer before they can be used. For the recommended font-selection workflow, see [`textFont()`](#textfontfont-size).
 
 Because of limitations in the After Effects environment, paragraph text does not support a second correction pass against paragraph bounds. For that reason, paragraph-style text in Momentum is implemented as point text with a custom line-breaking mechanism.
 
@@ -162,7 +163,7 @@ textFont(font, size)
 
 ### Parameters
 
-- `font`: Font name or supported font descriptor
+- `font`: Font name string
 - `size`: Optional font size
 
 ### Example
@@ -179,6 +180,7 @@ text("Hello", 20, 30);
 
 ### Notes
 
+- In the editor, `textFont()` shows a font dropdown/autocomplete list inside the first argument. It is recommended to choose fonts from that list instead of typing names manually.
 - If a size is provided, it also updates the current text size.
 - Final font resolution depends on the available font mapping in the application environment.
 

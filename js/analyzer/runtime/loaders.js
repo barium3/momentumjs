@@ -135,7 +135,7 @@ function createMomentumLoadImageWrapper(p, original, imageLoadTracker) {
     };
 
     var img;
-    var loadPromise = new Promise(function (resolve) {
+    var loadPromise = new Promise(function (resolve, reject) {
       img = original.call(
         p,
         sourceInfo.resolvedUrl,
@@ -145,7 +145,10 @@ function createMomentumLoadImageWrapper(p, original, imageLoadTracker) {
         },
         function (err) {
           onFailure(err);
-          resolve(null);
+          if (relativePath) {
+            delete cache[relativePath];
+          }
+          reject(toMomentumImageLoadError(path, sourceInfo, err));
         },
       );
     });
@@ -169,7 +172,26 @@ function waitForTracker(tracker) {
 
   var pending = tracker.pending.slice();
   tracker.pending.length = 0;
-  return Promise.allSettled(pending).then(function () {});
+  return Promise.all(pending).then(function () {});
+}
+
+function toMomentumImageLoadError(path, sourceInfo, err) {
+  if (err instanceof Error) {
+    return err;
+  }
+
+  var label =
+    sourceInfo && sourceInfo.relativePath
+      ? sourceInfo.relativePath
+      : String(path || "");
+  var detail =
+    err && err.message
+      ? err.message
+      : typeof err === "string" && err
+        ? err
+        : "File not found or failed to load";
+
+  return new Error('Failed to load asset "' + label + '": ' + detail);
 }
 
 function waitForMomentumImageLoads(imageLoadTracker) {

@@ -96,6 +96,9 @@ Use literal values instead.
 - Treat `user/` as the root for asset paths.
 - Write paths relative to `user/`, not relative to the sketch file.
 - Do not include the `user/` prefix in code.
+- Do not use `loadFont(...)`. Momentum does not support loading font files at runtime in the AE environment.
+- Fonts must already be installed on the user's computer.
+- When choosing fonts, use `textFont(...)`. In the editor, prefer the `textFont(...)` dropdown/autocomplete list.
 
 Correct:
 
@@ -135,6 +138,8 @@ Do not use browser-only APIs such as:
 - Boxed text is not native AE paragraph text with a second-pass box correction.
 - Momentum uses point text plus custom line breaking when width and height constraints are involved.
 - `text(str, x, y, maxWidth, maxHeight)` is affected by `rectMode()`.
+- Do not generate `loadFont(...)` workflows.
+- Use installed fonts with `textFont(...)`, and prefer names that can be selected from the editor dropdown.
 
 ### Images
 
