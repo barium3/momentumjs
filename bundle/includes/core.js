@@ -296,6 +296,7 @@ pub.runParsed = function (
     } catch (e) {
       deps = null;
     }
+
     var useSeparatedComps =
       setupShapeQueue.length > 0 || drawShapeQueue.length > 0;
 

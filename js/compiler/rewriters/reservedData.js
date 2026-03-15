@@ -23,6 +23,15 @@ window.compilerReservedDataPass = (function () {
           return;
         }
 
+        if (isDebugLogCall(node)) {
+          replacements.push({
+            start: node.start,
+            end: node.end,
+            text: "void 0",
+          });
+          return;
+        }
+
         if (node.callee.type !== "Identifier") {
           return;
         }
@@ -120,6 +129,37 @@ window.compilerReservedDataPass = (function () {
     }
 
     return out;
+  }
+
+  function isDebugLogCall(node) {
+    if (!node || node.type !== "CallExpression" || !node.callee) {
+      return false;
+    }
+
+    if (node.callee.type === "Identifier") {
+      return node.callee.name === "print";
+    }
+
+    if (
+      node.callee.type === "MemberExpression" &&
+      !node.callee.computed &&
+      node.callee.object &&
+      node.callee.object.type === "Identifier" &&
+      node.callee.object.name === "console" &&
+      node.callee.property &&
+      node.callee.property.type === "Identifier"
+    ) {
+      var methodName = node.callee.property.name;
+      return (
+        methodName === "log" ||
+        methodName === "info" ||
+        methodName === "warn" ||
+        methodName === "error" ||
+        methodName === "debug"
+      );
+    }
+
+    return false;
   }
 
   return {

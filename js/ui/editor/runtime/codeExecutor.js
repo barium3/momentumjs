@@ -441,6 +441,53 @@ window.codeExecutor = (function () {
     };
   }
 
+  function hasControllerDependencies(compiled) {
+    const controllers =
+      compiled && compiled.dependencies ? compiled.dependencies.controllers : null;
+
+    if (!controllers || typeof controllers !== "object") {
+      return false;
+    }
+
+    for (const key in controllers) {
+      if (Object.prototype.hasOwnProperty.call(controllers, key) && controllers[key]) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function shouldSkipComposition(compiled, separatedResult) {
+    const hasExplicitCanvas = !!(
+      compiled &&
+      compiled.config &&
+      compiled.config.width !== null &&
+      compiled.config.height !== null
+    );
+
+    if (hasExplicitCanvas) {
+      return false;
+    }
+
+    if (hasControllerDependencies(compiled)) {
+      return false;
+    }
+
+    const setupCount =
+      separatedResult &&
+      Array.isArray(separatedResult.setupRenderLayers)
+        ? separatedResult.setupRenderLayers.length
+        : 0;
+    const drawCount =
+      separatedResult &&
+      Array.isArray(separatedResult.drawRenderLayers)
+        ? separatedResult.drawRenderLayers.length
+        : 0;
+
+    return setupCount === 0 && drawCount === 0;
+  }
+
   function executeUserCode(code, fileName) {
     return new Promise(async (resolve, reject) => {
       try {
@@ -508,6 +555,11 @@ window.codeExecutor = (function () {
               plan.drawCode || "",
             );
           }
+        }
+
+        if (shouldSkipComposition(compiled, separatedResult)) {
+          resolve("No composition created");
+          return;
         }
 
         const payload = makePayload(

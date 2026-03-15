@@ -237,10 +237,28 @@ function getColorFuncLib() {
     "      var parsed = _parseColorString(arg);",
     "      if (parsed) return parsed;",
     "    }",
-    "    v1 = v2 = v3 = arg;",
+    "    if (_colorMode === RGB) {",
+    "      var rgbGrayMax = _colorMax3 === 0 ? 1 : _colorMax3;",
+    "      v1 = arg * (_colorMax1 / rgbGrayMax);",
+    "      v2 = arg * (_colorMax2 / rgbGrayMax);",
+    "      v3 = arg;",
+    "    } else {",
+    "      v1 = 0;",
+    "      v2 = 0;",
+    "      v3 = arg;",
+    "    }",
     "    a = _colorMaxA;",
     "  } else if (len === 2) {",
-    "    v1 = v2 = v3 = arguments[0];",
+    "    if (_colorMode === RGB) {",
+    "      var rgbGrayMax = _colorMax3 === 0 ? 1 : _colorMax3;",
+    "      v1 = arguments[0] * (_colorMax1 / rgbGrayMax);",
+    "      v2 = arguments[0] * (_colorMax2 / rgbGrayMax);",
+    "      v3 = arguments[0];",
+    "    } else {",
+    "      v1 = 0;",
+    "      v2 = 0;",
+    "      v3 = arguments[0];",
+    "    }",
     "    a = arguments[1];",
     "  } else if (len === 3) {",
     "    v1 = arguments[0];",
@@ -328,17 +346,17 @@ function getColorExtractLib() {
 
     "function red(c) {",
     "  if (!c || !c.length) return 0;",
-    "  return c[0] * _colorMax1;",
+    "  return c[0] * (_colorMode === RGB ? _colorMax1 : 255);",
     "}",
 
     "function green(c) {",
     "  if (!c || !c.length) return 0;",
-    "  return c[1] * _colorMax2;",
+    "  return c[1] * (_colorMode === RGB ? _colorMax2 : 255);",
     "}",
 
     "function blue(c) {",
     "  if (!c || !c.length) return 0;",
-    "  return c[2] * _colorMax3;",
+    "  return c[2] * (_colorMode === RGB ? _colorMax3 : 255);",
     "}",
 
     "function alpha(c) {",
@@ -362,13 +380,13 @@ function getColorExtractLib() {
     "function brightness(c) {",
     "  if (!c || !c.length) return 0;",
     "  var hsb = _rgbToHsb(c[0], c[1], c[2]);",
-    "  return _colorMode === RGB ? hsb[2] * 100 : hsb[2] * _colorMax3;",
+    "  return _colorMode === HSB ? hsb[2] * _colorMax3 : hsb[2] * 100;",
     "}",
 
     "function lightness(c) {",
     "  if (!c || !c.length) return 0;",
     "  var hsl = _rgbToHsl(c[0], c[1], c[2]);",
-    "  return _colorMode === RGB ? hsl[2] * 100 : hsl[2] * _colorMax3;",
+    "  return _colorMode === HSL ? hsl[2] * _colorMax3 : hsl[2] * 100;",
     "}"
   ].join("\n");
 }
@@ -512,17 +530,17 @@ function getColorLib(deps) {
   }
   if (deps.red) {
     lib.push(
-      "function red(c) { if (!c || !c.length) return 0; return c[0] * _colorMax1; }"
+      "function red(c) { if (!c || !c.length) return 0; return c[0] * (_colorMode === RGB ? _colorMax1 : 255); }"
     );
   }
   if (deps.green) {
     lib.push(
-      "function green(c) { if (!c || !c.length) return 0; return c[1] * _colorMax2; }"
+      "function green(c) { if (!c || !c.length) return 0; return c[1] * (_colorMode === RGB ? _colorMax2 : 255); }"
     );
   }
   if (deps.blue) {
     lib.push(
-      "function blue(c) { if (!c || !c.length) return 0; return c[2] * _colorMax3; }"
+      "function blue(c) { if (!c || !c.length) return 0; return c[2] * (_colorMode === RGB ? _colorMax3 : 255); }"
     );
   }
   if (deps.alpha) {
@@ -554,7 +572,7 @@ function getColorLib(deps) {
       needsConversion = true;
     }
     lib.push(
-      "function brightness(c) { if (!c || !c.length) return 0; var hsb = _rgbToHsb(c[0], c[1], c[2]); return _colorMode === RGB ? hsb[2] * 100 : hsb[2] * _colorMax3; }"
+      "function brightness(c) { if (!c || !c.length) return 0; var hsb = _rgbToHsb(c[0], c[1], c[2]); return _colorMode === HSB ? hsb[2] * _colorMax3 : hsb[2] * 100; }"
     );
   }
   if (deps.lightness) {
@@ -563,7 +581,7 @@ function getColorLib(deps) {
       needsConversion = true;
     }
     lib.push(
-      "function lightness(c) { if (!c || !c.length) return 0; var hsl = _rgbToHsl(c[0], c[1], c[2]); return _colorMode === RGB ? hsl[2] * 100 : hsl[2] * _colorMax3; }"
+      "function lightness(c) { if (!c || !c.length) return 0; var hsl = _rgbToHsl(c[0], c[1], c[2]); return _colorMode === HSL ? hsl[2] * _colorMax3 : hsl[2] * 100; }"
     );
   }
   if (deps.lerpColor) {

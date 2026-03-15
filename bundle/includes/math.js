@@ -574,6 +574,8 @@ function getMathAngleLib(deps) {
   if (deps.radians) lib.push("var radians = function(deg) { return deg * Math.PI / 180; };");
 
   if (
+    deps.degrees ||
+    deps.radians ||
     deps.sin ||
     deps.cos ||
     deps.tan ||
@@ -581,7 +583,9 @@ function getMathAngleLib(deps) {
     deps.acos ||
     deps.atan ||
     deps.atan2 ||
-    deps.angleMode
+    deps.angleMode ||
+    deps.p5 ||
+    deps.createVector
   ) {
     lib.push(
       "var _toAngleRadians = function(v) {",
