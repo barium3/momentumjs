@@ -547,6 +547,7 @@ window.compilerSemantics = (function () {
     createLoopScope: createLoopScope,
     createScope: createScope,
     forEachChild: forEachChild,
+    isBindingIdentifier: isBindingIdentifier,
     isReferenceIdentifier: isReferenceIdentifier,
     resolveBinding: resolveBinding,
   };

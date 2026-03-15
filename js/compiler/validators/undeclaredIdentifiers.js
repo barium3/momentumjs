@@ -5,19 +5,42 @@ window.compilerUndeclaredIdentifiersPass = (function () {
 
     var semantics = window.compilerSemantics;
     var globals = semantics.buildGlobalBindings();
+    var reservedConstants = getReservedConstants();
     var reported = Object.create(null);
     var globalScope = semantics.createScope(null);
 
     semantics.collectHoistedBindings(program, globalScope);
     semantics.collectLexicalBindings(program.body, globalScope);
-    visitProgram(program, globalScope, globals, diagnostics, reported);
+    visitProgram(
+      program,
+      globalScope,
+      globals,
+      reservedConstants,
+      diagnostics,
+      reported,
+    );
 
     return diagnostics;
   }
 
-  function visitProgram(program, scope, globals, diagnostics, reported) {
+  function visitProgram(
+    program,
+    scope,
+    globals,
+    reservedConstants,
+    diagnostics,
+    reported,
+  ) {
     if (!program || !Array.isArray(program.body)) return;
-    visitStatementList(program.body, scope, scope, globals, diagnostics, reported);
+    visitStatementList(
+      program.body,
+      scope,
+      scope,
+      globals,
+      reservedConstants,
+      diagnostics,
+      reported,
+    );
   }
 
   function visitStatementList(
@@ -25,24 +48,41 @@ window.compilerUndeclaredIdentifiersPass = (function () {
     scope,
     functionScope,
     globals,
+    reservedConstants,
     diagnostics,
     reported,
   ) {
     if (!Array.isArray(statements)) return;
 
     for (var i = 0; i < statements.length; i++) {
-      visitNode(statements[i], scope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        statements[i],
+        scope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
   }
 
-  function visitNode(node, scope, functionScope, globals, diagnostics, reported) {
+  function visitNode(
+    node,
+    scope,
+    functionScope,
+    globals,
+    reservedConstants,
+    diagnostics,
+    reported,
+  ) {
     if (!node || typeof node !== "object") return;
 
     var semantics = window.compilerSemantics;
 
     switch (node.type) {
       case "Program":
-        visitProgram(node, scope, globals, diagnostics, reported);
+        visitProgram(node, scope, globals, reservedConstants, diagnostics, reported);
         return;
       case "BlockStatement": {
         var blockScope = semantics.createScope(scope);
@@ -52,6 +92,7 @@ window.compilerUndeclaredIdentifiersPass = (function () {
           blockScope,
           functionScope,
           globals,
+          reservedConstants,
           diagnostics,
           reported,
         );
@@ -60,22 +101,81 @@ window.compilerUndeclaredIdentifiersPass = (function () {
       case "FunctionDeclaration":
       case "FunctionExpression":
       case "ArrowFunctionExpression":
-        visitFunctionNode(node, scope, globals, diagnostics, reported);
+        visitFunctionNode(
+          node,
+          scope,
+          globals,
+          reservedConstants,
+          diagnostics,
+          reported,
+        );
         return;
       case "CatchClause":
-        visitCatchClause(node, scope, functionScope, globals, diagnostics, reported);
+        visitCatchClause(
+          node,
+          scope,
+          functionScope,
+          globals,
+          reservedConstants,
+          diagnostics,
+          reported,
+        );
         return;
       case "ForStatement":
-        visitForStatement(node, scope, functionScope, globals, diagnostics, reported);
+        visitForStatement(
+          node,
+          scope,
+          functionScope,
+          globals,
+          reservedConstants,
+          diagnostics,
+          reported,
+        );
         return;
       case "ForInStatement":
       case "ForOfStatement":
-        visitForEachStatement(node, scope, functionScope, globals, diagnostics, reported);
+        visitForEachStatement(
+          node,
+          scope,
+          functionScope,
+          globals,
+          reservedConstants,
+          diagnostics,
+          reported,
+        );
         return;
       case "SwitchStatement":
-        visitSwitchStatement(node, scope, functionScope, globals, diagnostics, reported);
+        visitSwitchStatement(
+          node,
+          scope,
+          functionScope,
+          globals,
+          reservedConstants,
+          diagnostics,
+          reported,
+        );
+        return;
+      case "AssignmentExpression":
+        visitAssignmentExpression(
+          node,
+          scope,
+          functionScope,
+          globals,
+          reservedConstants,
+          diagnostics,
+          reported,
+        );
         return;
       case "Identifier":
+        if (semantics.isBindingIdentifier(node)) {
+          reportReservedConstantBinding(
+            node,
+            reservedConstants,
+            diagnostics,
+            reported,
+          );
+          return;
+        }
         if (
           semantics.isReferenceIdentifier(node) &&
           !isKnownIdentifier(node.name, scope, globals)
@@ -85,12 +185,27 @@ window.compilerUndeclaredIdentifiersPass = (function () {
         return;
       default:
         semantics.forEachChild(node, function (child) {
-          visitNode(child, scope, functionScope, globals, diagnostics, reported);
+          visitNode(
+            child,
+            scope,
+            functionScope,
+            globals,
+            reservedConstants,
+            diagnostics,
+            reported,
+          );
         });
     }
   }
 
-  function visitFunctionNode(node, parentScope, globals, diagnostics, reported) {
+  function visitFunctionNode(
+    node,
+    parentScope,
+    globals,
+    reservedConstants,
+    diagnostics,
+    reported,
+  ) {
     var semantics = window.compilerSemantics;
     var functionScope = semantics.createScope(parentScope);
 
@@ -107,7 +222,15 @@ window.compilerUndeclaredIdentifiersPass = (function () {
     }
 
     for (var j = 0; j < (node.params || []).length; j++) {
-      visitNode(node.params[j], functionScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.params[j],
+        functionScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
 
     if (node.body && node.body.type === "BlockStatement") {
@@ -118,23 +241,48 @@ window.compilerUndeclaredIdentifiersPass = (function () {
         functionScope,
         functionScope,
         globals,
+        reservedConstants,
         diagnostics,
         reported,
       );
       return;
     }
 
-    visitNode(node.body, functionScope, functionScope, globals, diagnostics, reported);
+    visitNode(
+      node.body,
+      functionScope,
+      functionScope,
+      globals,
+      reservedConstants,
+      diagnostics,
+      reported,
+    );
   }
 
-  function visitCatchClause(node, scope, functionScope, globals, diagnostics, reported) {
+  function visitCatchClause(
+    node,
+    scope,
+    functionScope,
+    globals,
+    reservedConstants,
+    diagnostics,
+    reported,
+  ) {
     var semantics = window.compilerSemantics;
     var catchScope = semantics.createScope(scope);
 
     semantics.addPatternBindings(catchScope, node.param);
 
     if (node.param) {
-      visitNode(node.param, catchScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.param,
+        catchScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
 
     if (node.body && node.body.type === "BlockStatement") {
@@ -144,58 +292,155 @@ window.compilerUndeclaredIdentifiersPass = (function () {
         catchScope,
         functionScope,
         globals,
+        reservedConstants,
         diagnostics,
         reported,
       );
       return;
     }
 
-    visitNode(node.body, catchScope, functionScope, globals, diagnostics, reported);
+    visitNode(
+      node.body,
+      catchScope,
+      functionScope,
+      globals,
+      reservedConstants,
+      diagnostics,
+      reported,
+    );
   }
 
-  function visitForStatement(node, scope, functionScope, globals, diagnostics, reported) {
+  function visitForStatement(
+    node,
+    scope,
+    functionScope,
+    globals,
+    reservedConstants,
+    diagnostics,
+    reported,
+  ) {
     var semantics = window.compilerSemantics;
     var loopScope = semantics.createLoopScope(scope, node.init);
 
     if (node.init) {
-      visitNode(node.init, loopScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.init,
+        loopScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
 
     if (node.test) {
-      visitNode(node.test, loopScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.test,
+        loopScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
 
     if (node.update) {
-      visitNode(node.update, loopScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.update,
+        loopScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
 
     if (node.body) {
-      visitNode(node.body, loopScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.body,
+        loopScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
   }
 
-  function visitForEachStatement(node, scope, functionScope, globals, diagnostics, reported) {
+  function visitForEachStatement(
+    node,
+    scope,
+    functionScope,
+    globals,
+    reservedConstants,
+    diagnostics,
+    reported,
+  ) {
     var semantics = window.compilerSemantics;
     var loopScope = semantics.createLoopScope(scope, node.left);
 
     if (node.left) {
-      visitNode(node.left, loopScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.left,
+        loopScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
 
     if (node.right) {
-      visitNode(node.right, loopScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.right,
+        loopScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
 
     if (node.body) {
-      visitNode(node.body, loopScope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.body,
+        loopScope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
   }
 
-  function visitSwitchStatement(node, scope, functionScope, globals, diagnostics, reported) {
+  function visitSwitchStatement(
+    node,
+    scope,
+    functionScope,
+    globals,
+    reservedConstants,
+    diagnostics,
+    reported,
+  ) {
     var semantics = window.compilerSemantics;
 
     if (node.discriminant) {
-      visitNode(node.discriminant, scope, functionScope, globals, diagnostics, reported);
+      visitNode(
+        node.discriminant,
+        scope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
     }
 
     var switchScope = semantics.createScope(scope);
@@ -206,7 +451,15 @@ window.compilerUndeclaredIdentifiersPass = (function () {
       if (!switchCase) continue;
 
       if (switchCase.test) {
-        visitNode(switchCase.test, switchScope, functionScope, globals, diagnostics, reported);
+        visitNode(
+          switchCase.test,
+          switchScope,
+          functionScope,
+          globals,
+          reservedConstants,
+          diagnostics,
+          reported,
+        );
       }
 
       visitStatementList(
@@ -214,23 +467,130 @@ window.compilerUndeclaredIdentifiersPass = (function () {
         switchScope,
         functionScope,
         globals,
+        reservedConstants,
         diagnostics,
         reported,
       );
     }
   }
 
+  function visitAssignmentExpression(
+    node,
+    scope,
+    functionScope,
+    globals,
+    reservedConstants,
+    diagnostics,
+    reported,
+  ) {
+    if (
+      node &&
+      node.left &&
+      node.left.type === "Identifier" &&
+      reservedConstants[node.left.name]
+    ) {
+      reportReservedConstantAssignment(node.left, diagnostics, reported);
+    }
+
+    var semantics = window.compilerSemantics;
+    semantics.forEachChild(node, function (child) {
+      visitNode(
+        child,
+        scope,
+        functionScope,
+        globals,
+        reservedConstants,
+        diagnostics,
+        reported,
+      );
+    });
+  }
+
   function isKnownIdentifier(name, scope, globals) {
     return !!window.compilerSemantics.resolveBinding(scope, name) || !!globals[name];
   }
 
+  function getReservedConstants() {
+    var registry = window.compilerSymbols && window.compilerSymbols.getRegistry
+      ? window.compilerSymbols.getRegistry()
+      : null;
+    var reserved = Object.create(null);
+
+    if (!registry) {
+      return reserved;
+    }
+
+    for (var categoryName in registry) {
+      if (!Object.prototype.hasOwnProperty.call(registry, categoryName)) continue;
+      var category = registry[categoryName];
+      if (!category || typeof category !== "object") continue;
+
+      for (var name in category) {
+        if (!Object.prototype.hasOwnProperty.call(category, name)) continue;
+        var item = category[name];
+        if (item && item.type === "constant") {
+          reserved[name] = true;
+        }
+      }
+    }
+
+    return reserved;
+  }
+
+  function reportReservedConstantBinding(node, reservedConstants, diagnostics, reported) {
+    if (!node || !reservedConstants || !reservedConstants[node.name]) {
+      return;
+    }
+
+    reportDiagnostic(
+      "COMPILER_RESERVED_CONSTANT_REDECLARATION",
+      'Identifier "' +
+        node.name +
+        '" is reserved by Momentum and cannot be redeclared',
+      node,
+      diagnostics,
+      reported,
+    );
+  }
+
+  function reportReservedConstantAssignment(node, diagnostics, reported) {
+    reportDiagnostic(
+      "COMPILER_RESERVED_CONSTANT_ASSIGNMENT",
+      'Identifier "' +
+        node.name +
+        '" is a reserved Momentum constant and cannot be assigned',
+      node,
+      diagnostics,
+      reported,
+    );
+  }
+
   function reportUndeclared(node, diagnostics, reported) {
+    reportDiagnostic(
+      "COMPILER_UNDECLARED_IDENTIFIER",
+      'Undeclared variable "' + node.name + '"',
+      node,
+      diagnostics,
+      reported,
+    );
+  }
+
+  function reportDiagnostic(code, message, node, diagnostics, reported) {
+    var loc =
+      node && node.loc && node.loc.start
+        ? {
+            line: node.loc.start.line,
+            column: node.loc.start.column,
+          }
+        : null;
     var key =
-      node.name +
+      code +
       ":" +
-      (node.loc && node.loc.start ? node.loc.start.line : 0) +
+      message +
       ":" +
-      (node.loc && node.loc.start ? node.loc.start.column : 0);
+      (loc ? loc.line : 0) +
+      ":" +
+      (loc ? loc.column : 0);
 
     if (reported[key]) {
       return;
@@ -238,18 +598,12 @@ window.compilerUndeclaredIdentifiersPass = (function () {
     reported[key] = true;
 
     diagnostics.push({
-      code: "COMPILER_UNDECLARED_IDENTIFIER",
-      message: 'Undeclared variable "' + node.name + '"',
+      code: code,
+      message: message,
       severity: "error",
       phase: "semantic",
       fatal: true,
-      loc:
-        node.loc && node.loc.start
-          ? {
-              line: node.loc.start.line,
-              column: node.loc.start.column,
-            }
-          : null,
+      loc: loc,
     });
   }
 
