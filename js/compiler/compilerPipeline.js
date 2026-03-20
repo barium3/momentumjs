@@ -101,6 +101,7 @@ window.compilerPipeline = (function () {
     ctx.config = window.compilerEnvironmentConfigPass.analyze(
       ctx.transformedAst,
       ctx.entries,
+      ctx.globals,
     );
     ctx.dependencies = window.compilerDependencyAnalysisPass.analyze(ctx.transformedAst);
   }

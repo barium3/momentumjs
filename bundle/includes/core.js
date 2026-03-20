@@ -180,6 +180,54 @@ function createEngineTextLayer(
   );
 }
 
+function createSyntheticSetupFunction(source) {
+  var code = String(source || "");
+  if (!code.length) {
+    return "";
+  }
+  return [
+    "function setup() {",
+    code,
+    "}"
+  ].join("\n");
+}
+
+function normalizeGlobalOnlySketch(
+  drawCode,
+  setupCode,
+  globalCode,
+  drawFullCode,
+  setupFullCode
+) {
+  var hasDraw = drawCode && drawCode.length > 0 && !drawCode.match(/^\/\/\s*Empty/);
+  var hasSetup = setupCode && setupCode.length > 0;
+  var hasGlobal = globalCode && globalCode.length > 0;
+
+  if (hasDraw || hasSetup || !hasGlobal) {
+    return {
+      drawCode: drawCode,
+      setupCode: setupCode,
+      globalCode: globalCode,
+      drawFullCode: drawFullCode,
+      setupFullCode: setupFullCode,
+      hasDraw: !!hasDraw,
+      hasSetup: !!hasSetup,
+      hasGlobal: !!hasGlobal
+    };
+  }
+
+  return {
+    drawCode: drawCode,
+    setupCode: globalCode,
+    globalCode: "",
+    drawFullCode: drawFullCode,
+    setupFullCode: createSyntheticSetupFunction(globalCode),
+    hasDraw: false,
+    hasSetup: true,
+    hasGlobal: false
+  };
+}
+
 pub.runParsed = function (
   drawCode,
   setupCode,
@@ -242,6 +290,19 @@ pub.runParsed = function (
     var parsedTableData = collectTableDataFromCode(combinedCodeForTables);
     var parsedJSONData = collectJSONDataFromCode(combinedCodeForTables);
 
+    var normalizedSketch = normalizeGlobalOnlySketch(
+      drawCode,
+      setupCode,
+      globalCode,
+      drawFullCodeArg,
+      setupFullCodeArg
+    );
+    drawCode = normalizedSketch.drawCode;
+    setupCode = normalizedSketch.setupCode;
+    globalCode = normalizedSketch.globalCode;
+    drawFullCodeArg = normalizedSketch.drawFullCode;
+    setupFullCodeArg = normalizedSketch.setupFullCode;
+
     var configCode = String(globalCode || "") + "\n" + String(setupCode || "");
     var env = extractEnvironmentConfig(
       configCode,
@@ -264,20 +325,17 @@ pub.runParsed = function (
       hasSetupOrDrawArg !== undefined && hasSetupOrDrawArg !== null
         ? Boolean(hasSetupOrDrawArg)
         : false;
+    if (normalizedSketch.hasSetup || normalizedSketch.hasDraw) {
+      hasSetupOrDraw = true;
+    }
     setCompBackgroundColor(engineComp, hasSetupOrDraw);
 
     var compFolder = createCompFolder(uniqueMainCompName);
     engineComp.parentFolder = compFolder;
 
-    var hasDraw = drawCode && drawCode.length > 0;
-    var hasSetup = setupCode && setupCode.length > 0;
-    var hasGlobal = globalCode && globalCode.length > 0;
-
-    if (!hasDraw && !hasSetup && hasGlobal) {
-      setupCode = globalCode;
-      globalCode = "";
-      hasSetup = true;
-    }
+    var hasDraw = normalizedSketch.hasDraw;
+    var hasSetup = normalizedSketch.hasSetup;
+    var hasGlobal = normalizedSketch.hasGlobal;
 
     if (!hasDraw) {
       drawCode = "// Empty draw function";
@@ -524,6 +582,12 @@ function createEngineLayer(
   var hasDraw =
     drawCode && drawCode.length > 0 && !drawCode.match(/^\/\/\s*Empty/);
   var hasSetup = setupCode && setupCode.length > 0;
+
+  if (!hasDraw && !hasSetup && processedGlobal) {
+    processedSetupFull = createSyntheticSetupFunction(processedGlobal);
+    processedGlobal = "";
+    hasSetup = true;
+  }
 
   var shapeCounts = shapeCountsParam || countShapesByType(shapeQueue);
   var expr = buildExpression(

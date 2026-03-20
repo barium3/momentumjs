@@ -1,5 +1,5 @@
 window.compilerEnvironmentConfigPass = (function () {
-  function parseDurationArgs(args, frameRate) {
+  function parseDurationArgs(args, frameRate, numericBindings) {
     var items = Array.isArray(args) ? args : [];
     var fps = frameRate || 30;
 
@@ -8,7 +8,7 @@ window.compilerEnvironmentConfigPass = (function () {
     }
 
     if (items.length === 1) {
-      var seconds = window.compilerAst.getStaticNumber(items[0]);
+      var seconds = window.compilerAst.getStaticNumber(items[0], numericBindings);
       if (seconds !== null && seconds > 0) {
         return seconds;
       }
@@ -23,7 +23,7 @@ window.compilerEnvironmentConfigPass = (function () {
 
     var nums = [];
     for (var i = 0; i < items.length && i < 4; i++) {
-      var value = window.compilerAst.getStaticNumber(items[i]);
+      var value = window.compilerAst.getStaticNumber(items[i], numericBindings);
       if (value === null) {
         return null;
       }
@@ -51,20 +51,31 @@ window.compilerEnvironmentConfigPass = (function () {
 
     var parseDuration =
       !options || options.parseDuration !== false;
+    var numericBindings =
+      options && options.numericBindings ? options.numericBindings : null;
     var expr = node.expression;
     var name = window.compilerAst.getCalleeName(expr.callee);
     if (!name) return;
 
     if (name === "createCanvas") {
-      var width = window.compilerAst.getStaticNumber(expr.arguments && expr.arguments[0]);
-      var height = window.compilerAst.getStaticNumber(expr.arguments && expr.arguments[1]);
+      var width = window.compilerAst.getStaticNumber(
+        expr.arguments && expr.arguments[0],
+        numericBindings,
+      );
+      var height = window.compilerAst.getStaticNumber(
+        expr.arguments && expr.arguments[1],
+        numericBindings,
+      );
       if (width !== null) config.width = width;
       if (height !== null) config.height = height;
       return;
     }
 
     if (name === "frameRate") {
-      var fps = window.compilerAst.getStaticNumber(expr.arguments && expr.arguments[0]);
+      var fps = window.compilerAst.getStaticNumber(
+        expr.arguments && expr.arguments[0],
+        numericBindings,
+      );
       if (fps !== null) config.frameRate = fps;
       return;
     }
@@ -73,6 +84,7 @@ window.compilerEnvironmentConfigPass = (function () {
       var parsedDuration = parseDurationArgs(
         expr.arguments,
         config.frameRate || 30,
+        numericBindings,
       );
       if (parsedDuration !== null) {
         config.duration = parsedDuration;
@@ -80,36 +92,50 @@ window.compilerEnvironmentConfigPass = (function () {
     }
   }
 
-  function analyze(program, entries) {
+  function analyze(program, entries, globalBindings) {
     var config = {
       width: null,
       height: null,
       frameRate: null,
       duration: null,
     };
+    var numericBindings =
+      globalBindings && globalBindings.numeric ? globalBindings.numeric : null;
 
     if (!program || !Array.isArray(program.body)) {
       return config;
     }
 
     for (var i = 0; i < program.body.length; i++) {
-      readCallConfig(program.body[i], config, { parseDuration: false });
+      readCallConfig(program.body[i], config, {
+        parseDuration: false,
+        numericBindings: numericBindings,
+      });
     }
 
     var setupEntry = entries && entries.setup ? entries.setup : null;
     if (setupEntry && setupEntry.bodyNode && setupEntry.bodyNode.type === "BlockStatement") {
       for (var j = 0; j < (setupEntry.bodyNode.body || []).length; j++) {
-        readCallConfig(setupEntry.bodyNode.body[j], config, { parseDuration: false });
+        readCallConfig(setupEntry.bodyNode.body[j], config, {
+          parseDuration: false,
+          numericBindings: numericBindings,
+        });
       }
     }
 
     for (var k = 0; k < program.body.length; k++) {
-      readCallConfig(program.body[k], config, { parseDuration: true });
+      readCallConfig(program.body[k], config, {
+        parseDuration: true,
+        numericBindings: numericBindings,
+      });
     }
 
     if (setupEntry && setupEntry.bodyNode && setupEntry.bodyNode.type === "BlockStatement") {
       for (var x = 0; x < (setupEntry.bodyNode.body || []).length; x++) {
-        readCallConfig(setupEntry.bodyNode.body[x], config, { parseDuration: true });
+        readCallConfig(setupEntry.bodyNode.body[x], config, {
+          parseDuration: true,
+          numericBindings: numericBindings,
+        });
       }
     }
 

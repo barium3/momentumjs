@@ -75,7 +75,7 @@ window.compilerGlobalBindingsPass = (function () {
           decl.init &&
           !window.compilerAst.isFunctionLike(decl.init)
         ) {
-          var value = window.compilerAst.getStaticNumber(decl.init);
+          var value = window.compilerAst.getStaticNumber(decl.init, numeric);
           if (value !== null) {
             numeric[bindingNames[0]] = value;
           }

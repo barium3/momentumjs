@@ -112,20 +112,56 @@ window.compilerAst = (function () {
       : null;
   }
 
-  function getStaticNumber(node) {
+  function getStaticNumber(node, numericBindings) {
     if (!node) return null;
 
     if (node.type === "Literal" && typeof node.value === "number") {
       return isNaN(node.value) ? null : node.value;
     }
 
+    if (node.type === "Identifier") {
+      if (
+        numericBindings &&
+        Object.prototype.hasOwnProperty.call(numericBindings, node.name)
+      ) {
+        return numericBindings[node.name];
+      }
+      return null;
+    }
+
     if (
       node.type === "UnaryExpression" &&
       (node.operator === "-" || node.operator === "+")
     ) {
-      var nested = getStaticNumber(node.argument);
+      var nested = getStaticNumber(node.argument, numericBindings);
       if (nested === null) return null;
       return node.operator === "-" ? -nested : nested;
+    }
+
+    if (node.type === "BinaryExpression") {
+      var left = getStaticNumber(node.left, numericBindings);
+      var right = getStaticNumber(node.right, numericBindings);
+
+      if (left === null || right === null) {
+        return null;
+      }
+
+      switch (node.operator) {
+        case "+":
+          return left + right;
+        case "-":
+          return left - right;
+        case "*":
+          return left * right;
+        case "/":
+          return right === 0 ? null : left / right;
+        case "%":
+          return right === 0 ? null : left % right;
+        case "**":
+          return Math.pow(left, right);
+        default:
+          return null;
+      }
     }
 
     return null;

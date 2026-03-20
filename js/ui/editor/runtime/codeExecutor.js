@@ -291,13 +291,58 @@ window.codeExecutor = (function () {
     return defaultName || "Untitled";
   }
 
+  function isNonEmptyCode(code) {
+    return !!(code && String(code).trim());
+  }
+
+  function synthesizeSetupFullCode(code) {
+    const source = code || "";
+    if (!isNonEmptyCode(source)) {
+      return "";
+    }
+    return `function setup() {\n${source}\n}`;
+  }
+
+  function normalizeGlobalOnlyPlan(plan) {
+    const hasSetup = isNonEmptyCode(plan && plan.setupCode);
+    const hasDraw = isNonEmptyCode(plan && plan.drawCode);
+    const hasGlobal = isNonEmptyCode(plan && plan.globalCode);
+
+    if (hasSetup || hasDraw || !hasGlobal) {
+      return plan;
+    }
+
+    const setupCode = plan.globalCode || "";
+    const setupFullCode = synthesizeSetupFullCode(setupCode);
+    const aeSetupCode = plan.aeGlobalCode || setupCode;
+    const aeSetupFullCode = synthesizeSetupFullCode(
+      plan.aeGlobalCode || aeSetupCode,
+    );
+
+    return {
+      ...plan,
+      setupCode: setupCode,
+      setupFullCode: setupFullCode,
+      globalCode: "",
+      aeSetupCode: aeSetupCode,
+      aeSetupFullCode: aeSetupFullCode,
+      aeGlobalCode: "",
+      analysisCode: [
+        "",
+        plan.preloadFullCode || "",
+        setupFullCode,
+        plan.drawFullCode || "",
+      ].join("\n"),
+    };
+  }
+
   function buildExecutionPlan(compiled) {
     const output = compiled && compiled.output ? compiled.output : {};
     const ae = compiled && compiled.ae ? compiled.ae : {};
     const config = compiled && compiled.config ? compiled.config : {};
     const globals = compiled && compiled.globals ? compiled.globals : {};
 
-    return {
+    return normalizeGlobalOnlyPlan({
       drawCode: output.drawCode || "",
       setupCode: output.setupCode || "",
       drawFullCode: output.drawFullCode || "",
@@ -324,7 +369,7 @@ window.codeExecutor = (function () {
         output.setupFullCode || "",
         output.drawFullCode || "",
       ].join("\n"),
-    };
+    });
   }
 
   function getCompiler() {
@@ -404,9 +449,10 @@ window.codeExecutor = (function () {
     const drawNeedsEcho =
       separatedResult && separatedResult.drawNeedsEcho === true;
 
-    const hasSetup = !!(plan.setupCode && plan.setupCode.length > 0);
-    const hasDraw = !!(plan.drawCode && plan.drawCode.length > 0);
-    const hasSetupOrDraw = hasSetup || hasDraw;
+    const hasSetup = isNonEmptyCode(plan.setupCode);
+    const hasDraw = isNonEmptyCode(plan.drawCode);
+    const hasGlobal = isNonEmptyCode(plan.globalCode);
+    const hasSetupOrDraw = hasSetup || hasDraw || hasGlobal;
 
     return {
       args: [
