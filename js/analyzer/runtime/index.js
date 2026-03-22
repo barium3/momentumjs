@@ -250,7 +250,8 @@ class P5Runtime {
   constructor(options = {}) {
     this.options = {
       timeout: options.timeout || 2000,
-      maxLoopCount: options.maxLoopCount || 1000,
+      maxLoopCount:
+        typeof options.maxLoopCount === "number" ? options.maxLoopCount : null,
       canvasContainer: options.canvasContainer || document.body,
     };
 

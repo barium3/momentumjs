@@ -92,7 +92,11 @@ function recordShapeExecution(context, baseType, funcName, callsiteId, extra) {
 
   if (context.loopExecutions) {
     context.loopExecutions.value++;
-    if (context.loopExecutions.value > context.maxLoopCount) {
+    if (
+      typeof context.maxLoopCount === "number" &&
+      context.maxLoopCount >= 0 &&
+      context.loopExecutions.value > context.maxLoopCount
+    ) {
       throw new Error("Loop iteration limit exceeded");
     }
   }
@@ -193,7 +197,11 @@ function createShapeWrapper(options) {
 
     if (context.loopExecutions) {
       context.loopExecutions.value++;
-      if (context.loopExecutions.value > context.maxLoopCount) {
+      if (
+        typeof context.maxLoopCount === "number" &&
+        context.maxLoopCount >= 0 &&
+        context.loopExecutions.value > context.maxLoopCount
+      ) {
         throw new Error("Loop iteration limit exceeded");
       }
     }

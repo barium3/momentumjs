@@ -229,7 +229,6 @@ window.codeExecutor = (function () {
     if (!p5Analyzer && typeof window.P5Analyzer !== "undefined") {
       p5Analyzer = new window.P5Analyzer({
         timeout: 2000,
-        maxLoopCount: 1000,
       });
     }
     return p5Analyzer;

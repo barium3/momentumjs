@@ -84,15 +84,16 @@ function getPreloadRunLib(rewindLabel) {
 
 function getDrawCallLine(hasShapes) {
   if (hasShapes) {
-    return "      __momentumPhase = 'draw'; resetMatrix(); __user__.draw();";
+    return "      _setMomentumRenderTargets('draw'); resetMatrix(); __user__.draw(); _refreshMergedRenderState();";
   }
-  return "      __momentumPhase = 'draw'; __user__.draw();";
+  return "      _setMomentumRenderTargets('draw'); __user__.draw(); _refreshMergedRenderState();";
 }
 
 function getDrawIdleLib(hasShapes) {
   return [
     "  _render = true;",
-    hasShapes ? "  __momentumPhase = 'draw'; resetMatrix();" : "  __momentumPhase = 'draw';"
+    "  _setMomentumRenderTargets();",
+    hasShapes ? "  resetMatrix();" : ""
   ].join("\n");
 }
 
@@ -127,7 +128,7 @@ function getDrawLoopLib(hasShapes, envDeps) {
 function getFrameCachePreludeLib() {
   return [
     "// ===== Frame Cache =====",
-    "var _lastComputedFrame = _ctx._lastComputedFrame || -1;",
+    "var _lastComputedFrame = (typeof _ctx._lastComputedFrame === 'number') ? _ctx._lastComputedFrame : -1;",
     "var _needsFullRecompute = false;",
     "if (currentFrame < _lastComputedFrame) {",
     "  _lastComputedFrame = -1;",
@@ -143,8 +144,9 @@ function getSetupLib(label, hasShapes) {
     label,
     "if (_lastComputedFrame === -1) {",
     "  _render = true;",
-    "  __momentumPhase = 'setup';",
-    "  __user__.setup();"
+    "  _setMomentumRenderTargets('setup');",
+    "  __user__.setup();",
+    "  _refreshMergedRenderState();"
   ];
   if (hasShapes && label === "// Run setup on first execution") {
     block.push("  resetMatrix();");
