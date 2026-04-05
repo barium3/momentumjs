@@ -6,11 +6,10 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
 RELEASE_DIR="${DIST_DIR}/momentumjs"
-LEGACY_RELEASE_DIR="${DIST_DIR}/momentumjs-macos"
 EXTENSION_PAYLOAD_DIR="${RELEASE_DIR}/momentumjs"
 
 if [ "$(uname -s)" != "Darwin" ]; then
-  echo "Error: scripts/package-release-macos.sh currently supports macOS only."
+  echo "Error: scripts/package-release.sh currently supports macOS only."
   exit 1
 fi
 
@@ -31,7 +30,7 @@ if [ -z "${PLUGIN_SOURCE_DIR}" ]; then
   exit 1
 fi
 
-rm -rf "${RELEASE_DIR}" "${LEGACY_RELEASE_DIR}"
+rm -rf "${RELEASE_DIR}"
 mkdir -p "${RELEASE_DIR}"
 mkdir -p "${RELEASE_DIR}/scripts"
 
@@ -59,4 +58,4 @@ chmod +x \
   "${RELEASE_DIR}/scripts/uninstall.sh"
 
 echo "Release directory created at: ${RELEASE_DIR}"
-echo "Suggested archive name: momentumjs-macos.zip"
+echo "Suggested archive name: momentumjs.zip"

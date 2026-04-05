@@ -37,7 +37,7 @@ Momentum currently ships as two pieces on macOS:
 Download a release package that already contains a prebuilt `Momentum.plugin`, then run:
 
 ```bash
-curl -L https://github.com/yourname/momentumjs/releases/download/vX.Y.Z/momentumjs-macos.zip -o momentumjs.zip
+curl -L https://github.com/yourname/momentumjs/releases/download/vX.Y.Z/momentumjs.zip -o momentumjs.zip
 unzip momentumjs.zip
 cd momentumjs
 ./install.sh
@@ -90,7 +90,7 @@ bash scripts/install-dev.sh
 - The install scripts currently support macOS only.
 - `scripts/install.sh` expects a prebuilt `Momentum.plugin` either at the repo root or in `build/Debug/Momentum.plugin`.
 - A plain GitHub source download is not enough for non-developers unless it includes a prebuilt plugin bundle.
-- To prepare a release directory locally, run `bash scripts/package-release-macos.sh`.
+- To prepare a release directory locally, run `bash scripts/package-release.sh`.
 
 ## Example Code
 
