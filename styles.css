@@ -88,6 +88,7 @@ html {
 /* File list styles */
 #file-list {
   width: 220px;
+  flex-shrink: 0;
   overflow-y: auto;
   background-color: transparent;
   user-select: none;
@@ -98,6 +99,16 @@ html {
     Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
   padding: 0;
   border-right: 1px solid #333332;
+}
+
+#main-content.file-list-collapsed #file-list {
+  width: 0;
+  border-right-color: transparent;
+  overflow: hidden;
+}
+
+#main-content.file-list-collapsed #file-list > * {
+  visibility: hidden;
 }
 
 .no-files-hint {
@@ -273,36 +284,60 @@ html {
 
 #toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 4px 8px;
   border-bottom: 1px solid #333332;
   background-color: #1a1a19;
+  min-width: 0;
 }
 
 .toolbar-left {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .toolbar-center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  flex: 1 1 auto;
   color: #cccccc;
   font-size: 13px;
 }
 
 .toolbar-right {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+.run-mode-select {
+  height: 28px;
+  background-color: #1f1f1e;
+  color: #cccccc;
+  border: 1px solid #333332;
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.run-mode-select:hover {
+  border-color: #555554;
 }
 
 #current-filename {
+  display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 300px;
+  max-width: 100%;
+  min-width: 0;
+  text-align: center;
 }
 
 /* Modify icon-button styles */
@@ -314,7 +349,6 @@ html {
   height: 28px;
   border-radius: 4px;
   cursor: pointer;
-  margin: 0 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -343,7 +377,57 @@ html {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
   overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  #current-filename {
+    max-width: 180px;
+  }
+}
+
+@media (max-width: 760px) {
+  #current-filename {
+    max-width: 132px;
+  }
+
+  #console-container {
+    height: 150px;
+  }
+
+  .run-mode-select {
+    padding: 0 6px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 300px) {
+  .toolbar-center {
+    display: none;
+  }
+
+  #toolbar {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 200px) {
+  #renderModeSelect {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  #toolbar {
+    gap: 6px;
+    padding: 4px 6px;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    gap: 4px;
+  }
 }
 
 /* Console Object Expandable Styles */

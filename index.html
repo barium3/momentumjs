@@ -18,6 +18,14 @@
     <div id="container">
       <div id="toolbar">
         <div class="toolbar-left">
+          <button
+            id="toggleFileList"
+            class="icon-button toggle-file-list-button"
+            title="Collapse file list"
+            aria-label="Collapse file list"
+          >
+            <i class="fas fa-bars"></i>
+          </button>
           <button id="newFile" class="icon-button">
             <i class="fas fa-plus"></i>
           </button>
@@ -31,6 +39,10 @@
         </div>
 
         <div class="toolbar-right">
+          <select id="renderModeSelect" class="run-mode-select" title="Render mode">
+            <option value="vector">Vector</option>
+            <option value="bitmap">Bitmap</option>
+          </select>
           <button id="runEditorScript" class="icon-button" hidden>
             <i class="fas fa-play"></i>
           </button>
@@ -38,17 +50,13 @@
       </div>
 
       <div id="main-content">
-        <!-- File Browser -->
         <div id="file-list"></div>
 
-        <!-- Code Area -->
         <div id="right-panel">
-          <!-- Editor -->
           <div id="editor-container">
             <div id="editor"></div>
           </div>
 
-          <!-- Console -->
           <div id="console-container">
             <div id="console-title">Console</div>
             <div id="console-output"></div>
@@ -57,12 +65,9 @@
       </div>
     </div>
 
-    <!-- Module JS Files -->
     <script src="js/ui/console/manager.js"></script>
     <script src="js/ui/editor/runtime/preprocessor.js"></script>
-    <!-- Registry (must be loaded before Runtime) -->
     <script src="bundle/includes/registry.js"></script>
-    <!-- Compiler -->
     <script src="js/compiler/core/ast.js"></script>
     <script src="js/compiler/core/context.js"></script>
     <script src="js/compiler/core/symbols.js"></script>
@@ -84,26 +89,25 @@
     <script src="js/compiler/rewriters/callsiteInstrumentation.js"></script>
     <script src="js/compiler/rewriters/reservedData.js"></script>
     <script src="js/compiler/compilerPipeline.js"></script>
+    <script src="js/plugin/bridge.js"></script>
+    <script src="js/plugin/asset.js"></script>
+    <script src="js/plugin/bitmap.js"></script>
     <script src="js/ui/editor/runtime/codeExecutor.js"></script>
+    <script src="js/ui/editor/runtime/capabilities.js"></script>
     <script src="js/ui/files/fileTree.js"></script>
     <script src="js/ui/files/fileManager.js"></script>
-    <!-- Analyzer: shared -->
     <script src="js/analyzer/shared/ast.js"></script>
     <script src="js/analyzer/shared/registry.js"></script>
-    <!-- Analyzer: static analysis -->
     <script src="js/analyzer/analysis/conditions.js"></script>
     <script src="js/analyzer/analysis/loops.js"></script>
     <script src="js/analyzer/analysis/dependencies.js"></script>
-    <!-- Analyzer: runtime -->
     <script src="js/analyzer/runtime/stubs.js"></script>
     <script src="js/analyzer/runtime/loaders.js"></script>
     <script src="js/analyzer/runtime/expose.js"></script>
     <script src="js/analyzer/runtime/index.js"></script>
-    <!-- Analyzer: assets -->
     <script src="js/analyzer/assets/io.js"></script>
     <script src="js/analyzer/assets/fonts.js"></script>
     <script src="js/analyzer/assets/images.js"></script>
-    <!-- Analyzer facade -->
     <script src="js/analyzer/index.js"></script>
     <script src="js/ui/editor/features/validation.js"></script>
     <script src="js/ui/editor/features/autocomplete.js"></script>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog version="1.2" theme="demo">
+  <book id="bk101" category="fiction">
+    <title>Momentum Guide</title>
+    <author>Ada</author>
+    <price currency="USD">19.5</price>
+  </book>
+  <book id="bk102" category="reference">
+    <title>Vector Notes</title>
+    <author>Lin</author>
+    <price currency="USD">24.0</price>
+  </book>
+</catalog>

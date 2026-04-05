@@ -1,0 +1,1 @@
+let ang;function setup() {  createCanvas(200, 200);  angleMode(DEGREES);  ang = createAngle(45);}function draw() {  background(240);  push();  translate(width / 2, height / 2);  rotate(ang.degrees());  rectMode(CENTER);  fill(30);  noStroke();  rect(0, 0, 100, 20);  pop();}

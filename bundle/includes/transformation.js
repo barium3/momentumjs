@@ -146,21 +146,28 @@ function getApplyTransformLib() {
 // Expression runtime.
 function getTransformationLib(deps) {
   if (!deps) deps = {};
+  function compactJoin(parts, separator) {
+    var compact = [];
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i]) compact.push(parts[i]);
+    }
+    return compact.join(separator);
+  }
   if (deps.state) {
-    return [
+    return compactJoin([
       getTransformStateLib(),
       getApplyTransformLib(),
       getResetMatrixLib()
-    ].filter(Boolean).join("\n\n");
+    ], "\n\n");
   }
 
-  return [
+  return compactJoin([
     getTransformStateLib(),
     (deps.translate || deps.rotate || deps.scale) ? getTransformBasicLib() : "",
     (deps.push || deps.pop) ? getTransformStackLib() : "",
     deps.resetMatrix ? getResetMatrixLib() : "",
     deps.shape ? getApplyTransformLib() : ""
-  ].filter(Boolean).join("\n\n");
+  ], "\n\n");
 }
 
 // Transform function names.

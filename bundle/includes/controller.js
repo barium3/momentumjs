@@ -914,96 +914,6 @@ function getPointControllerLib() {
   ].join("\n");
 }
 
-function getPathControllerLib() {
-  return [
-    "// ===== Path Controller =====",
-    "var __pathControllerIndex = 0;",
-    "function _nextPathControllerName(name) {",
-    "  __pathControllerIndex++;",
-    "  var key = String(name || ('path' + __pathControllerIndex));",
-    "  key = key.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\\d)/, '_$1');",
-    "  return { id: key, maskName: '__path__' + key };",
-    "}",
-    "function _pathClamp01(t) {",
-    "  if (!(t === t)) return 0;",
-    "  if (t < 0) return 0;",
-    "  if (t > 1) return 1;",
-    "  return t;",
-    "}",
-    "function _pathPoint(points, t, closed) {",
-    "  if (!points || points.length === 0) return [0, 0];",
-    "  if (points.length === 1) return points[0];",
-    "  var pts = [];",
-    "  var i;",
-    "  for (i = 0; i < points.length; i++) pts.push(points[i]);",
-    "  if (closed && points.length > 1) pts.push(points[0]);",
-    "  var segLens = [];",
-    "  var total = 0;",
-    "  for (i = 0; i < pts.length - 1; i++) {",
-    "    var dx = pts[i + 1][0] - pts[i][0];",
-    "    var dy = pts[i + 1][1] - pts[i][1];",
-    "    var len = Math.sqrt(dx * dx + dy * dy);",
-    "    segLens.push(len);",
-    "    total += len;",
-    "  }",
-    "  if (!(total > 0)) return pts[0];",
-    "  var target = _pathClamp01(t) * total;",
-    "  var acc = 0;",
-    "  for (i = 0; i < segLens.length; i++) {",
-    "    var seg = segLens[i];",
-    "    if (target <= acc + seg || i === segLens.length - 1) {",
-    "      var local = seg > 0 ? (target - acc) / seg : 0;",
-    "      return [",
-    "        pts[i][0] + (pts[i + 1][0] - pts[i][0]) * local,",
-    "        pts[i][1] + (pts[i + 1][1] - pts[i][1]) * local",
-    "      ];",
-    "    }",
-    "    acc += seg;",
-    "  }",
-    "  return pts[pts.length - 1];",
-    "}",
-    "function _pathTangent(points, t, closed) {",
-    "  var eps = 0.001;",
-    "  var t0 = _pathClamp01(t - eps);",
-    "  var t1 = _pathClamp01(t + eps);",
-    "  var p0 = _pathPoint(points, t0, closed);",
-    "  var p1 = _pathPoint(points, t1, closed);",
-    "  var dx = p1[0] - p0[0];",
-    "  var dy = p1[1] - p0[1];",
-    "  var len = Math.sqrt(dx * dx + dy * dy);",
-    "  if (!(len > 0)) return [1, 0];",
-    "  return [dx / len, dy / len];",
-    "}",
-    "function createPathController(name, points, closed) {",
-    "  var meta = _nextPathControllerName(name);",
-    "  var ctrl = _getControllerLayer();",
-    "  var defPoints = (points && points.length >= 2) ? points : [[thisComp.width/3,thisComp.height/2],[(thisComp.width*2)/3,thisComp.height/2]];",
-    "  var defClosed = (closed === undefined) ? false : !!closed;",
-    "  _pushController('path', { id: meta.id, label: String(name || meta.id), maskName: meta.maskName, points: defPoints, closed: defClosed });",
-    "  function _pathProp() {",
-    "    try { return ctrl ? ctrl.mask(meta.maskName).maskPath : null; } catch (e) { return null; }",
-    "  }",
-    "  return {",
-    "    exists: function() { return !!_pathProp(); },",
-    "    closed: function() { var snap = _readPathSnapshot(_pathProp(), defPoints, defClosed); return snap.closed; },",
-    "    points: function() { var snap = _readPathSnapshot(_pathProp(), defPoints, defClosed); return snap.points; },",
-    "    point: function(t) { var snap = _readPathSnapshot(_pathProp(), defPoints, defClosed); return snap.source && typeof snap.source.pointOnPath === 'function' ? snap.source.pointOnPath(_pathClamp01(t)) : _pathPoint(snap.points, t, snap.closed); },",
-    "    tangent: function(t) { var snap = _readPathSnapshot(_pathProp(), defPoints, defClosed); return snap.source && typeof snap.source.tangentOnPath === 'function' ? snap.source.tangentOnPath(_pathClamp01(t)) : _pathTangent(snap.points, t, snap.closed); },",
-    "    normal: function(t) { var snap = _readPathSnapshot(_pathProp(), defPoints, defClosed); if (snap.source && typeof snap.source.normalOnPath === 'function') return snap.source.normalOnPath(_pathClamp01(t)); var tan = _pathTangent(snap.points, t, snap.closed); return [-tan[1], tan[0]]; },",
-    "    angle: function(t) { var tan = this.tangent(t); return Math.atan2(tan[1], tan[0]) * 180 / Math.PI; },",
-    "    sample: function(count) {",
-    "      var n = Math.max(0, Math.floor(Number(count) || 0));",
-    "      var out = [];",
-    "      if (n <= 0) return out;",
-    "      if (n === 1) { out.push(this.point(0)); return out; }",
-    "      for (var i = 0; i < n; i++) out.push(this.point(i / (n - 1)));",
-    "      return out;",
-    "    }",
-    "  };",
-    "}"
-  ].join("\n");
-}
-
 /**
  * Build the controller expression library.
  * @param {Object} deps
@@ -1019,8 +929,7 @@ function getControllerLib(deps) {
     deps.createColorPicker ||
     deps.createCheckbox ||
     deps.createSelect ||
-    deps.createPoint ||
-    deps.createPathController;
+    deps.createPoint;
 
   if (needControllerLib) {
     lib.push(getControllerHelpersLib());
@@ -1042,9 +951,6 @@ function getControllerLib(deps) {
   }
   if (deps.createPoint) {
     lib.push(getPointControllerLib());
-  }
-  if (deps.createPathController) {
-    lib.push(getPathControllerLib());
   }
 
   return lib.join("\n");

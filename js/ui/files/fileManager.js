@@ -1,6 +1,16 @@
 // File panel state, file I/O, and editor/preview switching.
 window.fileManager = (function () {
   const DRAFT_FILE_NAME = "Untitled.js";
+  const DEFAULT_JS_TEMPLATE = [
+    "function setup() {",
+    "  createCanvas(400, 400);",
+    "}",
+    "",
+    "function draw() {",
+    "  background(220);",
+    "}",
+    "",
+  ].join("\n");
   const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "bmp"];
   const LANGUAGE_BY_EXTENSION = {
     js: "javascript",
@@ -16,6 +26,15 @@ window.fileManager = (function () {
   let isDraftSession = false;
   let recentlyCreatedFile = null;
   let pendingEditorState = null;
+  let isFileListManuallyCollapsed = false;
+  let isResponsiveFileListForcedOpen = false;
+  let isResponsiveNarrowViewport = false;
+  let responsiveLayoutInitialized = false;
+  let responsiveResizeFrame = 0;
+  const FILE_LIST_RETRY_LIMIT = 6;
+  const FILE_LIST_RETRY_DELAY_MS = 250;
+  const FILE_LIST_COLLAPSED_CLASS = "file-list-collapsed";
+  const RESPONSIVE_FILE_LIST_BREAKPOINT = 500;
 
   function escapeFilePathForEval(filePath) {
     return filePath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -32,6 +51,132 @@ window.fileManager = (function () {
 
   function setFileListMessage(html) {
     document.getElementById("file-list").innerHTML = html;
+  }
+
+  function getMainContentElement() {
+    return document.getElementById("main-content");
+  }
+
+  function getFileListToggleButton() {
+    return document.getElementById("toggleFileList");
+  }
+
+  function requestEditorLayout() {
+    window.requestAnimationFrame(function () {
+      if (
+        window.editorManager &&
+        window.editorManager.editor &&
+        typeof window.editorManager.editor.layout === "function"
+      ) {
+        window.editorManager.editor.layout();
+      }
+    });
+  }
+
+  function getViewportWidth() {
+    return Math.max(
+      window.innerWidth || 0,
+      document.documentElement ? document.documentElement.clientWidth : 0,
+    );
+  }
+
+  function isFileListEffectivelyCollapsed() {
+    if (isFileListManuallyCollapsed) {
+      return true;
+    }
+    if (isResponsiveNarrowViewport && !isResponsiveFileListForcedOpen) {
+      return true;
+    }
+    return false;
+  }
+
+  function syncFileListCollapsedUI() {
+    const isCollapsed = isFileListEffectivelyCollapsed();
+    const mainContent = getMainContentElement();
+    if (mainContent) {
+      mainContent.classList.toggle(FILE_LIST_COLLAPSED_CLASS, isCollapsed);
+    }
+
+    const toggleButton = getFileListToggleButton();
+    if (toggleButton) {
+      const nextLabel = isCollapsed ? "Expand file list" : "Collapse file list";
+
+      toggleButton.title = nextLabel;
+      toggleButton.setAttribute("aria-label", nextLabel);
+      toggleButton.setAttribute("aria-pressed", String(!isCollapsed));
+    }
+
+    requestEditorLayout();
+  }
+
+  function toggleFileListCollapsed() {
+    if (isResponsiveNarrowViewport) {
+      const isCollapsed = isFileListEffectivelyCollapsed();
+      isFileListManuallyCollapsed = false;
+      isResponsiveFileListForcedOpen = isCollapsed;
+      syncFileListCollapsedUI();
+      return;
+    }
+
+    isResponsiveFileListForcedOpen = false;
+    isFileListManuallyCollapsed = !isFileListManuallyCollapsed;
+    syncFileListCollapsedUI();
+  }
+
+  function expandFileList() {
+    isFileListManuallyCollapsed = false;
+    if (isResponsiveNarrowViewport) {
+      isResponsiveFileListForcedOpen = true;
+    }
+    syncFileListCollapsedUI();
+  }
+
+  function syncResponsiveLayout() {
+    const nextResponsiveNarrowViewport =
+      getViewportWidth() <= RESPONSIVE_FILE_LIST_BREAKPOINT;
+
+    if (isResponsiveNarrowViewport !== nextResponsiveNarrowViewport) {
+      isResponsiveNarrowViewport = nextResponsiveNarrowViewport;
+      if (!isResponsiveNarrowViewport) {
+        isResponsiveFileListForcedOpen = false;
+      }
+      syncFileListCollapsedUI();
+      return;
+    }
+
+    requestEditorLayout();
+  }
+
+  function scheduleResponsiveLayoutSync() {
+    if (responsiveResizeFrame) {
+      window.cancelAnimationFrame(responsiveResizeFrame);
+    }
+
+    responsiveResizeFrame = window.requestAnimationFrame(function () {
+      responsiveResizeFrame = 0;
+      syncResponsiveLayout();
+    });
+  }
+
+  function initResponsiveLayout() {
+    if (responsiveLayoutInitialized) {
+      return;
+    }
+
+    responsiveLayoutInitialized = true;
+    syncResponsiveLayout();
+    window.addEventListener("resize", scheduleResponsiveLayoutSync);
+  }
+
+  function isEmptyEvalScriptResult(result) {
+    return result === undefined || result === null || result === "";
+  }
+
+  function isEvalScriptFailure(result) {
+    return (
+      typeof result === "string" &&
+      (/^EvalScript error\./i.test(result) || /^Error:/i.test(result))
+    );
   }
 
   function writeEncodedFile(filePath, content, callback) {
@@ -96,52 +241,79 @@ window.fileManager = (function () {
 
   function loadFileList() {
     const folderPath = getUserFolderPath();
-
     const escapedPath = escapeFilePathForEval(folderPath);
-    csInterface.evalScript(
-      'getFileList("' + escapedPath + '")',
-      function (result) {
-        if (!result) {
-          setFileListMessage("<div>Failed to get file list: empty result</div>");
-          return;
-        }
-        try {
-          const response = JSON.parse(result);
-          if (response.error) {
-            setFileListMessage("<div>Error: " + response.error + "</div>");
-          } else if (response.files && response.files.length > 0) {
-            window.fileTree = response.files;
 
-            filterDSStoreFiles(window.fileTree);
+    function renderFileListResult(result) {
+      try {
+        const response = JSON.parse(result);
+        if (response.error) {
+          setFileListMessage("<div>Error: " + response.error + "</div>");
+        } else if (response.files && response.files.length > 0) {
+          window.fileTree = response.files;
 
-            sortFileTree(window.fileTree);
+          filterDSStoreFiles(window.fileTree);
 
-            window.fileTreeUI.renderFileTree(
-              window.fileTree,
-              document.getElementById("file-list"),
-            );
+          sortFileTree(window.fileTree);
 
-            if (recentlyCreatedFile) {
-              highlightFile(recentlyCreatedFile);
-              recentlyCreatedFile = null;
-            } else if (!isDraftSession && currentFilePath) {
-              window.fileTreeUI.selectFile(currentFilePath);
-            }
-          } else {
-            const pathHint = response.folderPath
-              ? " (Path: " + response.folderPath + ")"
-              : "";
-            setFileListMessage(
-              "<div class='no-files-hint'>No files found" +
-              pathHint +
-              "<br><small>Click the New button above to create your first file</small></div>",
-            );
+          window.fileTreeUI.renderFileTree(
+            window.fileTree,
+            document.getElementById("file-list"),
+          );
+
+          if (recentlyCreatedFile) {
+            highlightFile(recentlyCreatedFile);
+            recentlyCreatedFile = null;
+          } else if (!isDraftSession && currentFilePath) {
+            window.fileTreeUI.selectFile(currentFilePath);
           }
-        } catch (error) {
-          setFileListMessage("<div>Error loading file list</div>");
+        } else {
+          const pathHint = response.folderPath
+            ? " (Path: " + response.folderPath + ")"
+            : "";
+          setFileListMessage(
+            "<div class='no-files-hint'>No files found" +
+            pathHint +
+            "<br><small>Click the New button above to create your first file</small></div>",
+          );
         }
-      },
-    );
+      } catch (_error) {
+        setFileListMessage("<div>Error loading file list</div>");
+      }
+    }
+
+    function requestFileList(attempt) {
+      csInterface.evalScript(
+        'getFileList("' + escapedPath + '")',
+        function (result) {
+          if (isEmptyEvalScriptResult(result)) {
+            if (attempt < FILE_LIST_RETRY_LIMIT) {
+              window.setTimeout(function () {
+                requestFileList(attempt + 1);
+              }, FILE_LIST_RETRY_DELAY_MS);
+              return;
+            }
+
+            csInterface.evalScript("typeof getFileList === 'function'", function (availability) {
+              const detail =
+                availability === "true"
+                  ? "empty result after retries"
+                  : "ExtendScript bridge not ready";
+              setFileListMessage("<div>Failed to get file list: " + detail + "</div>");
+            });
+            return;
+          }
+
+          if (isEvalScriptFailure(result)) {
+            setFileListMessage("<div>Failed to get file list: " + result + "</div>");
+            return;
+          }
+
+          renderFileListResult(result);
+        },
+      );
+    }
+
+    requestFileList(0);
   }
 
   function filterDSStoreFiles(items) {
@@ -191,6 +363,14 @@ window.fileManager = (function () {
 
   function resolveEditorLanguage(fileExtension) {
     return LANGUAGE_BY_EXTENSION[fileExtension] || "plaintext";
+  }
+
+  function getDefaultFileContent(fileName) {
+    const fileExtension = getFileExtension(fileName || "");
+    if (fileExtension === "js") {
+      return DEFAULT_JS_TEMPLATE;
+    }
+    return "";
   }
 
   function applyEditorContent(content, language) {
@@ -296,7 +476,10 @@ window.fileManager = (function () {
   function initializeDraftSession(options) {
     const sessionOptions = options || {};
     const fileName = sessionOptions.fileName || DRAFT_FILE_NAME;
-    const content = sessionOptions.content || "";
+    const content =
+      sessionOptions.content !== undefined
+        ? sessionOptions.content
+        : getDefaultFileContent(fileName);
 
     setDraftSessionState(fileName);
     clearSelectedFiles();
@@ -363,6 +546,7 @@ window.fileManager = (function () {
   }
 
   function saveDraftAsFile() {
+    expandFileList();
     window.fileTreeUI.showNewFileInput(function (fileName) {
       if (!fileName) {
         return;
@@ -409,6 +593,7 @@ window.fileManager = (function () {
   }
 
   function createNewFile() {
+    expandFileList();
     window.fileTreeUI.showNewFileInput(function (fileName) {
       if (!fileName) {
         return;
@@ -421,10 +606,11 @@ window.fileManager = (function () {
       }
 
       const newFilePath = getUserFolderPath() + "/" + fileName;
+      const content = getDefaultFileContent(fileName);
 
       recentlyCreatedFile = newFilePath;
 
-      writeEncodedFile(newFilePath, "", function (result) {
+      writeEncodedFile(newFilePath, content, function (result) {
         if (result.startsWith("Error:")) {
           console.error("Error creating file:", result);
           recentlyCreatedFile = null;
@@ -454,5 +640,8 @@ window.fileManager = (function () {
     createNewFile: createNewFile,
     openFile: openFile,
     getCurrentFileName: getCurrentFileName,
+    expandFileList: expandFileList,
+    initResponsiveLayout: initResponsiveLayout,
+    toggleFileListCollapsed: toggleFileListCollapsed,
   };
 })();

@@ -7,6 +7,9 @@ window.compilerAssetCollectionPass = (function () {
       fonts: [],
       tables: [],
       json: [],
+      strings: [],
+      bytes: [],
+      xml: [],
       hasText: false,
     };
   }
@@ -36,7 +39,10 @@ window.compilerAssetCollectionPass = (function () {
         funcName !== "loadImage" &&
         funcName !== "textFont" &&
         funcName !== "loadTable" &&
-        funcName !== "loadJSON"
+        funcName !== "loadJSON" &&
+        funcName !== "loadStrings" &&
+        funcName !== "loadBytes" &&
+        funcName !== "loadXML"
       ) {
         return;
       }
@@ -54,6 +60,12 @@ window.compilerAssetCollectionPass = (function () {
         pushUnique(assets.tables, value);
       } else if (funcName === "loadJSON") {
         pushUnique(assets.json, value);
+      } else if (funcName === "loadStrings") {
+        pushUnique(assets.strings, value);
+      } else if (funcName === "loadBytes") {
+        pushUnique(assets.bytes, value);
+      } else if (funcName === "loadXML") {
+        pushUnique(assets.xml, value);
       }
     });
 

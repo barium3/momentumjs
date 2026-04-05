@@ -1,0 +1,4 @@
+wind in the timeline
+pixels on the floor
+runtime keeps the latest frame
+and draws a little more

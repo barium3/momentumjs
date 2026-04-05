@@ -1,5 +1,13 @@
 // Structure helpers.
 
+function _compactTruthy(items) {
+  var compact = [];
+  for (var i = 0; i < items.length; i++) {
+    if (items[i]) compact.push(items[i]);
+  }
+  return compact;
+}
+
 function getUserCodeLib(label, source) {
   if (!source) return "";
   return [
@@ -61,7 +69,7 @@ function buildUserScope(
   globalVarNames,
   pullFromMainComp
 ) {
-  return [
+  return _compactTruthy([
     getUserCodeLib("globals", processedGlobal),
     getUserCodeLib("preload", processedPreloadFull),
     getUserCodeLib("setup", processedSetupFull),
@@ -69,7 +77,7 @@ function buildUserScope(
     getSetupSeedWrapperLib(hasSetup, processedSetupFull),
     getMainCompGlobalsLib(globalVarNames, pullFromMainComp),
     getUserRegistryLib()
-  ].filter(Boolean);
+  ]);
 }
 
 function getPreloadRunLib(rewindLabel) {
@@ -169,27 +177,27 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
   var expr = [getFrameCachePreludeLib()];
 
   if (hasDraw && hasSetup) {
-    return expr.concat([
+    return _compactTruthy(expr.concat([
       getPreloadRunLib(" or timeline rewind"),
       getSetupLib("// Run setup on first execution or timeline rewind"),
       getDrawLoopLib(hasShapes, envDeps)
-    ]).filter(Boolean);
+    ]));
   } else if (hasDraw) {
-    return expr.concat([
+    return _compactTruthy(expr.concat([
       getPreloadRunLib(" or timeline rewind"),
       getDrawLoopLib(hasShapes, envDeps)
-    ]).filter(Boolean);
+    ]));
   } else if (hasSetup) {
-    return expr.concat([
+    return _compactTruthy(expr.concat([
       getPreloadRunLib(""),
       getSetupLib("// Run setup on first execution", hasShapes),
       getFrameCacheUpdateLib("// Update cached frame even without draw")
-    ]).filter(Boolean);
+    ]));
   }
 
-  return expr.concat([
+  return _compactTruthy(expr.concat([
     getFrameCacheUpdateLib("// No user code; only update cached frame")
-  ]).filter(Boolean);
+  ]));
 }
 
 // Context serialization.

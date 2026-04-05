@@ -38,6 +38,35 @@
       markStub("createPoint");
     }
 
+    if (typeof window.createSlider === "undefined") {
+      window.createSlider = function (min, max, value, step) {
+        var sliderMin = min === undefined ? 0 : Number(min);
+        var sliderMax = max === undefined ? 100 : Number(max);
+        var sliderValue = value === undefined ? sliderMin : Number(value);
+        var sliderStep = step === undefined ? 0 : Number(step);
+
+        function clampAndSnap(nextValue) {
+          var mapped = Number(nextValue);
+          if (!(mapped === mapped)) mapped = sliderValue;
+          if (mapped < sliderMin) mapped = sliderMin;
+          if (mapped > sliderMax) mapped = sliderMax;
+          if (sliderStep > 0) {
+            mapped = Math.floor((mapped - sliderMin) / sliderStep) * sliderStep + sliderMin;
+            if (mapped < sliderMin) mapped = sliderMin;
+            if (mapped > sliderMax) mapped = sliderMax;
+          }
+          return mapped;
+        }
+
+        return {
+          value: function () {
+            return clampAndSnap(sliderValue);
+          },
+        };
+      };
+      markStub("createSlider");
+    }
+
     if (typeof window.createAngle === "undefined") {
       window.createAngle = function (defaultDegrees) {
         var deg = defaultDegrees === undefined ? 0 : defaultDegrees;
@@ -57,104 +86,154 @@
       markStub("createAngle");
     }
 
-    if (typeof window.createPathController === "undefined") {
-      window.createPathController = function (name, points, closed) {
-        var defPoints =
-          points && points.length >= 2
-            ? points
-            : [
-                [window.width / 3 || 320, window.height / 2 || 240],
-                [((window.width || 960) * 2) / 3, window.height / 2 || 240],
-              ];
-        var defClosed = closed === undefined ? false : !!closed;
-
-        function clamp01(t) {
-          if (!(t === t)) return 0;
-          if (t < 0) return 0;
-          if (t > 1) return 1;
-          return t;
-        }
-
-        function pointAt(t) {
-          var pts = defPoints.slice();
-          if (pts.length === 0) return [0, 0];
-          if (pts.length === 1) return pts[0];
-          if (defClosed && pts.length > 1) pts.push(pts[0]);
-
-          var segLens = [];
-          var total = 0;
-          for (var i = 0; i < pts.length - 1; i++) {
-            var dx = pts[i + 1][0] - pts[i][0];
-            var dy = pts[i + 1][1] - pts[i][1];
-            var len = Math.sqrt(dx * dx + dy * dy);
-            segLens.push(len);
-            total += len;
-          }
-          if (!(total > 0)) return pts[0];
-
-          var target = clamp01(t) * total;
-          var acc = 0;
-          for (var j = 0; j < segLens.length; j++) {
-            var seg = segLens[j];
-            if (target <= acc + seg || j === segLens.length - 1) {
-              var local = seg > 0 ? (target - acc) / seg : 0;
-              return [
-                pts[j][0] + (pts[j + 1][0] - pts[j][0]) * local,
-                pts[j][1] + (pts[j + 1][1] - pts[j][1]) * local,
-              ];
+    if (typeof window.createColorPicker === "undefined") {
+      window.createColorPicker = function (r, g, b, a) {
+        function normalizeColorArray(input) {
+          if (typeof input === "string") {
+            var text = input.replace(/^#/, "");
+            if (text.length === 3 || text.length === 4) {
+              var expanded = "";
+              for (var ti = 0; ti < text.length; ti += 1) {
+                expanded += text.charAt(ti) + text.charAt(ti);
+              }
+              text = expanded;
             }
-            acc += seg;
+            if (text.length === 6 || text.length === 8) {
+              var red = parseInt(text.substring(0, 2), 16);
+              var green = parseInt(text.substring(2, 4), 16);
+              var blue = parseInt(text.substring(4, 6), 16);
+              var alpha = text.length === 8 ? parseInt(text.substring(6, 8), 16) : 255;
+              return [red / 255, green / 255, blue / 255, alpha / 255];
+            }
           }
-          return pts[pts.length - 1];
+          if (input instanceof Array && input.length >= 3) {
+            var raw = [
+              Number(input[0]),
+              Number(input[1]),
+              Number(input[2]),
+              input.length >= 4 ? Number(input[3]) : 1,
+            ];
+            var use255Scale = false;
+            for (var ri = 0; ri < raw.length; ri += 1) {
+              if (raw[ri] > 1) {
+                use255Scale = true;
+                break;
+              }
+            }
+            var divisor = use255Scale ? 255 : 1;
+            return [
+              Math.max(0, Math.min(1, (isFinite(raw[0]) ? raw[0] : 1) / divisor)),
+              Math.max(0, Math.min(1, (isFinite(raw[1]) ? raw[1] : 1) / divisor)),
+              Math.max(0, Math.min(1, (isFinite(raw[2]) ? raw[2] : 1) / divisor)),
+              Math.max(0, Math.min(1, (isFinite(raw[3]) ? raw[3] : 1) / divisor)),
+            ];
+          }
+          return [1, 1, 1, 1];
         }
 
-        function tangentAt(t) {
-          var p0 = pointAt(clamp01(t - 0.001));
-          var p1 = pointAt(clamp01(t + 0.001));
-          var dx = p1[0] - p0[0];
-          var dy = p1[1] - p0[1];
-          var len = Math.sqrt(dx * dx + dy * dy);
-          if (!(len > 0)) return [1, 0];
-          return [dx / len, dy / len];
+        function colorArrayToHex(colorArray) {
+          var color = normalizeColorArray(colorArray);
+          function channelToHex(value) {
+            var channel = Math.round(Math.max(0, Math.min(1, value)) * 255);
+            return (channel < 16 ? "0" : "") + channel.toString(16);
+          }
+          var hex = "#" + channelToHex(color[0]) + channelToHex(color[1]) + channelToHex(color[2]);
+          var alpha = Math.round(Math.max(0, Math.min(1, color[3])) * 255);
+          if (alpha < 255) {
+            hex += (alpha < 16 ? "0" : "") + alpha.toString(16);
+          }
+          return hex;
+        }
+
+        var colorValue;
+        if (arguments.length === 1) {
+          colorValue = normalizeColorArray(r);
+        } else if (arguments.length >= 3) {
+          colorValue = normalizeColorArray([r, g, b, a === undefined ? 255 : a]);
+        } else {
+          colorValue = [1, 1, 1, 1];
         }
 
         return {
-          exists: function () {
-            return true;
-          },
-          closed: function () {
-            return defClosed;
-          },
-          points: function () {
-            return defPoints;
-          },
-          point: function (t) {
-            return pointAt(t);
-          },
-          tangent: function (t) {
-            return tangentAt(t);
-          },
-          normal: function (t) {
-            var tan = tangentAt(t);
-            return [-tan[1], tan[0]];
-          },
-          angle: function (t) {
-            var tan = tangentAt(t);
-            return (Math.atan2(tan[1], tan[0]) * 180) / Math.PI;
-          },
-          sample: function (count) {
-            var n = Math.max(0, Math.floor(Number(count) || 0));
-            var out = [];
-            if (n <= 0) return out;
-            if (n === 1) return [pointAt(0)];
-            for (var i = 0; i < n; i++) {
-              out.push(pointAt(i / (n - 1)));
+          color: function () {
+            if (typeof window.color === "function") {
+              return window.color(this.value());
             }
-            return out;
+            return colorValue.slice();
+          },
+          value: function () {
+            return colorArrayToHex(colorValue);
           },
         };
       };
-      markStub("createPathController");
+      markStub("createColorPicker");
+    }
+
+    if (typeof window.createCheckbox === "undefined") {
+      window.createCheckbox = function (label, checked) {
+        var isChecked = !!checked;
+        return {
+          value: function () {
+            return isChecked;
+          },
+          checked: function () {
+            return isChecked;
+          },
+        };
+      };
+      markStub("createCheckbox");
+    }
+
+    if (typeof window.createSelect === "undefined") {
+      window.createSelect = function () {
+        var options = [];
+        var defaultIndex = 0;
+
+        function clampIndex(value) {
+          var length = options.length > 0 ? options.length : 1;
+          var index = Math.round(Number(value) || 0);
+          if (index < 0) index = 0;
+          if (index > length - 1) index = length - 1;
+          return index;
+        }
+
+        return {
+          option: function (label, value) {
+            options.push(arguments.length >= 2 ? value : label);
+            defaultIndex = clampIndex(defaultIndex);
+            return this;
+          },
+          index: function () {
+            defaultIndex = clampIndex(defaultIndex);
+            return defaultIndex;
+          },
+          value: function () {
+            var index = this.index();
+            if (index < 0 || index >= options.length) {
+              return null;
+            }
+            return options[index];
+          },
+          selected: function (value) {
+            if (arguments.length === 0) {
+              return this.value();
+            }
+            if (typeof value === "number" && isFinite(value)) {
+              defaultIndex = clampIndex(value);
+              return this;
+            }
+            for (var optionIndex = 0; optionIndex < options.length; optionIndex += 1) {
+              if (options[optionIndex] === value) {
+                defaultIndex = clampIndex(optionIndex);
+                return this;
+              }
+            }
+            defaultIndex = 0;
+            return this;
+          },
+        };
+      };
+      markStub("createSelect");
     }
 
     if (typeof window.image === "undefined") {

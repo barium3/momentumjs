@@ -1,8 +1,14 @@
 document.addEventListener("DOMContentLoaded", function () {
   window.consoleManager.initConsole();
   window.editorManager.initEditor();
+  window.editorManager.initRenderMode();
   window.editorManager.setRunEnabled(false);
+  window.fileManager.initResponsiveLayout();
   window.fileManager.initializeDraftSession();
+
+  document
+    .getElementById("toggleFileList")
+    .addEventListener("click", window.fileManager.toggleFileListCollapsed);
 
   document
     .getElementById("newFile")

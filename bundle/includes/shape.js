@@ -1180,7 +1180,7 @@ function getShapePolygonLib(deps) {
 function getShapeLib(deps) {
   if (!deps) deps = {};
 
-  return [
+  var parts = [
     getShapeModeLib(deps),
     getShapeCoreLib(),
     getShapeEllipseLib(deps),
@@ -1194,7 +1194,12 @@ function getShapeLib(deps) {
     getShapeCurveLib(deps),
     getShapePolygonLib(deps),
     deps.background ? getBackgroundLib() : ""
-  ].filter(Boolean).join("\n");
+  ];
+  var compact = [];
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i]) compact.push(parts[i]);
+  }
+  return compact.join("\n");
 }
 
 function createArcFromContext(index, slotKey, mainCompName, targetLayer) {

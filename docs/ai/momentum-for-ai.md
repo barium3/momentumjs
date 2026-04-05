@@ -48,7 +48,7 @@ Prefer these patterns:
 Important implementation detail:
 
 - The current loop max analysis only has special bound handling for `frameCount`, `random(...)`, `createSlider(...)`, and `createAngle(...)`.
-- Do not use `createCheckbox`, `createSelect`, `createPoint`, `createColorPicker`, or `createPathController` to decide how many shapes to generate.
+- Do not use `createCheckbox`, `createSelect`, `createPoint`, or `createColorPicker` to decide how many shapes to generate.
 
 ## General Generation Rules
 
@@ -204,7 +204,6 @@ They are not UI elements with layout, styling, visibility, or event methods.
 - `createCheckbox(label, checked)`
 - `createSelect()`
 - `createPoint(defaultX, defaultY)`
-- `createPathController(name, points, closed)`
 
 ### Supported Controller Methods
 
@@ -241,17 +240,6 @@ They are not UI elements with layout, styling, visibility, or event methods.
 - `x()`
 - `y()`
 
-`createPathController(...)` returns an object with:
-
-- `exists()`
-- `closed()`
-- `points()`
-- `point(t)`
-- `tangent(t)`
-- `normal(t)`
-- `angle(t)`
-- `sample(count)`
-
 ### Unsupported p5-Like Controller Methods
 
 Do not generate methods such as:
@@ -276,7 +264,6 @@ If a method is not in the supported list above, do not use it.
 - `createColorPicker(...)` accepts either a hex string or 3 to 4 numeric channel arguments.
 - Do not use the old array-style color picker input.
 - `createSelect().selected(v)` should be treated as selecting a default value for the controller object, not as a general DOM-style live setter API.
-- `createPathController(...)` is backed by a mask path on `__controller__`, not by a visible web control.
 
 ## Safe API Mindset
 

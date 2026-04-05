@@ -28,7 +28,7 @@ Use it to quickly navigate to the documentation for each API category.
   `PI`, `TWO_PI`, `HALF_PI`, `QUARTER_PI`, `DEGREES`, `RADIANS`, `CENTER`, `RADIUS`, `CORNER`, `CORNERS`, `OPEN`, `CHORD`, `PIE`, `CLOSE`, `LEFT`, `RIGHT`, `TOP`, `BOTTOM`, `BASELINE`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `degrees`, `radians`, `angleMode`, `sqrt`, `pow`, `abs`, `floor`, `ceil`, `round`, `min`, `max`, `exp`, `log`, `sq`, `fract`, `norm`, `mag`, `map`, `constrain`, `lerp`, `dist`, `random`, `randomGaussian`, `randomSeed`, `noise`, `noiseDetail`, `noiseSeed`, `bezierPoint`, `bezierTangent`, `curvePoint`, `curveTangent`, `curveTightness`, `createVector`
 
 - [Controllers](controllers.md)
-  `createSlider`, `createAngle`, `createColorPicker`, `createCheckbox`, `createSelect`, `createPoint`, `createPathController`
+  `createSlider`, `createAngle`, `createColorPicker`, `createCheckbox`, `createSelect`, `createPoint`
 
 ---
 

@@ -64,7 +64,6 @@ Supported factories:
 - `createCheckbox(label, checked)`
 - `createSelect()`
 - `createPoint(defaultX, defaultY)`
-- `createPathController(name, points, closed)`
 
 Supported methods only:
 
@@ -74,7 +73,6 @@ Supported methods only:
 - Checkbox: `checked()`, `value()`
 - Select: `option(...)`, `selected(...)`, `value()`, `index()`
 - Point: `value()`, `x()`, `y()`
-- Path: `exists()`, `closed()`, `points()`, `point(t)`, `tangent(t)`, `normal(t)`, `angle(t)`, `sample(count)`
 
 Do not generate methods such as:
 

@@ -530,7 +530,11 @@ function getMathLib(deps) {
     getMathVectorLib(deps)
   ];
 
-  return lib.filter(Boolean).join("\n");
+  var compact = [];
+  for (var i = 0; i < lib.length; i++) {
+    if (lib[i]) compact.push(lib[i]);
+  }
+  return compact.join("\n");
 }
 
 function getMathConstantsLib(deps) {

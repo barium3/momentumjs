@@ -4,6 +4,585 @@ window.momentumEditorManagerFactory = (function () {
     "}": true,
   };
   const DEFAULT_INDENT_SIZE = 2;
+  const RENDER_MODE_STORAGE_KEY = "momentum.renderMode";
+  const DEFAULT_RENDER_MODE = "vector";
+  const BITMAP_CONTROLLER_SLOT_LIMIT = 16;
+  const BITMAP_CONTROLLER_CALLSITE_PREFIX = "__mcc_";
+
+  function hashString(input) {
+    const source = String(input == null ? "" : input);
+    let hash = 2166136261;
+
+    for (let index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+
+    return (hash >>> 0).toString(16);
+  }
+
+  function normalizeBackgroundMode(compiled, code) {
+    if (compiled && compiled.analysis && compiled.analysis.backgroundMode) {
+      return compiled.analysis.backgroundMode;
+    }
+
+    if (!code) {
+      return "unknown";
+    }
+
+    const match = code.match(/background\s*\(([^)]*)\)/);
+    if (!match) {
+      return "transparent-likely";
+    }
+
+    const args = match[1]
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (args.length >= 2) {
+      const alpha = Number(args[args.length - 1]);
+      if (Number.isFinite(alpha) && alpha < 255) {
+        return "accumulation-likely";
+      }
+    }
+
+    return "opaque-likely";
+  }
+
+  function inferStateProfile(compiled, code) {
+    return "stateful-timeline-js";
+  }
+
+  function getBitmapCompConfig(compiled, fileName) {
+    return window.momentumPluginBitmap.getCompConfig(compiled, fileName);
+  }
+
+  function literalValueFromNode(node) {
+    if (!node) {
+      return undefined;
+    }
+
+    if (node.type === "Literal") {
+      return node.value;
+    }
+
+    if (node.type === "Identifier") {
+      if (node.name === "undefined") return undefined;
+      if (node.name === "true") return true;
+      if (node.name === "false") return false;
+      return undefined;
+    }
+
+    if (node.type === "UnaryExpression") {
+      const value = literalValueFromNode(node.argument);
+      if (typeof value !== "number") {
+        return undefined;
+      }
+      if (node.operator === "+") return +value;
+      if (node.operator === "-") return -value;
+    }
+
+    if (node.type === "ArrayExpression") {
+      const values = [];
+      for (let i = 0; i < node.elements.length; i += 1) {
+        values.push(literalValueFromNode(node.elements[i]));
+      }
+      return values;
+    }
+
+    return undefined;
+  }
+
+  function readNumberArg(args, index, fallbackValue) {
+    const value = literalValueFromNode(args[index]);
+    return typeof value === "number" && isFinite(value) ? value : fallbackValue;
+  }
+
+  function readStringArg(args, index, fallbackValue) {
+    const value = literalValueFromNode(args[index]);
+    return typeof value === "string" ? value : fallbackValue;
+  }
+
+  function readBooleanArg(args, index, fallbackValue) {
+    const value = literalValueFromNode(args[index]);
+    return typeof value === "boolean" ? value : fallbackValue;
+  }
+
+  function readArrayArg(args, index, fallbackValue) {
+    const value = literalValueFromNode(args[index]);
+    return Array.isArray(value) ? value : fallbackValue;
+  }
+
+  function buildColorControllerConfig(args) {
+    if (!args || args.length <= 0) {
+      return { type: "color", value: [255, 255, 255, 255] };
+    }
+
+    if (args.length === 1) {
+      const singleValue = literalValueFromNode(args[0]);
+      if (typeof singleValue === "string") {
+        return { type: "color", value: singleValue };
+      }
+      if (Array.isArray(singleValue)) {
+        return { type: "color", value: singleValue };
+      }
+    }
+
+    return {
+      type: "color",
+      value: [
+        readNumberArg(args, 0, 255),
+        readNumberArg(args, 1, 255),
+        readNumberArg(args, 2, 255),
+        readNumberArg(args, 3, 255),
+      ],
+    };
+  }
+
+  function buildBitmapControllerCallsiteId(node, calleeName) {
+    const safeName = String(calleeName || "controller").replace(/[^\w$]/g, "_");
+    const loc =
+      node &&
+      node.loc &&
+      node.loc.start &&
+      typeof node.loc.start.line === "number" &&
+      typeof node.loc.start.column === "number"
+        ? node.loc.start
+        : null;
+
+    if (loc) {
+      return `${BITMAP_CONTROLLER_CALLSITE_PREFIX}${safeName}_${loc.line}_${loc.column}`;
+    }
+
+    return `${BITMAP_CONTROLLER_CALLSITE_PREFIX}${safeName}`;
+  }
+
+  function parseSelectControllerChain(expression) {
+    let current = expression;
+    const steps = [];
+
+    while (
+      current &&
+      current.type === "CallExpression" &&
+      current.callee &&
+      current.callee.type === "MemberExpression" &&
+      !current.callee.computed &&
+      current.callee.property &&
+      current.callee.property.type === "Identifier"
+    ) {
+      steps.unshift({
+        method: current.callee.property.name,
+        args: current.arguments || [],
+      });
+      current = current.callee.object;
+    }
+
+    if (
+      !current ||
+      current.type !== "CallExpression" ||
+      !current.callee ||
+      current.callee.type !== "Identifier" ||
+      current.callee.name !== "createSelect"
+    ) {
+      return null;
+    }
+
+    const config = {
+      type: "select",
+      options: [],
+      value: 0,
+    };
+
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i];
+      if (step.method === "option") {
+        const label = readStringArg(step.args, 0, "");
+        const explicitValue = literalValueFromNode(step.args[1]);
+        config.options.push({
+          label,
+          value: explicitValue !== undefined ? explicitValue : label,
+        });
+        continue;
+      }
+      if (step.method === "selected") {
+        const selectedValue = literalValueFromNode(step.args[0]);
+        if (typeof selectedValue === "number" && isFinite(selectedValue)) {
+          config.value = Math.max(0, Math.floor(selectedValue));
+        } else {
+          for (let optionIndex = 0; optionIndex < config.options.length; optionIndex += 1) {
+            const option = config.options[optionIndex];
+            if (option && (option.value === selectedValue || option.label === selectedValue)) {
+              config.value = optionIndex;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      config,
+      callNode: current,
+      factoryName: "createSelect",
+    };
+  }
+
+  function extractBitmapControllerConfigs(source) {
+    if (typeof acorn === "undefined" || !source) {
+      return [];
+    }
+
+    let program = null;
+    try {
+      program = acorn.parse(String(source), { ecmaVersion: 2020, sourceType: "script" });
+    } catch (_parseError) {
+      return [];
+    }
+
+    const configs = [];
+
+    function pushConfig(config, sourceNode, factoryName) {
+      if (!config) {
+        return;
+      }
+      const nextConfig = { ...config };
+      const typeKey = String(nextConfig.type || "controller");
+
+      if (!nextConfig.id) {
+        nextConfig.id = buildBitmapControllerCallsiteId(
+          sourceNode,
+          factoryName || typeKey,
+        );
+      }
+      configs.push(nextConfig);
+    }
+
+    function describeControllerBinding(node) {
+      if (!node || typeof node !== "object") {
+        return "";
+      }
+      if (node.type === "Identifier") {
+        return node.name || "";
+      }
+      if (
+        node.type === "MemberExpression" &&
+        !node.computed &&
+        node.property &&
+        node.property.type === "Identifier"
+      ) {
+        const objectLabel = describeControllerBinding(node.object);
+        return objectLabel ? `${objectLabel}.${node.property.name}` : node.property.name;
+      }
+      return "";
+    }
+
+    function parseDirectControllerCall(expression) {
+      if (!expression || expression.type !== "CallExpression" || !expression.callee) {
+        return null;
+      }
+      if (expression.callee.type !== "Identifier") {
+        return null;
+      }
+
+      const args = expression.arguments || [];
+      switch (expression.callee.name) {
+        case "createSlider":
+          return {
+            config: {
+              type: "slider",
+              min: readNumberArg(args, 0, 0),
+              max: readNumberArg(args, 1, 100),
+              value: readNumberArg(args, 2, readNumberArg(args, 0, 0)),
+              step: readNumberArg(args, 3, 0),
+            },
+            callNode: expression,
+            factoryName: expression.callee.name,
+          };
+        case "createAngle":
+          return {
+            config: {
+              type: "angle",
+              value: readNumberArg(args, 0, 0),
+            },
+            callNode: expression,
+            factoryName: expression.callee.name,
+          };
+        case "createColorPicker":
+          return {
+            config: buildColorControllerConfig(args),
+            callNode: expression,
+            factoryName: expression.callee.name,
+          };
+        case "createCheckbox": {
+          const config = {
+            type: "checkbox",
+            value: readBooleanArg(args, 1, false),
+          };
+          const label = readStringArg(args, 0, "");
+          if (label) {
+            config.label = label;
+          }
+          return {
+            config,
+            callNode: expression,
+            factoryName: expression.callee.name,
+          };
+        }
+        case "createSelect":
+          return {
+            config: {
+              type: "select",
+              options: [],
+              value: 0,
+            },
+            callNode: expression,
+            factoryName: expression.callee.name,
+          };
+        case "createPoint":
+          return {
+            config: {
+              type: "point",
+              value: [
+                readNumberArg(args, 0, 0),
+                readNumberArg(args, 1, 0),
+              ],
+            },
+            callNode: expression,
+            factoryName: expression.callee.name,
+          };
+        default:
+          return null;
+      }
+    }
+
+    function visitNode(node) {
+      if (!node || typeof node !== "object") {
+        return;
+      }
+
+      if (node.type === "VariableDeclarator" && node.init) {
+        const selectResult = parseSelectControllerChain(node.init);
+        if (selectResult) {
+          const bindingLabel = describeControllerBinding(node.id);
+          if (bindingLabel && !selectResult.config.label) {
+            selectResult.config.label = bindingLabel;
+          }
+          pushConfig(selectResult.config, selectResult.callNode, selectResult.factoryName);
+          return;
+        }
+        const directResult = parseDirectControllerCall(node.init);
+        if (directResult) {
+          const bindingLabel = describeControllerBinding(node.id);
+          if (bindingLabel) {
+            directResult.config.label = bindingLabel;
+          }
+          pushConfig(directResult.config, directResult.callNode, directResult.factoryName);
+          return;
+        }
+      }
+
+      if (node.type === "AssignmentExpression" && node.right) {
+        const selectResult = parseSelectControllerChain(node.right);
+        if (selectResult) {
+          const bindingLabel = describeControllerBinding(node.left);
+          if (bindingLabel && !selectResult.config.label) {
+            selectResult.config.label = bindingLabel;
+          }
+          pushConfig(selectResult.config, selectResult.callNode, selectResult.factoryName);
+          return;
+        }
+        const directResult = parseDirectControllerCall(node.right);
+        if (directResult) {
+          const bindingLabel = describeControllerBinding(node.left);
+          if (bindingLabel) {
+            directResult.config.label = bindingLabel;
+          }
+          pushConfig(directResult.config, directResult.callNode, directResult.factoryName);
+          return;
+        }
+      }
+
+      if (node.type === "ExpressionStatement" && node.expression) {
+        const selectResult = parseSelectControllerChain(node.expression);
+        if (selectResult) {
+          pushConfig(selectResult.config, selectResult.callNode, selectResult.factoryName);
+          return;
+        }
+        const directResult = parseDirectControllerCall(node.expression);
+        if (directResult) {
+          pushConfig(directResult.config, directResult.callNode, directResult.factoryName);
+          return;
+        }
+      }
+
+      for (const key in node) {
+        if (!Object.prototype.hasOwnProperty.call(node, key)) {
+          continue;
+        }
+        if (key === "loc" || key === "range" || key === "start" || key === "end") {
+          continue;
+        }
+        const value = node[key];
+        if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i += 1) {
+            visitNode(value[i]);
+          }
+        } else if (value && typeof value === "object") {
+          visitNode(value);
+        }
+      }
+    }
+
+    visitNode(program);
+    return configs;
+  }
+
+  function mergeBitmapControllerConfigs(staticConfigs, runtimeConfigs) {
+    const fallbackConfigs = Array.isArray(staticConfigs) ? staticConfigs : [];
+    if (!Array.isArray(runtimeConfigs) || runtimeConfigs.length === 0) {
+      return fallbackConfigs;
+    }
+
+    const mergedConfigs = [];
+    const usedStaticIndices = {};
+    const staticById = {};
+    const staticByLabel = {};
+    const staticTypeBuckets = {};
+    const runtimeTypeCounts = {};
+
+    function addIndexBucket(target, key, index) {
+      if (!target[key]) {
+        target[key] = [];
+      }
+      target[key].push(index);
+    }
+
+    function claimFirstUnused(bucket) {
+      if (!Array.isArray(bucket)) {
+        return -1;
+      }
+      for (let index = 0; index < bucket.length; index += 1) {
+        const candidate = bucket[index];
+        if (!usedStaticIndices[candidate]) {
+          usedStaticIndices[candidate] = true;
+          return candidate;
+        }
+      }
+      return -1;
+    }
+
+    fallbackConfigs.forEach((config, index) => {
+      if (!config || typeof config !== "object") {
+        return;
+      }
+      if (config.id) {
+        addIndexBucket(staticById, String(config.id), index);
+      }
+      if (config.type && config.label) {
+        addIndexBucket(staticByLabel, `${config.type}::${config.label}`, index);
+      }
+      if (config.type) {
+        addIndexBucket(staticTypeBuckets, String(config.type), index);
+      }
+    });
+
+    for (let index = 0; index < runtimeConfigs.length; index += 1) {
+      const runtimeConfig = runtimeConfigs[index];
+      if (!runtimeConfig || typeof runtimeConfig !== "object") {
+        continue;
+      }
+
+      const nextConfig = { ...runtimeConfig };
+      const typeKey = String(nextConfig.type || "");
+      const typeOrdinal = runtimeTypeCounts[typeKey] || 0;
+      runtimeTypeCounts[typeKey] = typeOrdinal + 1;
+
+      let staticIndex = -1;
+      if (nextConfig.id) {
+        staticIndex = claimFirstUnused(staticById[String(nextConfig.id)]);
+      }
+      if (staticIndex < 0 && nextConfig.label && typeKey) {
+        staticIndex = claimFirstUnused(staticByLabel[`${typeKey}::${nextConfig.label}`]);
+      }
+      if (staticIndex < 0 && typeKey) {
+        const typeBucket = staticTypeBuckets[typeKey];
+        if (Array.isArray(typeBucket) && typeOrdinal < typeBucket.length) {
+          const candidate = typeBucket[typeOrdinal];
+          if (!usedStaticIndices[candidate]) {
+            usedStaticIndices[candidate] = true;
+            staticIndex = candidate;
+          } else {
+            staticIndex = claimFirstUnused(typeBucket);
+          }
+        }
+      }
+
+      const staticConfig =
+        staticIndex >= 0 && staticIndex < fallbackConfigs.length
+          ? fallbackConfigs[staticIndex]
+          : null;
+      if (staticConfig) {
+        if (staticConfig.id && !nextConfig.id) {
+          nextConfig.id = staticConfig.id;
+        }
+        if (staticConfig.label && !nextConfig.label) {
+          nextConfig.label = staticConfig.label;
+        }
+      }
+      mergedConfigs.push(nextConfig);
+    }
+
+    return mergedConfigs.length > 0 ? mergedConfigs : fallbackConfigs;
+  }
+
+  function buildBitmapBundle(code, compiled, fileName, runtimeControllerConfigs) {
+    const source = String(code || "");
+    const sourceHash = hashString(source);
+    const comp = getBitmapCompConfig(compiled, fileName);
+    const backgroundMode = normalizeBackgroundMode(compiled, source);
+    const profile = inferStateProfile(compiled, source);
+    const staticControllerConfigs = extractBitmapControllerConfigs(source);
+    const controllerConfigs = mergeBitmapControllerConfigs(
+      staticControllerConfigs,
+      runtimeControllerConfigs,
+    ).slice(0, BITMAP_CONTROLLER_SLOT_LIMIT);
+    const controllerHash =
+      controllerConfigs.length > 0 ? hashString(JSON.stringify(controllerConfigs)) : "none";
+
+    return {
+      bundleVersion: 1,
+      runtimeTarget: window.momentumPluginBitmap.RUNTIME_TARGET,
+      revision: parseInt(sourceHash.slice(0, 4), 16) % 32768,
+      sourcePath: "sketch.js",
+      sourceHash,
+      pixelDensity: Math.max(1, Number(window.devicePixelRatio) || 1),
+      comp,
+      analysis: {
+        profile,
+        backgroundMode,
+      },
+      controller: {
+        hash: controllerHash,
+        configs: controllerConfigs,
+      },
+      cache: {
+        recentFrameBudgetMB: 512,
+        checkpointInterval: 12,
+        denseWindowBacktrack: 8,
+        denseWindowForward: 24,
+      },
+    };
+  }
+
+  function extractRunTargetName(code, fallbackName) {
+    const fileNameRegex = /\/\/\s*@filename[:\s]*([^\n]+)/;
+    const match = String(code || "").match(fileNameRegex);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+    return fallbackName || "New Composition";
+  }
 
   function hasFatalDiagnostics(result) {
     if (!result || !Array.isArray(result.diagnostics)) {
@@ -82,6 +661,7 @@ window.momentumEditorManagerFactory = (function () {
     let isAutoFormatting = false;
     let isApplyingIndentCorrection = false;
     let isRunEnabled = false;
+    let renderMode = "vector";
     const validation = window.momentumEditorValidation.createController({
       getEditor: () => editor,
       validationDelay: 250,
@@ -95,6 +675,134 @@ window.momentumEditorManagerFactory = (function () {
 
     function getRunButton() {
       return document.getElementById("runEditorScript");
+    }
+
+    function getRenderModeSelect() {
+      return document.getElementById("renderModeSelect");
+    }
+
+    function syncRenderModeSelect() {
+      const select = getRenderModeSelect();
+      if (!select) {
+        return;
+      }
+
+      select.value = renderMode;
+    }
+
+    function syncEffectiveRenderModeSelect(mode) {
+      const select = getRenderModeSelect();
+      if (!select) {
+        return;
+      }
+
+      select.value = normalizeRenderMode(mode);
+    }
+
+    function normalizeRenderMode(mode) {
+      if (mode === "bitmap") {
+        return "bitmap";
+      }
+      if (mode === "vector") {
+        return "vector";
+      }
+      return "vector";
+    }
+
+    function setRenderMode(mode) {
+      renderMode = normalizeRenderMode(mode);
+
+      try {
+        window.localStorage.setItem(RENDER_MODE_STORAGE_KEY, renderMode);
+      } catch (_ignore) {}
+
+      syncRenderModeSelect();
+    }
+
+    function getRenderMode() {
+      return renderMode;
+    }
+
+    function initRenderMode() {
+      let savedMode = DEFAULT_RENDER_MODE;
+
+      try {
+        savedMode =
+          window.localStorage.getItem(RENDER_MODE_STORAGE_KEY) ||
+          DEFAULT_RENDER_MODE;
+      } catch (_ignore) {}
+
+      setRenderMode(savedMode);
+
+      const select = getRenderModeSelect();
+      if (!select) {
+        return;
+      }
+
+      select.addEventListener("change", (event) => {
+        setRenderMode(event && event.target ? event.target.value : "vector");
+      });
+    }
+
+    function detectBitmapRequirements(code) {
+      if (
+        !window.momentumRuntimeCapabilities ||
+        typeof window.momentumRuntimeCapabilities.detectBitmapRequirements !== "function"
+      ) {
+        return {
+          requiresBitmap: false,
+          functions: [],
+        };
+      }
+
+      try {
+        return window.momentumRuntimeCapabilities.detectBitmapRequirements(code);
+      } catch (_ignore) {
+        return {
+          requiresBitmap: false,
+          functions: [],
+        };
+      }
+    }
+
+    function getEffectiveRenderModeInfo(code) {
+      const requirements = detectBitmapRequirements(code);
+      const requiredMode =
+        requirements && requirements.requiresBitmap ? "bitmap" : null;
+      const effectiveMode = normalizeRenderMode(requiredMode || renderMode);
+
+      return {
+        requirements,
+        requiredMode,
+        effectiveMode,
+      };
+    }
+
+    function syncRuntimeModeUI(code) {
+      const info = getEffectiveRenderModeInfo(code);
+      syncEffectiveRenderModeSelect(info.effectiveMode);
+      return info;
+    }
+
+    function reportRuntimeModeSwitch(info, selectedMode) {
+      const normalizedSelectedMode = normalizeRenderMode(selectedMode);
+      if (
+        !info ||
+        info.effectiveMode !== "bitmap" ||
+        !info.requiredMode ||
+        normalizedSelectedMode === info.effectiveMode
+      ) {
+        return;
+      }
+
+      const functions =
+        info.requirements && Array.isArray(info.requirements.functions)
+          ? info.requirements.functions
+          : [];
+      const detail = functions.length ? ` ${functions.join(", ")}` : "";
+      console.warn(
+        `Render mode switched to Bitmap because Vector mode does not support${detail}.`,
+      );
     }
 
     function setRunEnabled(enabled) {
@@ -442,6 +1150,82 @@ window.momentumEditorManagerFactory = (function () {
       });
     }
 
+    function runVectorScript(code, fileName) {
+      return window.codeExecutor.executeUserCode(code, fileName).catch((error) =>
+        console.error(
+          "Execution error:",
+          error && error.message ? error.message : String(error),
+        ),
+      );
+    }
+
+  function parseApplyMomentumResult(rawValue) {
+    return window.momentumPluginBitmap.parseApplyMomentumResult(rawValue);
+  }
+
+  function expectExtendScriptOk(rawValue, stepName) {
+    return window.momentumPluginBitmap.expectExtendScriptOk(rawValue, stepName);
+  }
+
+  function reportApplyMomentumWarnings(result) {
+    return window.momentumPluginBitmap.reportApplyMomentumWarnings(result);
+  }
+
+  function runBitmapScript(code, fileName) {
+    const bitmapRuntimeCode =
+      window.codeExecutor &&
+      typeof window.codeExecutor.absolutizeBitmapAssetCalls === "function"
+        ? window.codeExecutor.absolutizeBitmapAssetCalls(code)
+        : code;
+    const compiled = window.sketchCompiler.compile(code);
+
+    if (!compiled || !compiled.ok) {
+      const primaryDiagnostic = (compiled && compiled.diagnostics || []).find(
+        (diagnostic) => diagnostic && diagnostic.severity !== "warning",
+      );
+      if (primaryDiagnostic) {
+        console.error(
+          "Compile error:",
+          formatDiagnosticForConsole(primaryDiagnostic),
+        );
+      }
+      return Promise.resolve(false);
+    }
+
+    const runtimeControllerPromise =
+      window.codeExecutor &&
+      typeof window.codeExecutor.discoverBitmapControllers === "function"
+        ? window.codeExecutor.discoverBitmapControllers(code, compiled)
+        : Promise.resolve([]);
+
+    return Promise.resolve(runtimeControllerPromise)
+      .catch(() => [])
+      .then((runtimeControllerConfigs) => {
+        const bundle = buildBitmapBundle(
+          code,
+          compiled,
+          extractRunTargetName(code, fileName || "New Composition"),
+          runtimeControllerConfigs,
+        );
+        return window.momentumPluginBitmap.applyRuntimeBundle(
+          bundle,
+          bitmapRuntimeCode,
+        );
+      })
+      .then((applyResultText) => {
+        const applyResult = parseApplyMomentumResult(applyResultText);
+        reportApplyMomentumWarnings(applyResult);
+        return true;
+      })
+      .catch((error) => {
+        console.error(
+          "Bitmap execution error:",
+          error && error.message ? error.message : String(error),
+        );
+        return false;
+      });
+  }
+
     function runScript() {
       if (!isRunEnabled) {
         return Promise.resolve(false);
@@ -452,9 +1236,21 @@ window.momentumEditorManagerFactory = (function () {
         .then(() => {
           const code = editor.getValue();
           const fileName = window.fileManager.getCurrentFileName && window.fileManager.getCurrentFileName();
+          const selectedRenderMode = renderMode;
+          if (
+            window.consoleManager &&
+            typeof window.consoleManager.clearConsole === "function"
+          ) {
+            window.consoleManager.clearConsole();
+          } else {
+            document.getElementById("console-output").innerHTML = "";
+          }
+          const runtimeModeInfo = syncRuntimeModeUI(code);
+          const effectiveRenderMode = runtimeModeInfo.effectiveMode;
+          if (effectiveRenderMode !== normalizeRenderMode(renderMode)) {
+            setRenderMode(effectiveRenderMode);
+          }
           const validationResult = validation.diagnoseCode(code);
-
-          document.getElementById("console-output").innerHTML = "";
           if (hasFatalDiagnostics(validationResult)) {
             const primaryDiagnostic = (validationResult.diagnostics || []).find(
               (diagnostic) => diagnostic && diagnostic.severity !== "warning",
@@ -468,14 +1264,13 @@ window.momentumEditorManagerFactory = (function () {
             return;
           }
 
-          return window.codeExecutor
-            .executeUserCode(code, fileName)
-            .catch((error) =>
-              console.error(
-                "Execution error:",
-                error && error.message ? error.message : String(error),
-              ),
-            );
+          reportRuntimeModeSwitch(runtimeModeInfo, selectedRenderMode);
+
+          if (effectiveRenderMode === "bitmap") {
+            return runBitmapScript(code, fileName);
+          }
+
+          return runVectorScript(code, fileName);
         });
     }
 
@@ -483,8 +1278,11 @@ window.momentumEditorManagerFactory = (function () {
       diagnoseCode: validation.diagnoseCode,
       formatDocument,
       initEditor,
+      initRenderMode,
       isRunEnabled: () => isRunEnabled,
+      getRenderMode,
       runScript,
+      setRenderMode,
       setRunEnabled,
       toggleLineComments: interactions.toggleLineComments,
       editor: null,

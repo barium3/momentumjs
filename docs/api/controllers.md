@@ -16,7 +16,6 @@ Controller APIs:
 - `createCheckbox(label, checked)`
 - `createSelect()`
 - `createPoint(defaultX, defaultY)`
-- `createPathController(name, points, closed)`
 
 Controller values are mapped to a controller layer in After Effects:
 
@@ -26,7 +25,6 @@ Controller values are mapped to a controller layer in After Effects:
 - `Checkbox Control`
 - `Dropdown Menu Control`
 - `Point Control`
-- `Mask Path`
 
 ---
 
@@ -246,50 +244,6 @@ A controller object with:
 let pt = createPoint(100, 200);
 circle(pt.x(), pt.y(), 20);
 ```
-
----
-
-## `createPathController(name, points, closed)`
-
-Creates a path controller backed by an AE mask path.
-
-### Signature
-
-```js
-createPathController(name, points, closed)
-```
-
-### Parameters
-
-- `name`: Path name
-- `points`: Default points
-- `closed`: Whether the path is closed
-
-### Returns
-
-A controller object with:
-
-- `exists()`
-- `closed()`
-- `points()`
-- `point(t)`
-- `tangent(t)`
-- `normal(t)`
-- `angle(t)`
-- `sample(count)`
-
-### Example
-
-```js
-let path = createPathController("guide", [[50, 50], [150, 50]], false);
-let p = path.point(0.5);
-circle(p[0], p[1], 10);
-```
-
-### Notes
-
-- This controller is backed by a mask path on the controller layer.
-- Path sampling methods use normalized `t` values from `0` to `1`.
 
 ---
 

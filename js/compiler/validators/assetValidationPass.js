@@ -3,6 +3,9 @@ window.compilerAssetValidationPass = (function () {
     loadImage: true,
     loadJSON: true,
     loadTable: true,
+    loadStrings: true,
+    loadBytes: true,
+    loadXML: true,
   };
 
   function analyze(program) {
