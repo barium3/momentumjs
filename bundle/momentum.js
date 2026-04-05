@@ -3,7 +3,7 @@ var m = {};
 
 (function(pub, app, undef) {
 
-  pub.VERSION = "1.0.0";
+  pub.VERSION = "1.1.0";
   pub._debugLogs = [];
   pub._debug = function(msg) {
     try {

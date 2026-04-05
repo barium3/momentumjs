@@ -25,6 +25,73 @@ If you use AI to write Momentum code, you can give the following docs to the AI 
 - Provides users with controller interfaces that make it possible to drive variables with keyframes.
 - Seamless integration with After Effects.
 
+## Install
+
+Momentum currently ships as two pieces on macOS:
+
+- A CEP extension
+- A native `Momentum.plugin` bundle for bitmap mode
+
+### Install From A Release
+
+Download a release package that already contains a prebuilt `Momentum.plugin`, then run:
+
+```bash
+curl -L https://github.com/yourname/momentumjs/releases/download/vX.Y.Z/momentumjs-macos.zip -o momentumjs.zip
+unzip momentumjs.zip
+cd momentumjs
+./install.sh
+```
+
+The installer copies:
+
+- The CEP extension to `~/Library/Application Support/Adobe/CEP/extensions/momentumjs`
+- The native plugin to `~/Library/Application Support/Adobe/Common/Plug-ins/.../MediaCore/Momentum/Momentum.plugin`
+- The bitmap runtime to `.../MediaCore/Momentum/runtime`
+
+Restart After Effects after installation.
+
+### Install From Source
+
+If you are working from the repository, first set `AE_SDK_ROOT`, then run:
+
+```bash
+bash scripts/install-dev.sh
+```
+
+This will:
+
+1. Build the native plugin
+2. Install the CEP extension
+3. Install the native plugin
+
+### Update
+
+Run the same install command again:
+
+```bash
+./install.sh
+```
+
+or, from source:
+
+```bash
+bash scripts/install-dev.sh
+```
+
+### Uninstall
+
+```bash
+./uninstall.sh
+```
+
+### Notes
+
+- The install scripts currently support macOS only.
+- `scripts/install.sh` expects a prebuilt `Momentum.plugin` either at the repo root or in `build/Debug/Momentum.plugin`.
+- A plain GitHub source download is not enough for non-developers unless it includes a prebuilt plugin bundle.
+- To prepare a release directory locally, run `bash scripts/package-release-macos.sh`.
+
 ## Example Code
 
 ![showcase](footage/showcase.png)

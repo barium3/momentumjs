@@ -112,6 +112,14 @@ window.consoleManager = (function () {
     return div.innerHTML;
   }
 
+  function formatWarnText(text) {
+    const escaped = escapeHtml(text == null ? "" : String(text));
+    return escaped
+      .replace(/\[i\](.*?)\[\/i\]/g, "<em>$1</em>")
+      .replace(/\[u\](.*?)\[\/u\]/g, "<u>$1</u>")
+      .replace(/\r?\n/g, "<br>");
+  }
+
   // Use message and index attributes so an inline reference can toggle its detail block.
   function createObjectDetails(obj, messageId = null, index = null) {
     if (!isObject(obj) && !Array.isArray(obj)) {
@@ -341,7 +349,7 @@ window.consoleManager = (function () {
     overrideConsoleMethod("warn", function (args) {
       const lineDiv = document.createElement("div");
       lineDiv.className = "console-line console-warn-line";
-      lineDiv.innerHTML = `<span class="console-warn">${args.join(' ')}</span><br>`;
+      lineDiv.innerHTML = `<span class="console-warn">${formatWarnText(args.join(' '))}</span><br>`;
       appendLine(lineDiv);
     });
 

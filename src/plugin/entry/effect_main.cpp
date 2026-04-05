@@ -5812,6 +5812,7 @@ PF_Err CopyCpuRasterToOutput(
   const OutputCopyOriginInfo copyOrigin = ResolveOutputCopyOrigin(*output, invocation);
   const A_long sourceOriginX = copyOrigin.sourceOriginX;
   const A_long sourceOriginY = copyOrigin.sourceOriginY;
+  const std::size_t rasterSize = raster->size();
   AppendPerformanceTraceField("ae.source_origin_x", std::to_string(sourceOriginX));
   AppendPerformanceTraceField("ae.source_origin_y", std::to_string(sourceOriginY));
   AppendPerformanceTraceField("ae.output_is_tile", copyOrigin.outputLooksLikeTile ? "1" : "0");
@@ -5847,7 +5848,11 @@ PF_Err CopyCpuRasterToOutput(
             ))
           )
         );
-    return (*raster)[static_cast<std::size_t>(sampleY * sourceWidth + sampleX)];
+    const std::size_t sampleIndex = static_cast<std::size_t>(sampleY * sourceWidth + sampleX);
+    if (sampleIndex >= rasterSize) {
+      return PF_Pixel{0, 0, 0, 0};
+    }
+    return (*raster)[sampleIndex];
   };
 
   switch (pixelFormat) {

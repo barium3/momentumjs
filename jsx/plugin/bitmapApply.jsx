@@ -586,8 +586,9 @@ function _momentumBuildCpuFallbackWarning(gpuState) {
   return (
     "AE GPU acceleration appears to be disabled (current mode: " +
     modeLabel +
-    "). Momentum Bitmap has automatically fallen back to CPU mode, which may be less smooth. " +
-    "Enable it in After Effects at: File > Project Settings > Video Rendering and Effects > Use > Mercury GPU Acceleration."
+    "). Momentum Bitmap has automatically fallen back to CPU mode, which may be less smooth.\n" +
+    "Enable it in After Effects at:\n" +
+    "[u][i]File[/i][/u] > [u][i]Project Settings[/i][/u] > [u][i]Video Rendering and Effects[/i][/u] > [u][i]Use[/i][/u] > [u][i]Mercury GPU Acceleration[/i][/u]"
   );
 }
 

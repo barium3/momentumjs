@@ -4,15 +4,17 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
+
+#if defined(__APPLE__)
+#include <dlfcn.h>
+#endif
 
 namespace momentum::runtime_internal {
 
 namespace {
-
-constexpr char kRuntimeDirectorySuffix[] =
-  "/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/Momentum/runtime";
 
 bool IsCompatibleSequenceDataVersion(A_u_long version) {
   return version == kSequenceCacheDataLegacyVersion || version == kSequenceCacheDataVersion;
@@ -662,21 +664,54 @@ std::optional<std::string> ExtractNestedJsonStringField(
   return ExtractJsonStringField(*objectJson, childKey);
 }
 
-std::string GetHomeDirectoryPath() {
-  const char* home = std::getenv("HOME");
-  if (!home || !home[0]) {
+std::string GetRuntimeDirectoryOverridePath() {
+  const char* overridePath = std::getenv("MOMENTUM_RUNTIME_DIR");
+  if (!overridePath || !overridePath[0]) {
     return std::string();
   }
-  return std::string(home);
+  return std::string(overridePath);
+}
+
+std::string GetInstalledPluginRuntimeDirectoryPath() {
+#if defined(__APPLE__)
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<const void*>(&GetInstalledPluginRuntimeDirectoryPath), &info) == 0) {
+    return std::string();
+  }
+  if (!info.dli_fname || !info.dli_fname[0]) {
+    return std::string();
+  }
+
+  std::filesystem::path binaryPath(info.dli_fname);
+  std::error_code ec;
+  const std::filesystem::path canonicalBinaryPath = std::filesystem::weakly_canonical(binaryPath, ec);
+  if (!ec) {
+    binaryPath = canonicalBinaryPath;
+  }
+
+  const std::filesystem::path macOsDir = binaryPath.parent_path();
+  const std::filesystem::path contentsDir = macOsDir.parent_path();
+  const std::filesystem::path pluginBundleDir = contentsDir.parent_path();
+  const std::filesystem::path pluginInstallDir = pluginBundleDir.parent_path();
+  if (pluginInstallDir.empty()) {
+    return std::string();
+  }
+
+  return (pluginInstallDir / "runtime").string();
+#else
+  return std::string();
+#endif
 }
 
 std::string BuildRuntimePath(const char* fileName = NULL) {
-  const std::string home = GetHomeDirectoryPath();
-  if (home.empty()) {
+  std::string path = GetRuntimeDirectoryOverridePath();
+  if (path.empty()) {
+    path = GetInstalledPluginRuntimeDirectoryPath();
+  }
+  if (path.empty()) {
     return std::string();
   }
 
-  std::string path = home + kRuntimeDirectorySuffix;
   if (fileName && fileName[0]) {
     path.push_back('/');
     path.append(fileName);

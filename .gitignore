@@ -21,3 +21,7 @@ npm-debug.log*
 # Temporary files
 *.tmp
 *.temp
+
+# Local build and release artifacts
+build/
+dist/

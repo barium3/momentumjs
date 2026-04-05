@@ -12,10 +12,63 @@ function _momentumNextBitmapInstanceId() {
 }
 
 function _momentumGetRuntimeFolder() {
-  return new Folder(
-    Folder("~").fsName +
-      "/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/Momentum/runtime"
+  var overridePath = "";
+  try {
+    if ($.global.__momentumRuntimePath) {
+      overridePath = String($.global.__momentumRuntimePath);
+    }
+  } catch (_momentumRuntimeOverrideError) {}
+  if (overridePath) {
+    return new Folder(overridePath);
+  }
+
+  var pluginInstallFolder = _momentumFindInstalledPluginFolder();
+  if (pluginInstallFolder) {
+    return new Folder(pluginInstallFolder.fsName + "/runtime");
+  }
+
+  return null;
+}
+
+function _momentumFindInstalledPluginFolder() {
+  var homeFolder = Folder("~");
+  var commonPluginsFolder = new Folder(
+    homeFolder.fsName + "/Library/Application Support/Adobe/Common/Plug-ins"
   );
+  if (!commonPluginsFolder.exists) {
+    return null;
+  }
+
+  var directMomentumFolder = new Folder(commonPluginsFolder.fsName + "/Momentum");
+  if (new Folder(directMomentumFolder.fsName + "/Momentum.plugin").exists) {
+    return directMomentumFolder;
+  }
+
+  var versionEntries = [];
+  try {
+    versionEntries = commonPluginsFolder.getFiles(function (entry) {
+      return entry instanceof Folder;
+    });
+  } catch (_momentumPluginSearchError) {
+    versionEntries = [];
+  }
+
+  for (var i = 0; i < versionEntries.length; i += 1) {
+    var versionFolder = versionEntries[i];
+    if (!(versionFolder instanceof Folder)) {
+      continue;
+    }
+    var mediaCoreFolder = new Folder(versionFolder.fsName + "/MediaCore");
+    if (!mediaCoreFolder.exists) {
+      continue;
+    }
+    var momentumFolder = new Folder(mediaCoreFolder.fsName + "/Momentum");
+    if (new Folder(momentumFolder.fsName + "/Momentum.plugin").exists) {
+      return momentumFolder;
+    }
+  }
+
+  return null;
 }
 
 function _momentumAppendApplyTrace(message) {
@@ -138,7 +191,11 @@ function _momentumWritePendingRuntimeBundleRaw(bundleText) {
 }
 
 function _momentumClearPendingRuntimeBundle() {
-  var pendingFile = new File(_momentumGetRuntimeFolder().fsName + "/pending_sketch_bundle.json");
+  var runtimeFolder = _momentumGetRuntimeFolder();
+  if (!runtimeFolder) {
+    return "Error: Cannot resolve Momentum runtime directory.";
+  }
+  var pendingFile = new File(runtimeFolder.fsName + "/pending_sketch_bundle.json");
   if (!pendingFile.exists) {
     return "";
   }
@@ -160,7 +217,11 @@ function _momentumClearPendingRuntimeBundle() {
 
 function _momentumGetRuntimeInstanceFolder(instanceId) {
   var safeInstanceId = Math.max(1, Math.floor(Number(instanceId) || 0));
-  return new Folder(_momentumGetRuntimeFolder().fsName + "/instances/" + String(safeInstanceId));
+  var runtimeFolder = _momentumGetRuntimeFolder();
+  if (!runtimeFolder) {
+    return null;
+  }
+  return new Folder(runtimeFolder.fsName + "/instances/" + String(safeInstanceId));
 }
 
 function _momentumWriteTextFileRaw(targetFile, content) {
@@ -193,7 +254,7 @@ function _momentumWriteRuntimeInstanceFilesRaw(instanceId, sourceText, bundleTex
 
   var instanceFolder = _momentumGetRuntimeInstanceFolder(instanceId);
   if (!_momentumEnsureFolder(instanceFolder)) {
-    return "Error: Cannot create Momentum instance runtime directory: " + instanceFolder.fsName;
+    return "Error: Cannot create Momentum instance runtime directory: " + (instanceFolder ? instanceFolder.fsName : "<unresolved>");
   }
 
   var sourceFile = new File(instanceFolder.fsName + "/sketch.js");
