@@ -16,6 +16,7 @@ fi
 PLUGIN_SOURCE_DIR=""
 for candidate in \
   "${ROOT_DIR}/Momentum.plugin" \
+  "${ROOT_DIR}/build-universal/Debug/Momentum.plugin" \
   "${ROOT_DIR}/build/Debug/Momentum.plugin"
 do
   if [ -d "${candidate}/Contents/MacOS" ]; then

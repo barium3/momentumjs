@@ -45,6 +45,7 @@ resolve_plugin_source() {
 
   for candidate in \
     "${ROOT_DIR}/Momentum.plugin" \
+    "${ROOT_DIR}/build-universal/Debug/Momentum.plugin" \
     "${ROOT_DIR}/build/Debug/Momentum.plugin" \
     "${ROOT_DIR}/dist/Momentum.plugin"
   do

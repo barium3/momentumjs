@@ -24,4 +24,6 @@ npm-debug.log*
 
 # Local build and release artifacts
 build/
+build-arm64/
+build-universal/
 dist/
