@@ -736,6 +736,32 @@ std::string ResolveBundleSketchPath(const RuntimeSketchBundle& bundle) {
   return runtimeDirectory + "/" + bundle.sourcePath;
 }
 
+std::string ResolveBundleDebugTracePath(const RuntimeSketchBundle& bundle) {
+  if (!bundle.debugTracePath.empty()) {
+    if (bundle.debugTracePath[0] == '/') {
+      return bundle.debugTracePath;
+    }
+    const std::string runtimeDirectory = GetRuntimeDirectoryPath();
+    if (runtimeDirectory.empty()) {
+      return bundle.debugTracePath;
+    }
+    return runtimeDirectory + "/" + bundle.debugTracePath;
+  }
+
+  if (bundle.sourcePath.empty()) {
+    const std::string runtimeDirectory = GetRuntimeDirectoryPath();
+    return runtimeDirectory.empty() ? std::string() : runtimeDirectory + "/debug_trace.log";
+  }
+
+  std::filesystem::path sourcePath(bundle.sourcePath);
+  if (sourcePath.has_parent_path()) {
+    return (sourcePath.parent_path() / "debug_trace.log").string();
+  }
+
+  const std::string runtimeDirectory = GetRuntimeDirectoryPath();
+  return runtimeDirectory.empty() ? std::string() : runtimeDirectory + "/debug_trace.log";
+}
+
 }  // namespace
 
 double GetTimeSeconds(PF_InData* in_data) {
@@ -1012,6 +1038,12 @@ RuntimeSketchBundle ReadRuntimeSketchBundleFromText(
   if (const auto sourceHash = ExtractJsonStringField(bundleText, "sourceHash")) {
     bundle.sourceHash = *sourceHash;
   }
+  if (const auto debugTracePath = ExtractJsonStringField(bundleText, "debugTracePath")) {
+    bundle.debugTracePath = *debugTracePath;
+  }
+  if (const auto debugSessionId = ExtractJsonStringField(bundleText, "debugSessionId")) {
+    bundle.debugSessionId = *debugSessionId;
+  }
   if (const auto profile = ExtractJsonStringField(bundleText, "profile")) {
     bundle.profile = *profile;
   } else if (const auto nestedProfile = ExtractNestedJsonStringField(bundleText, "analysis", "profile")) {
@@ -1068,6 +1100,7 @@ RuntimeSketchBundle ReadRuntimeSketchBundleFromText(
   }
 
   bundle.sourcePath = ResolveBundleSketchPath(bundle);
+  bundle.debugTracePath = ResolveBundleDebugTracePath(bundle);
   return bundle;
 }
 

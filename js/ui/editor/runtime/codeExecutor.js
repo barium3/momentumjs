@@ -394,6 +394,18 @@ window.codeExecutor = (function () {
     }
   }
 
+  function bindSilentConsole(session) {
+    const noop = function () {};
+    session.setValue("console", {
+      log: noop,
+      info: noop,
+      warn: noop,
+      error: noop,
+      debug: noop,
+    });
+    session.setValue("print", noop);
+  }
+
   function buildBitmapControllerCallsiteId(node, calleeName) {
     const safeName = String(calleeName || "controller").replace(/[^\w$]/g, "_");
     const loc =
@@ -822,6 +834,7 @@ window.codeExecutor = (function () {
     try {
       bindP5RuntimeVariables(window, session, runtime.p);
       bindP5RuntimeFunctions(session, runtime.p);
+      bindSilentConsole(session);
       bindControllerBootstrapStubs(session, controllerCollector);
 
       const entrypoints = buildControllerBootstrapEntrypoints(controllerSource, window);

@@ -71,33 +71,6 @@ function _momentumFindInstalledPluginFolder() {
   return null;
 }
 
-function _momentumAppendApplyTrace(message) {
-  var runtimeFolder = _momentumGetRuntimeFolder();
-  if (!_momentumEnsureFolder(runtimeFolder)) {
-    return;
-  }
-
-  var traceFile = new File(runtimeFolder.fsName + "/apply_trace.log");
-  traceFile.encoding = "UTF-8";
-  var line =
-    "ts_ms=" +
-    String(new Date().getTime()) +
-    " " +
-    String(message == null ? "" : message).replace(/[\r\n]+/g, " ");
-
-  try {
-    if (!traceFile.open("a")) {
-      return;
-    }
-    traceFile.writeln(line);
-    traceFile.close();
-  } catch (_traceWriteError) {
-    try {
-      traceFile.close();
-    } catch (_traceCloseError) {}
-  }
-}
-
 function _momentumEnsureFolder(folder) {
   if (!folder) {
     return false;
@@ -155,13 +128,6 @@ function _momentumWriteRuntimeFile(fileName, encodedContent) {
     return "Error: Cannot write file: " + targetFile.fsName + " (" + writeError.toString() + ")";
   }
 
-  _momentumAppendApplyTrace(
-    "phase=write_runtime_file" +
-    " file=" + fileName +
-    " bytes=" + content.length +
-    " path=" + targetFile.fsName
-  );
-
   return JSON.stringify({
     ok: true,
     file: targetFile.fsName,
@@ -180,12 +146,6 @@ function _momentumWritePendingRuntimeBundleRaw(bundleText) {
   if (writeError) {
     return writeError;
   }
-
-  _momentumAppendApplyTrace(
-    "phase=write_pending_runtime_bundle" +
-    " path=" + pendingFile.fsName +
-    " bundle_bytes=" + String(String(bundleText || "").length)
-  );
 
   return "";
 }
@@ -208,10 +168,6 @@ function _momentumClearPendingRuntimeBundle() {
     return "Error: Cannot remove file: " + pendingFile.fsName + " (" + removeError.toString() + ")";
   }
 
-  _momentumAppendApplyTrace(
-    "phase=clear_pending_runtime_bundle" +
-    " path=" + pendingFile.fsName
-  );
   return "";
 }
 
@@ -222,6 +178,14 @@ function _momentumGetRuntimeInstanceFolder(instanceId) {
     return null;
   }
   return new Folder(runtimeFolder.fsName + "/instances/" + String(safeInstanceId));
+}
+
+function _momentumGetRuntimeInstanceDebugTraceFile(instanceId) {
+  var instanceFolder = _momentumGetRuntimeInstanceFolder(instanceId);
+  if (!instanceFolder) {
+    return null;
+  }
+  return new File(instanceFolder.fsName + "/debug_trace.log");
 }
 
 function _momentumWriteTextFileRaw(targetFile, content) {
@@ -259,6 +223,7 @@ function _momentumWriteRuntimeInstanceFilesRaw(instanceId, sourceText, bundleTex
 
   var sourceFile = new File(instanceFolder.fsName + "/sketch.js");
   var bundleFile = new File(instanceFolder.fsName + "/sketch_bundle.json");
+  var debugTraceFile = _momentumGetRuntimeInstanceDebugTraceFile(instanceId);
   var sourceWriteError = _momentumWriteTextFileRaw(sourceFile, sourceText);
   if (sourceWriteError) {
     return sourceWriteError;
@@ -267,15 +232,10 @@ function _momentumWriteRuntimeInstanceFilesRaw(instanceId, sourceText, bundleTex
   if (bundleWriteError) {
     return bundleWriteError;
   }
-
-  _momentumAppendApplyTrace(
-    "phase=write_instance_runtime" +
-    " instance_id=" + String(Math.floor(Number(instanceId) || 0)) +
-    " source=" + sourceFile.fsName +
-    " bundle=" + bundleFile.fsName +
-    " source_bytes=" + String(String(sourceText || "").length) +
-    " bundle_bytes=" + String(String(bundleText || "").length)
-  );
+  var debugTraceWriteError = _momentumWriteTextFileRaw(debugTraceFile, "");
+  if (debugTraceWriteError) {
+    return debugTraceWriteError;
+  }
 
   return "";
 }

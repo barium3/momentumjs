@@ -364,7 +364,27 @@ window.consoleManager = (function () {
     }
   }
 
+  function appendExternalLine(text, level) {
+    if (!consoleOutput) {
+      return;
+    }
+
+    const safeText = escapeHtml(text == null ? "" : String(text)).replace(/\r?\n/g, "<br>");
+    const lineDiv = document.createElement("div");
+    const normalizedLevel = level === "error" ? "error" : level === "warn" ? "warn" : "log";
+    let className = "console-line";
+    if (normalizedLevel === "error") {
+      className += " console-error-line";
+    } else if (normalizedLevel === "warn") {
+      className += " console-warn-line";
+    }
+    lineDiv.className = className;
+    lineDiv.innerHTML = `<span class="console-message">${safeText}</span>`;
+    appendLine(lineDiv);
+  }
+
   return {
+    appendExternalLine,
     initConsole,
     clearConsole,
   };

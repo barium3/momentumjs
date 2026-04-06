@@ -191,6 +191,15 @@ window.fileManager = (function () {
     window.consoleManager.clearConsole();
   }
 
+  function stopDebugTraceSession() {
+    if (
+      window.debugTraceManager &&
+      typeof window.debugTraceManager.stop === "function"
+    ) {
+      window.debugTraceManager.stop();
+    }
+  }
+
   function flushPendingEditorState() {
     if (!pendingEditorState || !window.editorManager || !window.editorManager.editor) {
       return false;
@@ -482,6 +491,7 @@ window.fileManager = (function () {
         : getDefaultFileContent(fileName);
 
     setDraftSessionState(fileName);
+    stopDebugTraceSession();
     clearSelectedFiles();
     showCodeEditor();
     applyEditorContent(content, "javascript");
@@ -513,6 +523,7 @@ window.fileManager = (function () {
   }
 
   function openFile(filePath) {
+    stopDebugTraceSession();
     clearConsole();
     openPathInEditor(filePath);
   }
@@ -599,6 +610,7 @@ window.fileManager = (function () {
         return;
       }
 
+      stopDebugTraceSession();
       clearConsole();
 
       if (!fileName.includes(".")) {

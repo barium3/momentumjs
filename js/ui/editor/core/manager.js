@@ -712,6 +712,14 @@ window.momentumEditorManagerFactory = (function () {
     function setRenderMode(mode) {
       renderMode = normalizeRenderMode(mode);
 
+      if (
+        renderMode !== "bitmap" &&
+        window.debugTraceManager &&
+        typeof window.debugTraceManager.stop === "function"
+      ) {
+        window.debugTraceManager.stop();
+      }
+
       try {
         window.localStorage.setItem(RENDER_MODE_STORAGE_KEY, renderMode);
       } catch (_ignore) {}
@@ -1215,6 +1223,18 @@ window.momentumEditorManagerFactory = (function () {
       .then((applyResultText) => {
         const applyResult = parseApplyMomentumResult(applyResultText);
         reportApplyMomentumWarnings(applyResult);
+        if (
+          applyResult &&
+          applyResult.debugTracePath &&
+          window.debugTraceManager &&
+          typeof window.debugTraceManager.startSession === "function"
+        ) {
+          window.debugTraceManager.startSession({
+            compName: applyResult.comp || "",
+            filePath: applyResult.debugTracePath,
+            sessionId: applyResult.debugSessionId || applyResult.instanceId || "",
+          });
+        }
         return true;
       })
       .catch((error) => {
@@ -1237,6 +1257,12 @@ window.momentumEditorManagerFactory = (function () {
           const code = editor.getValue();
           const fileName = window.fileManager.getCurrentFileName && window.fileManager.getCurrentFileName();
           const selectedRenderMode = renderMode;
+          if (
+            window.debugTraceManager &&
+            typeof window.debugTraceManager.stop === "function"
+          ) {
+            window.debugTraceManager.stop();
+          }
           if (
             window.consoleManager &&
             typeof window.consoleManager.clearConsole === "function"

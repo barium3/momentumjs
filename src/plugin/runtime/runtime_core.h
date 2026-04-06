@@ -39,16 +39,6 @@ bool BuildBitmapFramePlanAtCurrentTime(
   std::string* errorMessage
 );
 
-void ResetPerformanceTrace();
-void AppendPerformanceTraceMetric(const std::string& key, double milliseconds);
-void AppendPerformanceTraceField(const std::string& key, const std::string& value);
-void FlushPerformanceTrace(const std::string& prefix);
-void TraceRenderLifecycleEvent(
-  const std::string& event,
-  std::uint64_t cacheKey,
-  const std::string& detail
-);
-
 void MarkControllerHistoryDirty(
   std::uintptr_t cacheKey,
   long earliestAffectedFrame,

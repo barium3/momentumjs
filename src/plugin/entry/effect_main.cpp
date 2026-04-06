@@ -59,79 +59,8 @@ std::uintptr_t GetEffectRefKey(PF_InData* in_data) {
     : 0;
 }
 
-const char* CommandName(PF_Cmd cmd) {
-  switch (cmd) {
-    case PF_Cmd_ABOUT: return "about";
-    case PF_Cmd_GLOBAL_SETUP: return "global_setup";
-    case PF_Cmd_GLOBAL_SETDOWN: return "global_setdown";
-    case PF_Cmd_PARAMS_SETUP: return "params_setup";
-    case PF_Cmd_SEQUENCE_SETUP: return "sequence_setup";
-    case PF_Cmd_SEQUENCE_RESETUP: return "sequence_resetup";
-    case PF_Cmd_SEQUENCE_FLATTEN: return "sequence_flatten";
-    case PF_Cmd_SEQUENCE_SETDOWN: return "sequence_setdown";
-    case PF_Cmd_RENDER: return "render";
-    case PF_Cmd_EVENT: return "event";
-    case PF_Cmd_USER_CHANGED_PARAM: return "user_changed_param";
-    case PF_Cmd_ARBITRARY_CALLBACK: return "arbitrary_callback";
-    case PF_Cmd_QUERY_DYNAMIC_FLAGS: return "query_dynamic_flags";
-    case PF_Cmd_UPDATE_PARAMS_UI: return "update_params_ui";
-    case PF_Cmd_SMART_PRE_RENDER: return "smart_pre_render";
-    case PF_Cmd_SMART_RENDER: return "smart_render";
-    case PF_Cmd_SMART_RENDER_GPU: return "smart_render_gpu";
-    case PF_Cmd_GPU_DEVICE_SETUP: return "gpu_device_setup";
-    case PF_Cmd_GPU_DEVICE_SETDOWN: return "gpu_device_setdown";
-    case PF_Cmd_GET_FLATTENED_SEQUENCE_DATA: return "get_flattened_sequence_data";
-    default: return "unknown";
-  }
-}
-
-const char* WindowTypeName(PF_WindowType type) {
-  switch (type) {
-    case PF_Window_COMP: return "comp";
-    case PF_Window_LAYER: return "layer";
-    case PF_Window_EFFECT: return "effect";
-    default: return "other";
-  }
-}
-
-const char* EventTypeName(PF_EventType type) {
-  switch (type) {
-    case PF_Event_NEW_CONTEXT: return "new_context";
-    case PF_Event_ACTIVATE: return "activate";
-    case PF_Event_DO_CLICK: return "do_click";
-    case PF_Event_DRAG: return "drag";
-    case PF_Event_DRAW: return "draw";
-    case PF_Event_ADJUST_CURSOR: return "adjust_cursor";
-    default: return "other";
-  }
-}
-
-std::string GetEntryTraceFlagPath() {
-  return runtime_internal::GetRuntimeDirectoryPath() + "/render_trace.on";
-}
-
-std::string GetEntryTraceLogPath() {
-  return runtime_internal::GetRuntimeDirectoryPath() + "/entry_trace.log";
-}
-
 std::string GetColorTraceLogPath() {
   return runtime_internal::GetRuntimeDirectoryPath() + "/color_trace.log";
-}
-
-void WriteEntryTraceLine(const std::string& line) {
-  const std::string flagPath = GetEntryTraceFlagPath();
-  if (flagPath.empty() || !runtime_internal::FileExists(flagPath)) {
-    return;
-  }
-  const std::string logPath = GetEntryTraceLogPath();
-  if (logPath.empty()) {
-    return;
-  }
-  std::ofstream stream(logPath.c_str(), std::ios::out | std::ios::app);
-  if (!stream.is_open()) {
-    return;
-  }
-  stream << line << '\n';
 }
 
 void AppendColorTraceLine(const std::string& line) {
@@ -148,30 +77,6 @@ void AppendColorTraceLine(const std::string& line) {
     now.time_since_epoch()
   ).count();
   stream << "ts_ms=" << timestampMs << ' ' << line << '\n';
-}
-
-void TracePluginEntry(
-  const char* phase,
-  PF_InData* in_data,
-  const std::string& details = std::string()
-) {
-  std::ostringstream stream;
-  const auto now = std::chrono::system_clock::now();
-  const auto timestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-    now.time_since_epoch()
-  ).count();
-  stream << "ts_ms=" << timestampMs;
-  stream << " phase=" << (phase ? phase : "unknown");
-  stream << " effect_ref=" << GetEffectRefKey(in_data);
-  if (in_data) {
-    stream << " width=" << in_data->width;
-    stream << " height=" << in_data->height;
-    stream << " current_time=" << runtime_internal::GetCompTimeSeconds(in_data);
-  }
-  if (!details.empty()) {
-    stream << ' ' << details;
-  }
-  WriteEntryTraceLine(stream.str());
 }
 
 std::mutex gEffectInstanceRegistryMutex;
@@ -1240,33 +1145,6 @@ PF_Fixed DoubleToFixed(double value) {
   return static_cast<PF_Fixed>(value * 65536.0);
 }
 
-void TracePointOverlayEvent(
-  const char* phase,
-  PF_InData* in_data,
-  PF_EventExtra* extra,
-  int slot,
-  std::uint64_t instanceId,
-  const PF_Point* framePoint = NULL,
-  const PF_FixedPoint* layerPoint = NULL
-) {
-  std::ostringstream details;
-  details << "event_type=" << EventTypeName(extra ? extra->e_type : PF_Event_NONE);
-  details << " instance_id=" << instanceId;
-  details << " slot=" << slot;
-  if (extra && extra->contextH && *extra->contextH) {
-    details << " window=" << WindowTypeName((*extra->contextH)->w_type);
-  }
-  if (framePoint) {
-    details << " frame_x=" << framePoint->h;
-    details << " frame_y=" << framePoint->v;
-  }
-  if (layerPoint) {
-    details << " layer_x=" << FixedToDouble(layerPoint->x);
-    details << " layer_y=" << FixedToDouble(layerPoint->y);
-  }
-  TracePluginEntry(phase, in_data, details.str());
-}
-
 std::string BuildControllerStateHash(const ControllerPoolState& state) {
   std::ostringstream stream;
   stream << std::fixed << std::setprecision(4);
@@ -2098,12 +1976,6 @@ PF_Err PersistColorControllerValue(
     NULL
   );
   if (!interfaceSuite.get() || !streamSuite.get() || !effectSuite.get() || !keyframeSuite.get()) {
-    TracePluginEntry(
-      "persist_color_stream_unavailable",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown")
-    );
     return PF_Err_NONE;
   }
 
@@ -2124,13 +1996,6 @@ PF_Err PersistColorControllerValue(
     &effectH
   );
   if (effectErr != A_Err_NONE || !effectH) {
-    TracePluginEntry(
-      "persist_color_stream_effect_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(effectErr))
-    );
     return static_cast<PF_Err>(effectErr);
   }
 
@@ -2142,12 +2007,6 @@ PF_Err PersistColorControllerValue(
     slot
   );
   if (colorParamSlot < 0 || colorParamSlot >= kControllerSlotCount) {
-    TracePluginEntry(
-      "persist_color_stream_missing_slot",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown")
-    );
     return PF_Err_BAD_CALLBACK_PARAM;
   }
   const PF_ParamIndex paramIndex = ControllerColorValueParamIndex(colorParamSlot);
@@ -2159,60 +2018,24 @@ PF_Err PersistColorControllerValue(
   );
   if (suiteErr != A_Err_NONE || !streamH) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_color_stream_open_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " param_index=" + std::to_string(static_cast<int>(paramIndex)) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
 
   suiteErr = streamSuite->AEGP_GetStreamType(streamH, &streamType);
   if (suiteErr != A_Err_NONE) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_color_stream_type_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
   if (streamType != AEGP_StreamType_ARB) {
-    TracePluginEntry(
-      "persist_color_stream_type_mismatch",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " stream_type=" + std::to_string(static_cast<int>(streamType)) +
-        " reason=" + std::string(reason ? reason : "unknown")
-    );
     goto cleanup;
   }
 
   suiteErr = keyframeSuite->AEGP_GetStreamNumKFs(streamH, &numKfs);
   if (suiteErr != A_Err_NONE) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_color_stream_kf_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
   if (numKfs == AEGP_NumKF_NO_DATA || numKfs > 0) {
-    TracePluginEntry(
-      "persist_color_stream_skipped",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " num_kfs=" + std::to_string(numKfs)
-    );
     goto cleanup;
   }
 
@@ -2230,13 +2053,6 @@ PF_Err PersistColorControllerValue(
   );
   if (suiteErr != A_Err_NONE) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_color_stream_read_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
   haveStreamValue = true;
@@ -2256,13 +2072,6 @@ PF_Err PersistColorControllerValue(
     PF_ArbitraryH nextHandle = NULL;
     err = AllocateColorArbHandle(in_data, safeColor, &nextHandle);
     if (err != PF_Err_NONE || !nextHandle) {
-      TracePluginEntry(
-        "persist_color_stream_allocate_error",
-        in_data,
-        "slot=" + std::to_string(slot) +
-          " reason=" + std::string(reason ? reason : "unknown") +
-          " err=" + std::to_string(static_cast<int>(err))
-      );
       goto cleanup;
     }
     streamValue.val.arbH = nextHandle;
@@ -2275,27 +2084,9 @@ PF_Err PersistColorControllerValue(
   );
   if (suiteErr != A_Err_NONE) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_color_stream_write_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
 
-  TracePluginEntry(
-    "persist_color_stream",
-    in_data,
-    "slot=" + std::to_string(slot) +
-      " reason=" + std::string(reason ? reason : "unknown") +
-      " wrote_in_place=" + std::string(wroteInPlace ? "1" : "0") +
-      " color=" + std::to_string(safeColor.r) + "," +
-      std::to_string(safeColor.g) + "," +
-      std::to_string(safeColor.b) + "," +
-      std::to_string(safeColor.a)
-  );
 
 cleanup:
   if (haveStreamValue) {
@@ -2330,12 +2121,6 @@ PF_Err PersistAngleControllerValue(
   const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
   const int angleParamSlot = ResolveAngleParamSlotForLogicalSlot(bundle, slot);
   if (angleParamSlot < 0 || angleParamSlot >= kControllerSlotCount) {
-    TracePluginEntry(
-      "persist_angle_stream_missing_slot",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown")
-    );
     return PF_Err_BAD_CALLBACK_PARAM;
   }
   WriteAngleControllerValueToParams(params, angleParamSlot, safeDegrees);
@@ -2365,12 +2150,6 @@ PF_Err PersistAngleControllerValue(
     NULL
   );
   if (!interfaceSuite.get() || !streamSuite.get() || !effectSuite.get() || !keyframeSuite.get()) {
-    TracePluginEntry(
-      "persist_angle_stream_unavailable",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown")
-    );
     return PF_Err_NONE;
   }
 
@@ -2390,13 +2169,6 @@ PF_Err PersistAngleControllerValue(
     &effectH
   );
   if (effectErr != A_Err_NONE || !effectH) {
-    TracePluginEntry(
-      "persist_angle_stream_effect_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(effectErr))
-    );
     return static_cast<PF_Err>(effectErr);
   }
 
@@ -2409,60 +2181,24 @@ PF_Err PersistAngleControllerValue(
   );
   if (suiteErr != A_Err_NONE || !streamH) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_angle_stream_open_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " param_index=" + std::to_string(static_cast<int>(paramIndex)) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
 
   suiteErr = streamSuite->AEGP_GetStreamType(streamH, &streamType);
   if (suiteErr != A_Err_NONE) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_angle_stream_type_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
   if (streamType != AEGP_StreamType_OneD) {
-    TracePluginEntry(
-      "persist_angle_stream_type_mismatch",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " stream_type=" + std::to_string(static_cast<int>(streamType)) +
-        " reason=" + std::string(reason ? reason : "unknown")
-    );
     goto cleanup;
   }
 
   suiteErr = keyframeSuite->AEGP_GetStreamNumKFs(streamH, &numKfs);
   if (suiteErr != A_Err_NONE) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_angle_stream_kf_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
   if (numKfs == AEGP_NumKF_NO_DATA || numKfs > 0) {
-    TracePluginEntry(
-      "persist_angle_stream_skipped",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " num_kfs=" + std::to_string(numKfs)
-    );
     goto cleanup;
   }
 
@@ -2480,13 +2216,6 @@ PF_Err PersistAngleControllerValue(
   );
   if (suiteErr != A_Err_NONE) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_angle_stream_read_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
   haveStreamValue = true;
@@ -2500,23 +2229,9 @@ PF_Err PersistAngleControllerValue(
   );
   if (suiteErr != A_Err_NONE) {
     err = static_cast<PF_Err>(suiteErr);
-    TracePluginEntry(
-      "persist_angle_stream_write_error",
-      in_data,
-      "slot=" + std::to_string(slot) +
-        " reason=" + std::string(reason ? reason : "unknown") +
-        " err=" + std::to_string(static_cast<int>(suiteErr))
-    );
     goto cleanup;
   }
 
-  TracePluginEntry(
-    "persist_angle_stream",
-    in_data,
-    "slot=" + std::to_string(slot) +
-      " reason=" + std::string(reason ? reason : "unknown") +
-      " degrees=" + std::to_string(safeDegrees)
-  );
 
 cleanup:
   if (haveStreamValue) {
@@ -3920,23 +3635,6 @@ PF_Err DrawPointControllerHandles(
       }
     }
   }
-  TracePluginEntry(
-    "point_overlay_draw",
-    in_data,
-    "event_type=" + std::string(EventTypeName(extra ? extra->e_type : PF_Event_NONE)) +
-      " instance_id=" + std::to_string(instanceId) +
-      " active_slot=" + std::to_string(activeSlot) +
-      " visible_count=" + std::to_string(visibleCount) +
-      (firstVisibleInfo
-         ? " frame_x=" + std::to_string(firstVisibleInfo->framePoint.h) +
-             " frame_y=" + std::to_string(firstVisibleInfo->framePoint.v) +
-             " layer_x=" + std::to_string(FixedToDouble(firstVisibleInfo->layerPoint.x)) +
-             " layer_y=" + std::to_string(FixedToDouble(firstVisibleInfo->layerPoint.y))
-         : std::string()) +
-      (extra && extra->contextH && *extra->contextH
-         ? " window=" + std::string(WindowTypeName((*extra->contextH)->w_type))
-         : std::string())
-  );
 
   PF_Err err = PF_Err_NONE;
   for (const PointHandleDrawInfo& info : infos) {
@@ -3968,27 +3666,11 @@ PF_Err BeginPointControllerDrag(
   PF_Point mousePoint = *reinterpret_cast<PF_Point*>(&extra->u.do_click.screen_point);
   const int slot = HitTestPointHandle(infos, mousePoint);
   if (slot < 0) {
-    TracePluginEntry(
-      "point_overlay_miss",
-      in_data,
-      "event_type=" + std::string(EventTypeName(extra->e_type)) +
-        " mouse_x=" + std::to_string(mousePoint.h) +
-        " mouse_y=" + std::to_string(mousePoint.v)
-    );
     return PF_Err_NONE;
   }
 
   const std::uint64_t instanceId = ResolvePointControllerInstanceId(in_data, params);
   SetActivePointOverlaySlot(instanceId, slot);
-  TracePointOverlayEvent(
-    "point_overlay_begin",
-    in_data,
-    extra,
-    slot,
-    instanceId,
-    &mousePoint,
-    &infos[static_cast<std::size_t>(slot)].layerPoint
-  );
 
   extra->u.do_click.send_drag = TRUE;
   extra->u.do_click.continue_refcon[0] = slot + 1;
@@ -4030,28 +3712,6 @@ PF_Err UpdateDraggedPointController(
     ControllerPointParamIndex(slot),
     "point-overlay-drag"
   );
-
-  if (extra->u.do_click.last_time) {
-    TracePointOverlayEvent(
-      "point_overlay_commit",
-      in_data,
-      extra,
-      slot,
-      instanceId,
-      &mousePoint,
-      &layerPoint
-    );
-  } else {
-    TracePointOverlayEvent(
-      "point_overlay_preview",
-      in_data,
-      extra,
-      slot,
-      instanceId,
-      &mousePoint,
-      &layerPoint
-    );
-  }
 
   ContinuePointControllerDrag(extra, slot);
   RequestCustomUIRefresh(in_data, out_data, extra, true);
@@ -4106,16 +3766,6 @@ PF_Err HandleCustomCompUIEvent(
   switch (extra->e_type) {
     case PF_Event_NEW_CONTEXT:
     case PF_Event_ACTIVATE:
-      TracePluginEntry(
-        "point_overlay_context",
-        in_data,
-        "event_type=" + std::string(EventTypeName(extra->e_type)) +
-          " instance_id=" + std::to_string(instanceId) +
-          " active_slot=" + std::to_string(GetActivePointOverlaySlot(instanceId)) +
-          (extra->contextH && *extra->contextH
-             ? " window=" + std::string(WindowTypeName((*extra->contextH)->w_type))
-             : std::string())
-      );
       extra->evt_out_flags |= PF_EO_HANDLED_EVENT;
       if (out_data) {
         out_data->out_flags |= PF_OutFlag_REFRESH_UI;
@@ -4968,19 +4618,6 @@ PF_Err HandleUserChangedParam(
       "select-controller-changed"
     );
   }
-  TracePluginEntry(
-    "controller_param_changed",
-    in_data,
-    "instance_id=" + std::to_string(instanceId) +
-      " param_index=" + std::to_string(static_cast<int>(extra->param_index)) +
-      " point_slot=" + std::to_string(pointSlot) +
-      " slider_slot=" + std::to_string(sliderSlot) +
-      " angle_slot=" + std::to_string(angleLogicalSlot) +
-      " angle_param_slot=" + std::to_string(angleParamSlot) +
-      " color_slot=" + std::to_string(colorSlot) +
-      " checkbox_slot=" + std::to_string(checkboxSlot) +
-      " select_slot=" + std::to_string(selectSlot)
-  );
   if (sliderSlot >= 0) {
     PF_ParamDef* sliderParam = params[ControllerSliderParamIndex(sliderSlot)];
     if (sliderParam) {
@@ -5001,18 +4638,6 @@ PF_Err HandleUserChangedParam(
         sliderParam->u.fs_d.value = static_cast<PF_FpLong>(snappedValue);
         sliderParam->uu.change_flags |= PF_ChangeFlag_CHANGED_VALUE;
       }
-      TracePluginEntry(
-        "slider_param_state",
-        in_data,
-        "slot=" + std::to_string(sliderSlot) +
-          " value=" + std::to_string(static_cast<double>(sliderParam->u.fs_d.value)) +
-          " raw_value=" + std::to_string(rawValue) +
-          " snapped_value=" + std::to_string(snappedValue) +
-          " valid_min=" + std::to_string(static_cast<double>(sliderParam->u.fs_d.valid_min)) +
-          " valid_max=" + std::to_string(static_cast<double>(sliderParam->u.fs_d.valid_max)) +
-          " slider_min=" + std::to_string(static_cast<double>(sliderParam->u.fs_d.slider_min)) +
-          " slider_max=" + std::to_string(static_cast<double>(sliderParam->u.fs_d.slider_max))
-      );
     }
   }
   if (out_data) {
@@ -5038,16 +4663,6 @@ PF_Err UpdateParamsUI(
   const std::string syncedControllerHash = LookupSyncedControllerHash(in_data, params);
   const bool controllerHashChanged = syncedControllerHash != bundle.controllerHash;
   bool refreshedLiveStateFromBundle = false;
-  TracePluginEntry(
-    "update_params_ui_bundle",
-    in_data,
-    BuildBundleControllerSummary(bundle) +
-      " revision=" + std::to_string(revision) +
-      " synced_revision=" + std::to_string(syncedRevision) +
-      " controller_hash=" + bundle.controllerHash +
-      " synced_controller_hash=" + syncedControllerHash +
-      (bundleError.empty() ? std::string() : " bundle_error=" + bundleError)
-  );
   if (revision >= 0 && (syncedRevision != revision || controllerHashChanged)) {
     PF_Err syncErr = SyncControllerParamValuesFromBundle(
       in_data,
@@ -5066,12 +4681,6 @@ PF_Err UpdateParamsUI(
     }
     SyncLiveControllerStateFromBundle(in_data, params, bundle);
     refreshedLiveStateFromBundle = true;
-    TracePluginEntry(
-      "update_params_ui_synced_defaults",
-      in_data,
-      "revision=" + std::to_string(revision) +
-        " controller_hash=" + bundle.controllerHash
-    );
   }
   if (!refreshedLiveStateFromBundle) {
     SyncLiveControllerStateFromParams(in_data, out_data, params);
@@ -5571,12 +5180,6 @@ PF_Err SyncControllerParamValuesFromBundle(
     }
   }
 
-  TracePluginEntry(
-    "sync_controller_defaults",
-    in_data,
-    std::string("reason=") + (reason ? reason : "unknown") +
-      " " + BuildBundleControllerSummary(bundle)
-  );
 
   if (out_data) {
     out_data->out_flags |= PF_OutFlag_REFRESH_UI;
@@ -5670,7 +5273,6 @@ PF_Err SyncSequenceRuntimeSnapshotFromLocalFiles(
 }
 
 PF_Err SequenceSetup(PF_InData* in_data, PF_OutData* out_data) {
-  TracePluginEntry("sequence_setup", in_data);
   if (in_data) {
     PF_Handle sequenceHandle = NULL;
     PF_Err err = EnsureSequenceDataHandleInitialized(in_data, out_data, &sequenceHandle);
@@ -5684,7 +5286,6 @@ PF_Err SequenceSetup(PF_InData* in_data, PF_OutData* out_data) {
 }
 
 PF_Err SequenceResetup(PF_InData* in_data, PF_OutData* out_data) {
-  TracePluginEntry("sequence_resetup", in_data);
   if (in_data) {
     PF_Handle sequenceHandle = NULL;
     PF_Err err = EnsureSequenceDataHandleInitialized(in_data, out_data, &sequenceHandle);
@@ -5706,7 +5307,6 @@ PF_Err GetFlattenedSequenceData(PF_InData* in_data, PF_OutData* out_data) {
 }
 
 PF_Err SequenceSetdown(PF_InData* in_data, PF_OutData* out_data) {
-  TracePluginEntry("sequence_setdown", in_data);
   std::uint64_t rememberedInstanceId = ResolveKnownInstanceId(in_data);
 
   if (rememberedInstanceId != 0) {
@@ -5813,10 +5413,6 @@ PF_Err CopyCpuRasterToOutput(
   const A_long sourceOriginX = copyOrigin.sourceOriginX;
   const A_long sourceOriginY = copyOrigin.sourceOriginY;
   const std::size_t rasterSize = raster->size();
-  AppendPerformanceTraceField("ae.source_origin_x", std::to_string(sourceOriginX));
-  AppendPerformanceTraceField("ae.source_origin_y", std::to_string(sourceOriginY));
-  AppendPerformanceTraceField("ae.output_is_tile", copyOrigin.outputLooksLikeTile ? "1" : "0");
-  AppendPerformanceTraceField("ae.copy_origin_mode", copyOrigin.mode);
 
   auto sampleSourcePixel = [&](A_long logicalX, A_long logicalY) -> PF_Pixel {
     if (logicalX < 0 || logicalY < 0 || logicalX >= canvasWidth || logicalY >= canvasHeight) {
@@ -5944,11 +5540,6 @@ PF_Err PreRender(
   PF_OutData* out_data,
   PF_PreRenderExtra* extra
 ) {
-  TracePluginEntry(
-    "pre_render_enter",
-    in_data,
-    std::string("has_extra=") + (extra ? "1" : "0")
-  );
   if (!extra || !extra->input || !extra->output) {
     return PF_Err_BAD_CALLBACK_PARAM;
   }
@@ -5982,11 +5573,6 @@ PF_Err PreRender(
   }
 
   (void)out_data;
-  TracePluginEntry(
-    "pre_render_exit",
-    in_data,
-    "gpu_possible=" + std::string(BitmapGpuBackendAvailable() ? "1" : "0")
-  );
   return PF_Err_NONE;
 }
 
@@ -5996,12 +5582,6 @@ PF_Err SmartRender(
   PF_SmartRenderExtra* extra,
   bool useGpu
 ) {
-  TracePluginEntry(
-    "smart_render_enter",
-    in_data,
-    std::string("mode=") + (useGpu ? "gpu" : "cpu") +
-      " has_extra=" + (extra ? "1" : "0")
-  );
   if (!extra || !extra->input || !extra->cb) {
     return PF_Err_BAD_CALLBACK_PARAM;
   }
@@ -6011,42 +5591,12 @@ PF_Err SmartRender(
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
 
-  const auto smartRenderStartTime = std::chrono::steady_clock::now();
-  ResetPerformanceTrace();
-  AppendPerformanceTraceField("ae.mode", useGpu ? "gpu" : "cpu");
-  AppendPerformanceTraceField("ae.revision", std::to_string(info->revision));
-  AppendPerformanceTraceField("ae.instance_id", std::to_string(info->instanceId));
-  AppendPerformanceTraceField("ae.canvas_width", std::to_string(info->canvasWidth));
-  AppendPerformanceTraceField("ae.canvas_height", std::to_string(info->canvasHeight));
-  AppendPerformanceTraceField("ae.tile_left", std::to_string(info->tileLeft));
-  AppendPerformanceTraceField("ae.tile_top", std::to_string(info->tileTop));
-  AppendPerformanceTraceField("ae.tile_right", std::to_string(info->tileRight));
-  AppendPerformanceTraceField("ae.tile_bottom", std::to_string(info->tileBottom));
-
   PF_EffectWorld* outputWorld = NULL;
   PF_Err err = extra->cb->checkout_output(in_data->effect_ref, &outputWorld);
   if (err != PF_Err_NONE || !outputWorld) {
     const PF_Err outputErr = err != PF_Err_NONE ? err : PF_Err_INTERNAL_STRUCT_DAMAGED;
-    AppendPerformanceTraceField("ae.checkout_output_ok", "0");
-    AppendPerformanceTraceField("ae.err", std::to_string(outputErr));
-    AppendPerformanceTraceMetric(
-      "ae.total",
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - smartRenderStartTime).count()
-    );
-    FlushPerformanceTrace(std::string("event=smart_render path=") + (useGpu ? "gpu" : "cpu"));
-    TracePluginEntry(
-      "smart_render_exit",
-      in_data,
-      std::string("mode=") + (useGpu ? "gpu" : "cpu") +
-        " err=" + std::to_string(outputErr)
-    );
     return outputErr;
   }
-  AppendPerformanceTraceField("ae.checkout_output_ok", "1");
-  AppendPerformanceTraceField("ae.output_width", std::to_string(outputWorld->width));
-  AppendPerformanceTraceField("ae.output_height", std::to_string(outputWorld->height));
-  AppendPerformanceTraceField("ae.output_origin_x", std::to_string(outputWorld->origin_x));
-  AppendPerformanceTraceField("ae.output_origin_y", std::to_string(outputWorld->origin_y));
 
   AEFX_SuiteScoper<PF_WorldSuite2> worldSuite =
     AEFX_SuiteScoper<PF_WorldSuite2>(
@@ -6059,48 +5609,16 @@ PF_Err SmartRender(
   PF_PixelFormat pixelFormat = PF_PixelFormat_INVALID;
   err = worldSuite->PF_GetPixelFormat(outputWorld, &pixelFormat);
   if (err != PF_Err_NONE) {
-    AppendPerformanceTraceField("ae.pixel_format_ok", "0");
-    AppendPerformanceTraceField("ae.err", std::to_string(err));
-    AppendPerformanceTraceMetric(
-      "ae.total",
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - smartRenderStartTime).count()
-    );
-    FlushPerformanceTrace(std::string("event=smart_render path=") + (useGpu ? "gpu" : "cpu"));
-    TracePluginEntry(
-      "smart_render_exit",
-      in_data,
-      std::string("mode=") + (useGpu ? "gpu" : "cpu") +
-        " err=" + std::to_string(err)
-    );
     return err;
   }
-  AppendPerformanceTraceField("ae.pixel_format_ok", "1");
-  AppendPerformanceTraceField("ae.pixel_format", std::to_string(static_cast<int>(pixelFormat)));
   if (!useGpu) {
-    const auto cpuRenderStartTime = std::chrono::steady_clock::now();
     err = RenderCurrentSketchToCpuWorld(in_data, outputWorld, *info, pixelFormat);
-    AppendPerformanceTraceMetric(
-      "ae.cpu_render",
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cpuRenderStartTime).count()
-    );
-    AppendPerformanceTraceField("ae.err", std::to_string(err));
-    AppendPerformanceTraceMetric(
-      "ae.total",
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - smartRenderStartTime).count()
-    );
-    FlushPerformanceTrace("event=smart_render path=cpu");
-    TracePluginEntry(
-      "smart_render_exit",
-      in_data,
-      std::string("mode=cpu err=") + std::to_string(err)
-    );
     return err;
   }
 
   PF_LayerDef sceneSurface = MakeSceneSurface(*outputWorld, *info);
   std::string errorMessage;
   BitmapFramePlan framePlan;
-  const auto planStartTime = std::chrono::steady_clock::now();
   const bool planOk = BuildBitmapFramePlanAtCurrentTime(
     in_data,
     info->revision,
@@ -6109,37 +5627,13 @@ PF_Err SmartRender(
     &framePlan,
     &errorMessage
   );
-  AppendPerformanceTraceMetric(
-    "ae.plan",
-    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - planStartTime).count()
-  );
-  AppendPerformanceTraceField("ae.plan_ok", planOk ? "1" : "0");
   if (!planOk) {
-    AppendPerformanceTraceField("ae.err", std::to_string(PF_Err_INTERNAL_STRUCT_DAMAGED));
-    if (!errorMessage.empty()) {
-      AppendPerformanceTraceField("ae.error_message", errorMessage);
-    }
-    AppendPerformanceTraceMetric(
-      "ae.total",
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - smartRenderStartTime).count()
-    );
-    FlushPerformanceTrace("event=smart_render path=gpu");
-    TracePluginEntry(
-      "smart_render_exit",
-      in_data,
-      std::string("mode=gpu err=") + std::to_string(PF_Err_INTERNAL_STRUCT_DAMAGED)
-    );
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
 
   const OutputCopyOriginInfo copyOrigin = ResolveOutputCopyOrigin(*outputWorld, *info);
   const A_long sourceOriginX = copyOrigin.sourceOriginX;
   const A_long sourceOriginY = copyOrigin.sourceOriginY;
-  AppendPerformanceTraceField("ae.source_origin_x", std::to_string(sourceOriginX));
-  AppendPerformanceTraceField("ae.source_origin_y", std::to_string(sourceOriginY));
-  AppendPerformanceTraceField("ae.output_is_tile", copyOrigin.outputLooksLikeTile ? "1" : "0");
-  AppendPerformanceTraceField("ae.copy_origin_mode", copyOrigin.mode);
-  const auto gpuRenderStartTime = std::chrono::steady_clock::now();
   err = RenderBitmapFramePlan(
     in_data,
     out_data,
@@ -6150,27 +5644,6 @@ PF_Err SmartRender(
     sourceOriginY,
     framePlan,
     &errorMessage
-  );
-  AppendPerformanceTraceMetric(
-    "ae.gpu_render",
-    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - gpuRenderStartTime).count()
-  );
-  AppendPerformanceTraceField("ae.err", std::to_string(err));
-  if (err != PF_Err_NONE) {
-    AppendPerformanceTraceField(
-      "ae.error_message",
-      !errorMessage.empty() ? errorMessage : "gpu-render-failed-with-empty-error-message"
-    );
-  }
-  AppendPerformanceTraceMetric(
-    "ae.total",
-    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - smartRenderStartTime).count()
-  );
-  FlushPerformanceTrace("event=smart_render path=gpu");
-  TracePluginEntry(
-    "smart_render_exit",
-    in_data,
-    std::string("mode=gpu err=") + std::to_string(err)
   );
   return err;
 }
@@ -6309,12 +5782,6 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
   PF_ParamDef def;
   std::string bundleError;
   const RuntimeSketchBundle bundle = ReadCurrentRunRuntimeSketchBundle(&bundleError);
-  TracePluginEntry(
-    "params_setup_bundle",
-    in_data,
-    BuildBundleControllerSummary(bundle) +
-      (bundleError.empty() ? std::string() : " bundle_error=" + bundleError)
-  );
   AEFX_CLR_STRUCT(def);
   def.ui_flags = PF_PUI_INVISIBLE;
 
@@ -6599,12 +6066,6 @@ EffectMain(
   PF_LayerDef* output,
   void* extra
 ) {
-  momentum::TracePluginEntry(
-    "effect_main_dispatch",
-    in_data,
-    std::string("cmd=") + momentum::CommandName(cmd) +
-      " raw_cmd=" + std::to_string(static_cast<int>(cmd))
-  );
   if (out_data && cmd != PF_Cmd_QUERY_DYNAMIC_FLAGS) {
     AEFX_CLR_STRUCT(*out_data);
   }

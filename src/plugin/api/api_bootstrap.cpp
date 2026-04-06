@@ -1,6 +1,9 @@
 #include "api_internal.h"
 #include "api_controller.cpp"
 
+#include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 
 namespace momentum {
@@ -11,6 +14,61 @@ struct JsCallbackRegistration {
   const char* name;
   JSObjectCallAsFunctionCallback callback;
 };
+
+std::string SanitizeDebugTraceText(const std::string& value) {
+  std::string sanitized;
+  sanitized.reserve(value.size());
+  for (char current : value) {
+    if (current == '\r' || current == '\n') {
+      if (sanitized.empty() || sanitized.back() != ' ') {
+        sanitized.push_back(' ');
+      }
+      continue;
+    }
+    sanitized.push_back(current);
+  }
+
+  while (!sanitized.empty() && sanitized.back() == ' ') {
+    sanitized.pop_back();
+  }
+  return sanitized;
+}
+
+std::string ResolveRuntimeDebugTracePath(const JsHostRuntime* runtime) {
+  if (runtime && !runtime->debugTracePath.empty()) {
+    return runtime->debugTracePath;
+  }
+  const std::string runtimeDirectory = runtime_internal::GetRuntimeDirectoryPath();
+  return runtimeDirectory.empty() ? std::string() : runtimeDirectory + "/debug_trace.log";
+}
+
+void AppendRuntimeDebugTraceLine(
+  const JsHostRuntime* runtime,
+  const std::string& level,
+  const std::string& message
+) {
+  const std::string logPath = ResolveRuntimeDebugTracePath(runtime);
+  if (logPath.empty()) {
+    return;
+  }
+
+  std::ofstream stream(logPath.c_str(), std::ios::out | std::ios::app);
+  if (!stream.is_open()) {
+    return;
+  }
+
+  std::ostringstream line;
+  line << "frame=" << (runtime ? runtime->currentFrameCount : 0);
+  line << " time=" << std::fixed << std::setprecision(3)
+       << (runtime ? runtime->currentTimeSeconds : 0.0);
+  line << " level=" << SanitizeDebugTraceText(level);
+  if (runtime && !runtime->debugSessionId.empty()) {
+    line << " session=" << SanitizeDebugTraceText(runtime->debugSessionId);
+  }
+  line << " message=" << SanitizeDebugTraceText(message);
+
+  stream << line.str() << '\n';
+}
 
 constexpr JsCallbackRegistration kRuntimeCallbackRegistrations[] = {
   {"createCanvas", JsCreateCanvas},
@@ -87,6 +145,7 @@ constexpr JsCallbackRegistration kRuntimeCallbackRegistrations[] = {
   {"__momentumNativeExitGraphics", JsMomentumNativeExitGraphics},
   {"__momentumNativePrepareGraphicsBitmap", JsMomentumNativePrepareGraphicsBitmap},
   {"__momentumNativeCommitGraphicsBitmap", JsMomentumNativeCommitGraphicsBitmap},
+  {"__momentumNativeDebugLog", JsMomentumNativeDebugLog},
   {"rectMode", JsRectMode},
   {"ellipseMode", JsEllipseMode},
   {"push", JsPush},
@@ -114,7 +173,41 @@ constexpr JsCallbackRegistration kRuntimeCallbackRegistrations[] = {
 };
 
 constexpr char kBootstrapFoundationScript[] = R"MOMENTUM_BOOT(
-var console = { log: function(){}, info: function(){}, warn: function(){}, error: function(){} };
+function __momentumFormatDebugValue(value) {
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'function') {
+    return '[Function ' + (value.name || 'anonymous') + ']';
+  }
+  try {
+    var json = JSON.stringify(value);
+    if (typeof json === 'string') return json;
+  } catch (_momentumDebugJsonError) {}
+  try {
+    return String(value);
+  } catch (_momentumDebugStringError) {}
+  return '[Unserializable]';
+}
+function __momentumDispatchDebug(level, argsLike) {
+  if (typeof __momentumNativeDebugLog !== 'function') return;
+  var parts = [];
+  for (var i = 0; i < argsLike.length; i += 1) {
+    parts.push(__momentumFormatDebugValue(argsLike[i]));
+  }
+  try {
+    __momentumNativeDebugLog(String(level || 'log'), parts.join(' '));
+  } catch (_momentumDebugDispatchError) {}
+}
+var console = {
+  log: function() { __momentumDispatchDebug('log', arguments); },
+  info: function() { __momentumDispatchDebug('info', arguments); },
+  warn: function() { __momentumDispatchDebug('warn', arguments); },
+  error: function() { __momentumDispatchDebug('error', arguments); },
+  debug: function() { __momentumDispatchDebug('debug', arguments); }
+};
+function print() { __momentumDispatchDebug('log', arguments); }
 var PI = Math.PI;
 var TWO_PI = Math.PI * 2;
 var HALF_PI = Math.PI * 0.5;
@@ -2358,6 +2451,34 @@ void EvaluateBootstrapSource(JSContextRef ctx, const std::string& source) {
 }
 
 }  // namespace
+
+JSValueRef JsMomentumNativeDebugLog(
+  JSContextRef ctx,
+  JSObjectRef function,
+  JSObjectRef thisObject,
+  std::size_t argumentCount,
+  const JSValueRef arguments[],
+  JSValueRef* exception
+) {
+  (void)function;
+  (void)thisObject;
+  (void)exception;
+
+  std::string level = "log";
+  std::string message;
+  if (argumentCount > 0) {
+    level = JsValueToStdString(ctx, arguments[0]);
+  }
+  if (argumentCount > 1) {
+    message = JsValueToStdString(ctx, arguments[1]);
+  } else if (argumentCount > 0) {
+    message = level;
+    level = "log";
+  }
+
+  AppendRuntimeDebugTraceLine(g_activeRuntime, level, message);
+  return JSValueMakeUndefined(ctx);
+}
 
 void SetJsNumber(JSContextRef ctx, JSObjectRef object, const char* name, double value) {
   JSStringRef key = JSStringCreateWithUTF8CString(name);

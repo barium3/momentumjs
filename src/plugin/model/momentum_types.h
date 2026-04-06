@@ -421,6 +421,10 @@ struct JsHostRuntime : RuntimeEngineState {
   bool insideContour = false;
   int shapeKind = BEGIN_SHAPE_DEFAULT;
   double desiredFrameRate = 0.0;
+  long currentFrameCount = 0;
+  double currentTimeSeconds = 0.0;
+  std::string debugTracePath;
+  std::string debugSessionId;
   bool noiseInitialized = false;
   std::vector<double> noiseValues;
 };
@@ -551,6 +555,8 @@ struct RuntimeSketchBundle {
   std::string sourcePath;
   std::string sourceText;
   std::string sourceHash;
+  std::string debugTracePath;
+  std::string debugSessionId;
   std::string profile;
   std::string backgroundMode;
   std::string controllerHash;

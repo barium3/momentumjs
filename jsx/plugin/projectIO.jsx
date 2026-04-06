@@ -60,6 +60,106 @@ function readFile(filePath) {
   return content;
 }
 
+function readFileSegment(filePath, startOffset) {
+  var file = new File(filePath);
+  var offset = Math.max(0, Math.floor(Number(startOffset) || 0));
+  if (!file.exists) {
+    return JSON.stringify({
+      ok: true,
+      exists: false,
+      text: "",
+      startOffset: 0,
+      nextOffset: 0,
+      length: 0,
+      modified: "",
+    });
+  }
+
+  file.encoding = "UTF-8";
+  if (!file.open("r")) {
+    return JSON.stringify({
+      ok: false,
+      error: "Cannot open file for reading: " + file.fsName,
+    });
+  }
+
+  try {
+    var length = Math.max(0, Math.floor(Number(file.length) || 0));
+    if (offset > length) {
+      offset = 0;
+    }
+    if (offset > 0 && typeof file.seek === "function") {
+      try {
+        file.seek(offset, 0);
+      } catch (_seekError) {
+        offset = 0;
+        try {
+          file.seek(0, 0);
+        } catch (_seekResetError) {}
+      }
+    }
+
+    var text = file.read() || "";
+    var modified = "";
+    try {
+      modified = String(file.modified || "");
+    } catch (_modifiedError) {}
+    file.close();
+
+    return JSON.stringify({
+      ok: true,
+      exists: true,
+      text: text,
+      startOffset: offset,
+      nextOffset: offset + text.length,
+      length: length,
+      modified: modified,
+    });
+  } catch (readError) {
+    try {
+      file.close();
+    } catch (_closeError) {}
+    return JSON.stringify({
+      ok: false,
+      error: "Cannot read file segment: " + readError.toString(),
+    });
+  }
+}
+
+function getActiveCompTimeInfo() {
+  try {
+    if (!app.project || !app.project.activeItem || !(app.project.activeItem instanceof CompItem)) {
+      return JSON.stringify({
+        ok: true,
+        active: false,
+      });
+    }
+
+    var comp = app.project.activeItem;
+    var timeSeconds = Number(comp.time || 0);
+    var frameDuration = Number(comp.frameDuration || 0);
+    var frameRate = frameDuration > 0 ? (1 / frameDuration) : 0;
+    var currentFrame = frameRate > 0
+      ? Math.max(1, Math.floor(timeSeconds * frameRate) + 1)
+      : 1;
+
+    return JSON.stringify({
+      ok: true,
+      active: true,
+      compName: String(comp.name || ""),
+      timeSeconds: timeSeconds,
+      frameDuration: frameDuration,
+      frameRate: frameRate,
+      currentFrame: currentFrame,
+    });
+  } catch (error) {
+    return JSON.stringify({
+      ok: false,
+      error: "Cannot read active comp time: " + error.toString(),
+    });
+  }
+}
+
 function executeUserCode(userCode) {
   try {
     var result = eval(userCode);

@@ -2863,7 +2863,6 @@ PF_Err CommitAndWait(id<MTLCommandBuffer> commandBuffer, std::string* errorMessa
 }  // namespace
 
 void DisposeAllMetalBitmapGpuState(const char* reason) {
-  TraceRenderLifecycleEvent("gpu_state_dispose_all", 0, reason ? reason : "unspecified");
   std::lock_guard<std::mutex> lock(gMetalRendererMutex);
   for (auto& cacheEntry : gMetalImageTextures) {
     for (auto& imageEntry : cacheEntry.second) {
@@ -2902,7 +2901,6 @@ void DisposeMetalBitmapGpuStateByCacheKey(std::uint64_t cacheKey, const char* re
   if (cacheKey == 0) {
     return;
   }
-  TraceRenderLifecycleEvent("gpu_state_dispose", cacheKey, reason ? reason : "unspecified");
   std::shared_ptr<std::mutex> cacheRenderLock = GetOrCreateMetalCacheRenderLock(cacheKey);
   std::unique_lock<std::mutex> renderLock;
   if (cacheRenderLock) {
@@ -3008,15 +3006,6 @@ PF_Err RenderBitmapPlanWithMetal(
       }
       return PF_Err_INTERNAL_STRUCT_DAMAGED;
     }
-    AppendPerformanceTraceField("gpu.metal.mode", "exact_output_cache");
-    AppendPerformanceTraceField("gpu.metal.replay_reason", "exact-output-cache");
-    AppendPerformanceTraceField("gpu.metal.plan_ops", "0");
-    AppendPerformanceTraceField("gpu.metal.exact_frame", std::to_string(plan.targetFrame));
-    AppendPerformanceTraceField("gpu.metal.ops", "0");
-    AppendPerformanceTraceField("gpu.metal.fills", "0");
-    AppendPerformanceTraceField("gpu.metal.strokes", "0");
-    AppendPerformanceTraceField("gpu.metal.images", "0");
-    const auto copyStartTime = std::chrono::steady_clock::now();
     PF_Err exactErr = EncodeCopyTextureToOutput(
       exactFrameCommandBuffer,
       rendererState,
@@ -3024,20 +3013,11 @@ PF_Err RenderBitmapPlanWithMetal(
       target,
       errorMessage
     );
-    AppendPerformanceTraceMetric(
-      "gpu.metal.copy",
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - copyStartTime).count()
-    );
     [exactFrameTexture->texture release];
     if (exactErr != PF_Err_NONE) {
       return exactErr;
     }
-    const auto commitStartTime = std::chrono::steady_clock::now();
     exactErr = CommitAndWait(exactFrameCommandBuffer, errorMessage);
-    AppendPerformanceTraceMetric(
-      "gpu.metal.commit",
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - commitStartTime).count()
-    );
     return exactErr;
   }
 
@@ -3067,14 +3047,6 @@ PF_Err RenderBitmapPlanWithMetal(
     plan.profile == BITMAP_GPU_PROFILE_DIRECT_FRAME ||
     !canvasState.initialized ||
     plan.targetFrame < canvasState.lastFrame;
-  std::string replayReason = "append";
-  if (plan.profile == BITMAP_GPU_PROFILE_DIRECT_FRAME) {
-    replayReason = "direct-profile";
-  } else if (!canvasState.initialized) {
-    replayReason = "canvas-uninitialized";
-  } else if (plan.targetFrame < canvasState.lastFrame) {
-    replayReason = "target-before-canvas";
-  }
 
   id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
   if (!commandBuffer) {
@@ -3118,36 +3090,12 @@ PF_Err RenderBitmapPlanWithMetal(
   std::size_t executedStrokes = 0;
   std::size_t executedImages = 0;
 
-  AppendPerformanceTraceField(
-    "gpu.metal.mode",
-    seededFromGpuCheckpoint
-      ? "seeded_gpu_checkpoint_canvas"
-      : (replayFromScratch ? "replay_full_canvas" : "append_canvas")
-  );
-  AppendPerformanceTraceField("gpu.metal.canvas_role", useRecoveryCanvas ? "recovery" : "playback");
-  AppendPerformanceTraceField(
-    "gpu.metal.replay_reason",
-    seededFromGpuCheckpoint ? "seeded-gpu-checkpoint" : replayReason
-  );
-  AppendPerformanceTraceField("gpu.metal.plan_ops", std::to_string(plan.operations.size()));
-  AppendPerformanceTraceField("gpu.metal.canvas_initialized_before", canvasState.initialized ? "1" : "0");
-  AppendPerformanceTraceField("gpu.metal.canvas_last_frame_before", std::to_string(canvasState.lastFrame));
-  if (seededFromGpuCheckpoint) {
-    AppendPerformanceTraceField("gpu.metal.seed_frame", std::to_string(plan.seedFrame));
-  }
   if (!plan.operations.empty()) {
     const BitmapFramePlanOp& firstOp = plan.operations.front();
     const BitmapFramePlanOp& lastOp = plan.operations.back();
-    AppendPerformanceTraceField(
-      "gpu.metal.plan_first_op",
-      "f=" + std::to_string(firstOp.frame) + "," + SummarizeGpuDrawPlanForTrace(firstOp.drawPlan)
-    );
-    AppendPerformanceTraceField(
-      "gpu.metal.plan_last_op",
-      "f=" + std::to_string(lastOp.frame) + "," + SummarizeGpuDrawPlanForTrace(lastOp.drawPlan)
-    );
+    (void)firstOp;
+    (void)lastOp;
   }
-  AppendPerformanceTraceField("gpu.metal.first_operation_frame", std::to_string(firstOperationFrame));
 
   long firstExecutedFrame = -1;
   bool firstExecutedClearTexture = false;
@@ -3166,7 +3114,6 @@ PF_Err RenderBitmapPlanWithMetal(
       firstExecutedClearTexture = clearTexture;
       firstExecutedPlanSummary = SummarizeGpuDrawPlanForTrace(op.drawPlan);
     }
-    const auto drawStartTime = std::chrono::steady_clock::now();
     err = RenderDrawPlanToTexture(
       commandBuffer,
       rendererState,
@@ -3177,10 +3124,6 @@ PF_Err RenderBitmapPlanWithMetal(
       clearTexture,
       nullptr,
       errorMessage
-    );
-    AppendPerformanceTraceMetric(
-      "gpu.metal.draw",
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - drawStartTime).count()
     );
     if (err != PF_Err_NONE) {
       DisposeMetalBitmapGpuStateByCacheKey(plan.cacheKey, "draw-plan-failed");
@@ -3217,27 +3160,14 @@ PF_Err RenderBitmapPlanWithMetal(
     }
   }
 
-  AppendPerformanceTraceField(
-    "gpu.metal.first_executed_frame",
-    firstExecutedFrame >= 0 ? std::to_string(firstExecutedFrame) : "none"
-  );
-  AppendPerformanceTraceField(
-    "gpu.metal.first_executed_clear_texture",
-    firstExecutedFrame >= 0 ? (firstExecutedClearTexture ? "1" : "0") : "none"
-  );
-  if (!firstExecutedPlanSummary.empty()) {
-    AppendPerformanceTraceField("gpu.metal.first_executed_op", firstExecutedPlanSummary);
-  }
-  AppendPerformanceTraceField(
-    "gpu.metal.zero_op_clear",
-    (!seededFromGpuCheckpoint &&
-     replayFromScratch &&
-     executedOps == 0) ? "1" : "0"
-  );
-  AppendPerformanceTraceField("gpu.metal.ops", std::to_string(executedOps));
-  AppendPerformanceTraceField("gpu.metal.fills", std::to_string(executedFills));
-  AppendPerformanceTraceField("gpu.metal.strokes", std::to_string(executedStrokes));
-  AppendPerformanceTraceField("gpu.metal.images", std::to_string(executedImages));
+  (void)firstExecutedFrame;
+  (void)firstExecutedClearTexture;
+  (void)firstExecutedPlanSummary;
+  (void)executedFills;
+  (void)executedStrokes;
+  (void)executedImages;
+  (void)useRecoveryCanvas;
+  (void)seededFromGpuCheckpoint;
 
   id<MTLTexture> exactFrameTextureToStore = CreateRenderTexture(device, plan.width, plan.height, errorMessage);
   if (exactFrameTextureToStore) {
@@ -3265,12 +3195,7 @@ PF_Err RenderBitmapPlanWithMetal(
     plan.targetFrame > 0 &&
     (plan.targetFrame % plan.checkpointInterval) == 0;
 
-  const auto copyStartTime = std::chrono::steady_clock::now();
   err = EncodeCopyTextureToOutput(commandBuffer, rendererState, canvasState.texture, target, errorMessage);
-  AppendPerformanceTraceMetric(
-    "gpu.metal.copy",
-    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - copyStartTime).count()
-  );
   if (err != PF_Err_NONE) {
     if (exactFrameTextureToStore) {
       [exactFrameTextureToStore release];
@@ -3280,12 +3205,7 @@ PF_Err RenderBitmapPlanWithMetal(
     return err;
   }
 
-  const auto commitStartTime = std::chrono::steady_clock::now();
   err = CommitAndWait(commandBuffer, errorMessage);
-  AppendPerformanceTraceMetric(
-    "gpu.metal.commit",
-    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - commitStartTime).count()
-  );
   if (err != PF_Err_NONE) {
     if (exactFrameTextureToStore) {
       [exactFrameTextureToStore release];
@@ -3310,7 +3230,6 @@ PF_Err RenderBitmapPlanWithMetal(
     StoreMetalExactFrameTexture(plan.cacheKey, plan.targetFrame, plan.width, plan.height, exactFrameTextureToStore);
     exactFrameTextureToStore = nil;
   }
-  AppendPerformanceTraceField("gpu.metal.canvas_last_frame_after", std::to_string(canvasState.lastFrame));
   return PF_Err_NONE;
 }
 

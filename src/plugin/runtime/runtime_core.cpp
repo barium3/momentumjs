@@ -37,8 +37,6 @@ using runtime_internal::IsDirectTimeProfile;
 using runtime_internal::IsOpaqueBackgroundProfile;
 using runtime_internal::BuildBindingRegistrationScript;
 using runtime_internal::ExtractTopLevelBindings;
-using runtime_internal::FileExists;
-using runtime_internal::GetRuntimeDirectoryPath;
 using runtime_internal::ReadRuntimeSketchBundle;
 using runtime_internal::ReadRuntimeSketchSource;
 using runtime_internal::ReadTextFile;
@@ -52,8 +50,6 @@ std::unordered_map<std::uint64_t, std::unordered_map<long, GpuRenderPlan>> g_cac
 std::unordered_map<std::uintptr_t, ControllerPoolState> g_liveControllerStates;
 std::recursive_mutex gSketchRuntimeMutex;
 std::mutex gLiveControllerStateMutex;
-thread_local std::vector<std::pair<std::string, std::string>> g_performanceTraceEntries;
-std::mutex gRenderTraceFileMutex;
 void AppendColorTraceLine(const std::string& line);
 
 ControllerColorValue ResolveColorControllerValue(
@@ -81,47 +77,8 @@ ControllerColorValue ResolveColorControllerValue(
   return color;
 }
 
-std::string GetRenderTraceFlagPath() {
-  return GetRuntimeDirectoryPath() + "/render_trace.on";
-}
-
-std::string GetRenderTraceLogPath() {
-  return GetRuntimeDirectoryPath() + "/render_trace.log";
-}
-
 std::string GetColorTraceLogPath() {
-  return GetRuntimeDirectoryPath() + "/color_trace.log";
-}
-
-bool RenderTraceEnabled() {
-  const std::string flagPath = GetRenderTraceFlagPath();
-  return !flagPath.empty() && FileExists(flagPath);
-}
-
-std::string SanitizeTraceToken(const std::string& value) {
-  std::string sanitized;
-  sanitized.reserve(value.size());
-  for (const char character : value) {
-    if (std::isspace(static_cast<unsigned char>(character))) {
-      sanitized.push_back('_');
-      continue;
-    }
-    if (character == '=') {
-      sanitized.push_back(':');
-      continue;
-    }
-    if (character == '\0') {
-      continue;
-    }
-    sanitized.push_back(character);
-  }
-  return sanitized;
-}
-
-std::string FormatTraceMetric(double milliseconds) {
-  std::ostringstream stream;
-  stream << std::fixed << std::setprecision(3) << milliseconds;
-  return stream.str();
+  return runtime_internal::GetRuntimeDirectoryPath() + "/color_trace.log";
 }
 
 void AppendColorTraceLine(const std::string& line) {
@@ -138,38 +95,6 @@ void AppendColorTraceLine(const std::string& line) {
     now.time_since_epoch()
   ).count();
   stream << "ts_ms=" << timestampMs << ' ' << line << '\n';
-}
-
-void AppendRenderTraceLine(const std::string& line) {
-  if (!RenderTraceEnabled()) {
-    return;
-  }
-
-  const std::string logPath = GetRenderTraceLogPath();
-  if (logPath.empty()) {
-    return;
-  }
-
-  const std::lock_guard<std::mutex> lock(gRenderTraceFileMutex);
-  std::ofstream stream(logPath.c_str(), std::ios::out | std::ios::app);
-  if (!stream.is_open()) {
-    return;
-  }
-  stream << line << '\n';
-}
-
-
-std::string ConsumePerformanceTrace() {
-  std::ostringstream stream;
-  for (std::size_t index = 0; index < g_performanceTraceEntries.size(); index += 1) {
-    const auto& entry = g_performanceTraceEntries[index];
-    if (index > 0) {
-      stream << ' ';
-    }
-    stream << entry.first << '=' << entry.second;
-  }
-  g_performanceTraceEntries.clear();
-  return stream.str();
 }
 
 unsigned long long HashBytes(const void* data, std::size_t size) {
@@ -201,21 +126,12 @@ std::string CaptureDebugSample(CachedSketchState* cache) {
 }
 
 void SetExecutionTrace(std::uintptr_t cacheKey, const std::string& trace) {
-  if (trace.empty()) {
-    return;
-  }
-  AppendRenderTraceLine(
-    "event=execution"
-    " cache_key=" + std::to_string(static_cast<unsigned long long>(cacheKey)) +
-    " " + trace
-  );
+  (void)cacheKey;
+  (void)trace;
 }
 
 void SetExecutionTrace(const std::string& trace) {
-  if (trace.empty()) {
-    return;
-  }
-  AppendRenderTraceLine(trace);
+  (void)trace;
 }
 
 std::string SummarizeScenePayload(const ScenePayload& scene) {
@@ -868,12 +784,6 @@ bool EnsureControllerStateFreshForTargetFrame(
       ? std::max<long>(0, dirtyStartFrame)
       : std::min<long>(cache->controllerHistoryDirtyFrame, std::max<long>(0, dirtyStartFrame));
 
-  TraceRenderLifecycleEvent(
-    "controller_history_dirty_mismatch",
-    static_cast<std::uint64_t>(cacheKey),
-    "target:" + std::to_string(targetFrame) +
-      "@frame:" + std::to_string(cache->controllerHistoryDirtyFrame)
-  );
   return true;
 }
 
@@ -1143,12 +1053,17 @@ bool RestoreFrameSnapshot(
 void UpdateFrameGlobals(
   JSContextRef ctx,
   JSObjectRef globalObject,
+  JsHostRuntime* runtime,
   const ScenePayload& scene,
   PF_LayerDef* output,
   double frameRate,
   double currentTime,
   long frameCount
 ) {
+  if (runtime) {
+    runtime->currentFrameCount = frameCount;
+    runtime->currentTimeSeconds = currentTime;
+  }
   SetJsNumber(ctx, globalObject, "width", GetSceneWidth(scene, output));
   SetJsNumber(ctx, globalObject, "height", GetSceneHeight(scene, output));
   SetJsNumber(ctx, globalObject, "frameCount", static_cast<double>(frameCount));
@@ -1243,6 +1158,7 @@ bool BuildSettledDisplaySceneForFrame(
   UpdateFrameGlobals(
     cache->context,
     globalObject,
+    &cache->runtime,
     cache->runtime.scene,
     output,
     simulationFrameRate,
@@ -1324,6 +1240,8 @@ bool InitializeCachedSketchState(
   PF_LayerDef* output,
   const std::string& source,
   const std::string& sourceHash,
+  const std::string& debugTracePath,
+  const std::string& debugSessionId,
   const std::string& controllerHash,
   const std::string& controllerStateHash,
   const ControllerPoolState* controllerState,
@@ -1368,6 +1286,10 @@ bool InitializeCachedSketchState(
   cache->runtime.desiredFrameRate = GetFrameRate(in_data);
   cache->runtime.randomState = 0x12345678UL;
   cache->runtime.pixelDensity = std::max(1.0, pixelDensity);
+  cache->runtime.debugTracePath = debugTracePath;
+  cache->runtime.debugSessionId = debugSessionId;
+  cache->runtime.currentFrameCount = 0;
+  cache->runtime.currentTimeSeconds = 0.0;
 
   ControllerPoolState initialControllerState = controllerState ? *controllerState : ControllerPoolState();
   if (in_data &&
@@ -1392,6 +1314,7 @@ bool InitializeCachedSketchState(
   UpdateFrameGlobals(
     cache->context,
     globalObject,
+    &cache->runtime,
     cache->runtime.scene,
     output,
     cache->runtime.desiredFrameRate,
@@ -1589,6 +1512,7 @@ bool AdvanceCachedSketchState(
     UpdateFrameGlobals(
       cache->context,
       globalObject,
+      &cache->runtime,
       cache->runtime.scene,
       output,
       simulationFrameRate,
@@ -1624,9 +1548,7 @@ bool AdvanceCachedSketchState(
         return false;
       }
       frameScene = settledScene;
-      AppendPerformanceTraceField("render.controller_frame_settled", "1");
     } else {
-      AppendPerformanceTraceField("render.controller_frame_settled", "0");
     }
     const bool fullyClears =
       SceneFullyClearsSurface(frameScene) ||
@@ -1753,6 +1675,7 @@ std::optional<ScenePayload> ExecuteDirectTimeSketchAtFrame(
   UpdateFrameGlobals(
     cache->context,
     globalObject,
+    &cache->runtime,
     cache->runtime.scene,
     output,
     simulationFrameRate,
@@ -1801,66 +1724,6 @@ std::optional<ScenePayload> ExecuteDirectTimeSketchAtFrame(
 
 }  // namespace
 
-void ResetPerformanceTrace() {
-  g_performanceTraceEntries.clear();
-}
-
-void AppendPerformanceTraceMetric(const std::string& key, double milliseconds) {
-  g_performanceTraceEntries.push_back(
-    std::make_pair(SanitizeTraceToken(key), FormatTraceMetric(milliseconds))
-  );
-}
-
-void AppendPerformanceTraceField(const std::string& key, const std::string& value) {
-  g_performanceTraceEntries.push_back(
-    std::make_pair(SanitizeTraceToken(key), SanitizeTraceToken(value))
-  );
-}
-
-void FlushPerformanceTrace(const std::string& prefix) {
-  if (!RenderTraceEnabled()) {
-    ResetPerformanceTrace();
-    return;
-  }
-
-  std::ostringstream stream;
-  const auto now = std::chrono::system_clock::now();
-  const auto timestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-    now.time_since_epoch()
-  ).count();
-  stream << "ts_ms=" << timestampMs;
-  if (!prefix.empty()) {
-    stream << ' ' << prefix;
-  }
-  const std::string payload = ConsumePerformanceTrace();
-  if (!payload.empty()) {
-    stream << ' ' << payload;
-  }
-  AppendRenderTraceLine(stream.str());
-}
-
-void TraceRenderLifecycleEvent(
-  const std::string& event,
-  std::uint64_t cacheKey,
-  const std::string& detail
-) {
-  if (event.empty()) {
-    return;
-  }
-  std::ostringstream stream;
-  const auto now = std::chrono::system_clock::now();
-  const auto timestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-    now.time_since_epoch()
-  ).count();
-  stream << "ts_ms=" << timestampMs;
-  stream << " event=" << SanitizeTraceToken(event);
-  stream << " cache_key=" << cacheKey;
-  if (!detail.empty()) {
-    stream << " detail=" << SanitizeTraceToken(detail);
-  }
-  AppendRenderTraceLine(stream.str());
-}
-
 void MarkControllerHistoryDirty(
   std::uintptr_t cacheKey,
   long earliestAffectedFrame,
@@ -1884,12 +1747,6 @@ void MarkControllerHistoryDirty(
       ? dirtyFrame
       : std::min(cache.controllerHistoryDirtyFrame, dirtyFrame);
 
-  TraceRenderLifecycleEvent(
-    "controller_history_dirty",
-    static_cast<std::uint64_t>(cacheKey),
-    std::string(reason ? reason : "controller-changed") +
-      "@frame:" + std::to_string(cache.controllerHistoryDirtyFrame)
-  );
 }
 
 void UpdateLiveControllerState(
@@ -1937,11 +1794,6 @@ void ClearCachedSketchByKey(std::uintptr_t cacheKey, const char* reason) {
   if (!cacheKey) {
     return;
   }
-  TraceRenderLifecycleEvent(
-    "runtime_cache_clear",
-    static_cast<std::uint64_t>(cacheKey),
-    reason ? reason : "unspecified"
-  );
   g_cachedSketches.erase(cacheKey);
   ClearCachedGpuFramePlansByKey(static_cast<std::uint64_t>(cacheKey));
   DisposeBitmapGpuStateByCacheKey(static_cast<std::uint64_t>(cacheKey), reason);
@@ -1950,7 +1802,6 @@ void ClearCachedSketchByKey(std::uintptr_t cacheKey, const char* reason) {
 
 void ClearAllCachedSketches(const char* reason) {
   const std::lock_guard<std::recursive_mutex> lock(gSketchRuntimeMutex);
-  TraceRenderLifecycleEvent("runtime_cache_clear_all", 0, reason ? reason : "unspecified");
   g_cachedSketches.clear();
   ClearAllCachedGpuFramePlans();
   ClearAllBitmapGpuTextAtlasCaches();
@@ -2055,11 +1906,6 @@ std::optional<ScenePayload> ExecuteSketchAtCurrentTime(
       appendInvalidateReason("output-size-changed");
     }
     const std::string invalidateReasonText = invalidateReason.str();
-    TraceRenderLifecycleEvent(
-      "runtime_cache_invalidate",
-      static_cast<std::uint64_t>(cacheKey),
-      invalidateReasonText
-    );
     source = ReadRuntimeSketchSource(bundle);
     if (!source.has_value()) {
       if (errorMessage) {
@@ -2086,6 +1932,8 @@ std::optional<ScenePayload> ExecuteSketchAtCurrentTime(
       output,
       *source,
       bundle.sourceHash,
+      bundle.debugTracePath,
+      bundle.debugSessionId,
       bundle.controllerHash,
       std::string(),
       NULL,
@@ -2100,8 +1948,6 @@ std::optional<ScenePayload> ExecuteSketchAtCurrentTime(
       return std::nullopt;
     }
   }
-  AppendPerformanceTraceField("render.interactive_point_only_diff", "0");
-  AppendPerformanceTraceField("render.interactive_session", "0");
   const bool controllerDirtyBeforeConsistencyCheck = cache.controllerHistoryDirty;
   if (!EnsureControllerStateFreshForTargetFrame(
         in_data,
@@ -2113,10 +1959,6 @@ std::optional<ScenePayload> ExecuteSketchAtCurrentTime(
       )) {
     return std::nullopt;
   }
-  AppendPerformanceTraceField(
-    "render.controller_state_mismatch",
-    (!controllerDirtyBeforeConsistencyCheck && cache.controllerHistoryDirty) ? "1" : "0"
-  );
 
   const bool controllerHistoryAffectsTarget =
     cache.controllerHistoryDirty &&
@@ -2125,18 +1967,11 @@ std::optional<ScenePayload> ExecuteSketchAtCurrentTime(
   const long dirtyStartFrame =
     controllerHistoryAffectsTarget ? cache.controllerHistoryDirtyFrame : -1;
   if (controllerHistoryAffectsTarget) {
-    AppendPerformanceTraceField("render.controller_history_dirty", "1");
-    AppendPerformanceTraceField(
-      "render.controller_history_dirty_from",
-      std::to_string(dirtyStartFrame)
-    );
     InvalidateCachedHistoryFromFrame(
       &cache,
       static_cast<std::uint64_t>(cacheKey),
       dirtyStartFrame
     );
-  } else {
-    AppendPerformanceTraceField("render.controller_history_dirty", "0");
   }
 
   // The old direct-time + opaque profile shortcut remains available only for
@@ -2144,14 +1979,6 @@ std::optional<ScenePayload> ExecuteSketchAtCurrentTime(
   // classification for correctness.
   const bool useLegacyProfileFastPath = false;
   const bool gpuPrimaryExecution = executionMode == SketchExecutionMode::kGpuPrimary;
-  AppendPerformanceTraceField(
-    "render.exec_semantics",
-    executionMode == SketchExecutionMode::kGpuPrimary ? "gpu-primary" : "cpu-fallback"
-  );
-  AppendPerformanceTraceField(
-    "render.legacy_profile_fast_path",
-    useLegacyProfileFastPath ? "1" : "0"
-  );
 
   if (!cache.drawFn) {
     if (controllerHistoryAffectsTarget) {
@@ -2175,6 +2002,8 @@ std::optional<ScenePayload> ExecuteSketchAtCurrentTime(
         output,
         *source,
         bundle.sourceHash,
+        bundle.debugTracePath,
+        bundle.debugSessionId,
         bundle.controllerHash,
         std::string(),
         NULL,
@@ -2324,6 +2153,8 @@ std::optional<ScenePayload> ExecuteSketchAtCurrentTime(
       output,
       *source,
       bundle.sourceHash,
+      bundle.debugTracePath,
+      bundle.debugSessionId,
       bundle.controllerHash,
       std::string(),
       NULL,
@@ -2456,9 +2287,6 @@ bool BuildBitmapFramePlanAtCurrentTime(
     return false;
   }
 
-  AppendPerformanceTraceField("render.cache_found", "1");
-  AppendPerformanceTraceField("render.target_scene", SummarizeScenePayload(*scene));
-
   auto cacheIt = g_cachedSketches.find(cacheKeyPtr);
   if (cacheIt == g_cachedSketches.end()) {
     if (errorMessage) {
@@ -2478,7 +2306,6 @@ bool BuildBitmapFramePlanAtCurrentTime(
     for (long frame = firstFrame; frame <= lastFrame; ++frame) {
       const auto gpuScene = cache.gpuFrameScenes.find(frame);
       if (gpuScene == cache.gpuFrameScenes.end()) {
-        AppendPerformanceTraceField("render.history_missing_frame", std::to_string(frame));
         return false;
       }
       outScenes->push_back(std::make_pair(frame, gpuScene->second));
@@ -2551,13 +2378,6 @@ bool BuildBitmapFramePlanAtCurrentTime(
     profile == BITMAP_GPU_PROFILE_STATEFUL_ACCUMULATION &&
     planMode != "stateful-reuse-canvas" &&
     TrimBitmapPlanScenesAfterLastFullClear(&scenes, &trimmedPlanFirstFrame);
-  AppendPerformanceTraceField("render.plan_trimmed_after_clear", trimmedAfterClear ? "1" : "0");
-  if (trimmedAfterClear) {
-    AppendPerformanceTraceField(
-      "render.plan_trimmed_first",
-      trimmedPlanFirstFrame >= 0 ? std::to_string(trimmedPlanFirstFrame) : "none"
-    );
-  }
   if (trimmedAfterClear && !scenes.empty()) {
     planFirstFrame = scenes.front().first;
     if (SceneFullyClearsSurface(scenes.front().second)) {
@@ -2587,34 +2407,16 @@ bool BuildBitmapFramePlanAtCurrentTime(
     outPlan->hasSeedGpuCheckpoint =
       profile == BITMAP_GPU_PROFILE_STATEFUL_ACCUMULATION && planHasSeedGpuCheckpoint;
     outPlan->seedFrame = outPlan->hasSeedGpuCheckpoint ? planSeedFrame : 0;
-    AppendPerformanceTraceField("render.plan_ops", std::to_string(outPlan->operations.size()));
-    AppendPerformanceTraceField("render.plan_has_seed_gpu_checkpoint", outPlan->hasSeedGpuCheckpoint ? "1" : "0");
     if (!outPlan->operations.empty()) {
       const BitmapFramePlanOp& firstOp = outPlan->operations.front();
       const BitmapFramePlanOp& lastOp = outPlan->operations.back();
-      AppendPerformanceTraceField(
-        "render.plan_first_op",
-        "f=" + std::to_string(firstOp.frame) + "," + SummarizeGpuDrawPlan(firstOp.drawPlan)
-      );
-      AppendPerformanceTraceField(
-        "render.plan_last_op",
-        "f=" + std::to_string(lastOp.frame) + "," + SummarizeGpuDrawPlan(lastOp.drawPlan)
-      );
+      (void)firstOp;
+      (void)lastOp;
     }
   }
-  AppendPerformanceTraceField(
-    "render.profile",
-    profile == BITMAP_GPU_PROFILE_STATEFUL_ACCUMULATION ? "stateful-accumulation" : "direct-frame"
-  );
-  AppendPerformanceTraceField("render.plan_ok", planOk ? "1" : "0");
-  AppendPerformanceTraceField("render.plan_mode", planMode);
-  AppendPerformanceTraceField("render.plan_first", std::to_string(planFirstFrame));
-  AppendPerformanceTraceField("render.plan_seed", planSeed);
-  AppendPerformanceTraceField("render.plan_frames", std::to_string(planScenes->size()));
-  AppendPerformanceTraceField("render.plan_fallback_reason", fallbackReason);
-  if (fallbackReason == "none") {
-    AppendPerformanceTraceField("render.history_missing_frame", "none");
-  }
+  (void)planFirstFrame;
+  (void)planScenes;
+  (void)fallbackReason;
   return planOk;
 }
 

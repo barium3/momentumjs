@@ -162,6 +162,14 @@ bool ReadNumericArgs(
 double NextRandomUnit(JsHostRuntime* runtime);
 bool JsValueToAngleModeSafe(JSContextRef ctx, JSValueRef value, int* angleModeOut);
 double ToRadiansForRuntime(JsHostRuntime* runtime, double angle);
+JSValueRef JsMomentumNativeDebugLog(
+  JSContextRef ctx,
+  JSObjectRef function,
+  JSObjectRef thisObject,
+  std::size_t argumentCount,
+  const JSValueRef arguments[],
+  JSValueRef* exception
+);
 
 JSValueRef JsBackground(
   JSContextRef ctx,

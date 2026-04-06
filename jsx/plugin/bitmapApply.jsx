@@ -216,57 +216,6 @@ function _momentumResolveControllerProp(effect, cfg, slotIndex, controllerConfig
   return numericProp || null;
 }
 
-function _momentumDescribePropValue(prop) {
-  if (!prop) {
-    return "null";
-  }
-
-  var value = null;
-  try {
-    value = prop.value;
-  } catch (_valueError) {
-    return "unreadable";
-  }
-
-  if (value instanceof Array) {
-    return "[" + value.join(",") + "]";
-  }
-  return String(value);
-}
-
-function _momentumTraceSafeText(value) {
-  var text = "";
-  try {
-    text = String(value);
-  } catch (_traceTextError) {
-    text = "";
-  }
-  return text.replace(/[\r\n]+/g, " ");
-}
-
-function _momentumLogControllerSnapshot(effect, controllerConfigs, stage) {
-  if (!effect || !(controllerConfigs instanceof Array) || controllerConfigs.length <= 0) {
-    return;
-  }
-
-  for (var idx = 0; idx < controllerConfigs.length; idx++) {
-    var cfg = controllerConfigs[idx] || {};
-    var controllerType = String(cfg.type || "");
-    var controllerId = cfg && cfg.id ? String(cfg.id) : "";
-    var targetProp = _momentumResolveControllerProp(effect, cfg, idx, controllerConfigs);
-    _momentumAppendApplyTrace(
-      "phase=controller_snapshot" +
-      " stage=" + _momentumTraceSafeText(stage || "") +
-      " slot=" + idx +
-      " id=" + controllerId +
-      " type=" + controllerType +
-      " name=" + (targetProp ? _momentumTraceSafeText(targetProp.name || "") : "") +
-      " property_index=" + (targetProp ? String(targetProp.propertyIndex || 0) : "0") +
-      " actual=" + (targetProp ? _momentumDescribePropValue(targetProp) : "null")
-    );
-  }
-}
-
 function _momentumResolvePointControllerProp(effect, slotIndex) {
   if (!effect) {
     return null;
@@ -328,8 +277,6 @@ function _momentumBindControllerParams(effect, controllerConfigs, options) {
 
   var bindDeferredOnly = !!(options && options.deferredOnly);
   var skipDeferred = !!(options && options.skipDeferred);
-  var passLabel = options && options.passLabel ? String(options.passLabel) : "";
-
   for (var idx = 0; idx < controllerConfigs.length; idx++) {
     var cfg = controllerConfigs[idx] || {};
     if (idx >= _MOMENTUM_CONTROLLER_SLOT_COUNT) {
@@ -337,7 +284,6 @@ function _momentumBindControllerParams(effect, controllerConfigs, options) {
     }
 
     var controllerType = String(cfg.type || "");
-    var controllerId = cfg && cfg.id ? String(cfg.id) : "";
     var isDeferredController = _momentumShouldDeferControllerBinding(controllerType);
     if (bindDeferredOnly && !isDeferredController) {
       continue;
@@ -346,38 +292,15 @@ function _momentumBindControllerParams(effect, controllerConfigs, options) {
       continue;
     }
     if (controllerType === "color") {
-      _momentumAppendApplyTrace(
-        "phase=bind_controller_value" +
-        (passLabel ? " pass=" + passLabel : "") +
-        " slot=" + idx +
-        " id=" + controllerId +
-        " type=color" +
-        " skipped=arbitrary_data_default"
-      );
       continue;
     }
 
     if (controllerType === "angle") {
-      _momentumAppendApplyTrace(
-        "phase=bind_controller_value" +
-        (passLabel ? " pass=" + passLabel : "") +
-        " slot=" + idx +
-        " id=" + controllerId +
-        " type=angle" +
-        " skipped=native_angle_default_sync"
-      );
       continue;
     }
 
     var targetProp = _momentumResolveControllerProp(effect, cfg, idx, controllerConfigs);
     if (!targetProp) {
-      _momentumAppendApplyTrace(
-        "phase=bind_controller_missing" +
-        (passLabel ? " pass=" + passLabel : "") +
-        " slot=" + idx +
-        " id=" + controllerId +
-        " type=" + controllerType
-      );
       continue;
     }
 
@@ -390,68 +313,23 @@ function _momentumBindControllerParams(effect, controllerConfigs, options) {
         sliderMax = sliderSwap;
       }
 
-      var sliderSetError = "";
       try {
         targetProp.setValue(_momentumReadNumber(cfg.value, sliderMin));
-      } catch (_sliderDefaultError) {
-        sliderSetError = _momentumTraceSafeText(_sliderDefaultError);
-      }
-      _momentumAppendApplyTrace(
-        "phase=bind_controller_value" +
-        (passLabel ? " pass=" + passLabel : "") +
-        " slot=" + idx +
-        " id=" + controllerId +
-        " type=slider" +
-        " name=" + String(targetProp.name || "") +
-        " property_index=" + String(targetProp.propertyIndex || 0) +
-        " expected=" + String(_momentumReadNumber(cfg.value, sliderMin)) +
-        (sliderSetError ? " set_error=" + sliderSetError : "") +
-        " actual=" + _momentumDescribePropValue(targetProp)
-      );
+      } catch (_sliderDefaultError) {}
       continue;
     }
 
     if (controllerType === "angle") {
-      var angleSetError = "";
       try {
         targetProp.setValue(_momentumReadNumber(cfg.value, 0));
-      } catch (_angleDefaultError) {
-        angleSetError = _momentumTraceSafeText(_angleDefaultError);
-      }
-      _momentumAppendApplyTrace(
-        "phase=bind_controller_value" +
-        (passLabel ? " pass=" + passLabel : "") +
-        " slot=" + idx +
-        " id=" + controllerId +
-        " type=angle" +
-        " name=" + String(targetProp.name || "") +
-        " property_index=" + String(targetProp.propertyIndex || 0) +
-        " expected=" + String(_momentumReadNumber(cfg.value, 0)) +
-        (angleSetError ? " set_error=" + angleSetError : "") +
-        " actual=" + _momentumDescribePropValue(targetProp)
-      );
+      } catch (_angleDefaultError) {}
       continue;
     }
 
     if (controllerType === "checkbox") {
-      var checkboxSetError = "";
       try {
         targetProp.setValue(cfg.value ? 1 : 0);
-      } catch (_checkboxDefaultError) {
-        checkboxSetError = _momentumTraceSafeText(_checkboxDefaultError);
-      }
-      _momentumAppendApplyTrace(
-        "phase=bind_controller_value" +
-        (passLabel ? " pass=" + passLabel : "") +
-        " slot=" + idx +
-        " id=" + controllerId +
-        " type=checkbox" +
-        " name=" + String(targetProp.name || "") +
-        " property_index=" + String(targetProp.propertyIndex || 0) +
-        " expected=" + String(cfg.value ? 1 : 0) +
-        (checkboxSetError ? " set_error=" + checkboxSetError : "") +
-        " actual=" + _momentumDescribePropValue(targetProp)
-      );
+      } catch (_checkboxDefaultError) {}
       continue;
     }
 
@@ -466,24 +344,9 @@ function _momentumBindControllerParams(effect, controllerConfigs, options) {
         selectIndex = optionCount - 1;
       }
 
-      var selectSetError = "";
       try {
         targetProp.setValue(selectIndex + 1);
-      } catch (_selectDefaultError) {
-        selectSetError = _momentumTraceSafeText(_selectDefaultError);
-      }
-      _momentumAppendApplyTrace(
-        "phase=bind_controller_value" +
-        (passLabel ? " pass=" + passLabel : "") +
-        " slot=" + idx +
-        " id=" + controllerId +
-        " type=select" +
-        " name=" + String(targetProp.name || "") +
-        " property_index=" + String(targetProp.propertyIndex || 0) +
-        " expected=" + String(selectIndex + 1) +
-        (selectSetError ? " set_error=" + selectSetError : "") +
-        " actual=" + _momentumDescribePropValue(targetProp)
-      );
+      } catch (_selectDefaultError) {}
       continue;
     }
 
@@ -496,23 +359,9 @@ function _momentumBindControllerParams(effect, controllerConfigs, options) {
       _momentumReadNumber(point[0], 0),
       _momentumReadNumber(point[1], 0)
     ];
-    var pointSetError = "";
     try {
       targetProp.setValue(pointValue);
-    } catch (_pointDefaultError) {
-      pointSetError = _momentumTraceSafeText(_pointDefaultError);
-    }
-    _momentumAppendApplyTrace(
-      "phase=bind_controller_value" +
-      (passLabel ? " pass=" + passLabel : "") +
-      " slot=" + idx +
-      " id=" + controllerId +
-      " type=point" +
-      " name=" + String(targetProp.name || "") +
-      " property_index=" + String(targetProp.propertyIndex || 0) +
-      (pointSetError ? " set_error=" + pointSetError : "") +
-      " actual=" + _momentumDescribePropValue(targetProp)
-    );
+    } catch (_pointDefaultError) {}
   }
 }
 
@@ -613,22 +462,6 @@ function applyMomentum(encodedPayload) {
       ? payload.controller.configs
       : [];
   var runtimeSource = payload && payload.runtimeSource ? String(payload.runtimeSource) : "";
-  var controllerTypes = [];
-  for (var controllerIndex = 0; controllerIndex < controllerConfig.length; controllerIndex++) {
-    var controllerEntry = controllerConfig[controllerIndex] || {};
-    controllerTypes.push(String(controllerEntry.type || "unknown"));
-  }
-
-  _momentumAppendApplyTrace(
-    "phase=apply_momentum_enter" +
-    " comp=" + compName +
-    " width=" + width +
-    " height=" + height +
-    " revision=" + revision +
-    " controllers=" + controllerConfig.length +
-    " controller_types=" + controllerTypes.join(",")
-  );
-
   if (!app.project) {
     app.newProject();
   }
@@ -675,11 +508,6 @@ function applyMomentum(encodedPayload) {
 
     var effect = _momentumFindOrAddMomentumEffect(layer);
     if (!effect) {
-      _momentumAppendApplyTrace(
-        "phase=apply_momentum_error" +
-        " step=add_effect" +
-        " message=" + String(_momentumFindOrAddMomentumEffect.lastError || "Unknown error.")
-      );
       try {
         $.writeln(
           "Momentum addProperty failed: " +
@@ -708,71 +536,47 @@ function applyMomentum(encodedPayload) {
       instanceId = _momentumNextBitmapInstanceId();
     }
 
+    var debugTracePath = "";
+    var debugSessionId = String(instanceId);
+    var debugTraceFile =
+      typeof _momentumGetRuntimeInstanceDebugTraceFile === "function"
+        ? _momentumGetRuntimeInstanceDebugTraceFile(instanceId)
+        : null;
+    if (debugTraceFile) {
+      debugTracePath = String(debugTraceFile.fsName || "").replace(/\\/g, "/");
+    }
+
     if (runtimeSource && typeof _momentumWriteRuntimeInstanceFilesRaw === "function") {
       var instanceBundle = JSON.parse(JSON.stringify(payload || {}));
       try {
         delete instanceBundle.runtimeSource;
       } catch (_deleteRuntimeSourceError) {}
       instanceBundle.sourcePath = "instances/" + String(instanceId) + "/sketch.js";
+      instanceBundle.debugTracePath = "instances/" + String(instanceId) + "/debug_trace.log";
+      instanceBundle.debugSessionId = debugSessionId;
       var instanceWriteError = _momentumWriteRuntimeInstanceFilesRaw(
         instanceId,
         runtimeSource,
         JSON.stringify(instanceBundle, null, 2)
       );
       if (instanceWriteError) {
-        _momentumAppendApplyTrace(
-          "phase=write_instance_runtime_error" +
-          " instance_id=" + instanceId +
-          " message=" + String(instanceWriteError)
-        );
         return String(instanceWriteError);
       }
     }
 
     instanceProp.setValue(instanceId);
     revisionProp.setValue(revision);
-    _momentumAppendApplyTrace(
-      "phase=bind_revision_state" +
-      " revision_expected=" + revision +
-      " revision_actual=" + _momentumDescribePropValue(revisionProp) +
-      " instance_expected=" + instanceId +
-      " instance_actual=" + _momentumDescribePropValue(instanceProp)
-    );
-    _momentumLogControllerSnapshot(effect, controllerConfig, "after_revision");
 
     _momentumBindControllerParams(effect, controllerConfig, {
-      skipDeferred: true,
-      passLabel: "immediate"
+      skipDeferred: true
     });
-    _momentumLogControllerSnapshot(effect, controllerConfig, "after_immediate_bind");
 
     comp.openInViewer();
     _momentumSelectLayerAndEffect(comp, layer, effect);
-    _momentumLogControllerSnapshot(effect, controllerConfig, "after_viewer");
 
     _momentumBindControllerParams(effect, controllerConfig, {
-      deferredOnly: true,
-      passLabel: "deferred"
+      deferredOnly: true
     });
-    _momentumLogControllerSnapshot(effect, controllerConfig, "after_deferred_bind");
-
-    _momentumAppendApplyTrace(
-      "phase=apply_momentum_bound" +
-      " comp=" + comp.name +
-      " layer=" + layer.name +
-      " revision=" + revision +
-      " instance_id=" + instanceId +
-      " controllers=" + controllerConfig.length
-    );
-
-    _momentumAppendApplyTrace(
-      "phase=apply_momentum_exit" +
-      " ok=1" +
-      " comp=" + comp.name +
-      " layer=" + layer.name +
-      " revision=" + revision +
-      " instance_id=" + instanceId
-    );
 
     return JSON.stringify({
       ok: true,
@@ -781,14 +585,11 @@ function applyMomentum(encodedPayload) {
       layer: layer.name,
       controllers: controllerConfig.length,
       revision: revision,
-      instanceId: instanceId
+      instanceId: instanceId,
+      debugSessionId: debugSessionId,
+      debugTracePath: debugTracePath
     });
   } catch (applyError) {
-    _momentumAppendApplyTrace(
-      "phase=apply_momentum_error" +
-      " step=exception" +
-      " message=" + String(applyError)
-    );
     return "Error: Failed to apply Momentum bitmap effect: " + applyError.toString();
   } finally {
     try {
