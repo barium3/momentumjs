@@ -92,7 +92,6 @@ function _momentumFindOrCreateBitmapLayer(comp) {
     comp.pixelAspect,
     comp.duration
   );
-  solid.guideLayer = true;
   return solid;
 }
 

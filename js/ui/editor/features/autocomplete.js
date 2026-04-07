@@ -96,6 +96,69 @@ window.momentumEditorAutocomplete = (function () {
       : 4;
   }
 
+  function getSnippetInsertTextRule() {
+    return getCompletionInsertTextRule();
+  }
+
+  function hasFollowingCallParen(model, range) {
+    if (!model || !range || typeof range.endColumn !== "number") {
+      return false;
+    }
+
+    const line = model.getLineContent(range.endLineNumber || range.startLineNumber);
+    if (!line) {
+      return false;
+    }
+
+    let index = Math.max(0, range.endColumn - 1);
+    while (index < line.length) {
+      const ch = line.charAt(index);
+      if (!/\s/.test(ch)) {
+        return ch === "(";
+      }
+      index += 1;
+    }
+
+    return false;
+  }
+
+  function isInsideExistingCallArguments(model, position) {
+    const astApi = getAstApi();
+    if (!model || !position || !astApi || typeof astApi.parse !== "function" || typeof astApi.walk !== "function") {
+      return false;
+    }
+
+    const code = model.getValue();
+    if (!code) {
+      return false;
+    }
+
+    const offset = model.getOffsetAt(position);
+    let inside = false;
+
+    try {
+      const program = astApi.parse(code, AST_PARSE_OPTIONS);
+      astApi.walk(program, (node) => {
+        if (
+          node &&
+          (node.type === "CallExpression" || node.type === "NewExpression") &&
+          node.callee &&
+          typeof node.callee.end === "number" &&
+          typeof node.end === "number" &&
+          offset > node.callee.end &&
+          offset < node.end - 1
+        ) {
+          inside = true;
+          return false;
+        }
+      });
+    } catch (_parseError) {
+      return false;
+    }
+
+    return inside;
+  }
+
   function buildArgPlaceholderList(count) {
     const items = [];
     for (let index = 0; index < count; index += 1) {
@@ -129,7 +192,11 @@ window.momentumEditorAutocomplete = (function () {
       .join(" / ");
   }
 
-  function buildFunctionInsertText(name, signatures) {
+  function buildFunctionInsertText(name, signatures, options) {
+    if (options && options.hasFollowingCallParen) {
+      return name;
+    }
+
     if (!Array.isArray(signatures) || !signatures.length) {
       return `${name}($0)`;
     }
@@ -163,12 +230,18 @@ window.momentumEditorAutocomplete = (function () {
     const isCallable =
       config.kind === monaco.languages.CompletionItemKind.Function ||
       config.kind === monaco.languages.CompletionItemKind.Method;
+    const insertTextRules =
+      typeof config.insertTextRules !== "undefined"
+        ? config.insertTextRules
+        : isCallable && typeof config.insertText === "string" && config.insertText.indexOf("$") >= 0
+          ? getSnippetInsertTextRule()
+          : undefined;
 
     return {
       label: config.label,
       kind: config.kind,
       insertText: config.insertText,
-      insertTextRules: isCallable ? getCompletionInsertTextRule() : undefined,
+      insertTextRules,
       detail: config.detail,
       documentation: config.documentation,
       range,
@@ -177,7 +250,7 @@ window.momentumEditorAutocomplete = (function () {
     };
   }
 
-  function buildMomentumSuggestions(range) {
+  function buildMomentumSuggestions(range, model, options) {
     if (typeof monaco === "undefined") {
       return [];
     }
@@ -189,6 +262,8 @@ window.momentumEditorAutocomplete = (function () {
 
     const suggestions = [];
     const seen = Object.create(null);
+    const hasTrailingParen = hasFollowingCallParen(model, range);
+    const suppressCallParens = !!(options && options.suppressCallParens);
     const categoryNames = [
       "shapes",
       "transforms",
@@ -211,6 +286,7 @@ window.momentumEditorAutocomplete = (function () {
       let kind = monaco.languages.CompletionItemKind.Function;
       const signatures = item && item.signatures;
       let insertText = name;
+      let insertTextRules;
 
       if (type === "constant") {
         kind = monaco.languages.CompletionItemKind.Constant;
@@ -221,7 +297,12 @@ window.momentumEditorAutocomplete = (function () {
       } else if (type === "instance_method") {
         kind = monaco.languages.CompletionItemKind.Method;
       } else {
-        insertText = buildFunctionInsertText(name, item && item.signatures);
+        insertText = buildFunctionInsertText(name, item && item.signatures, {
+          hasFollowingCallParen: hasTrailingParen || suppressCallParens,
+        });
+        if (insertText.indexOf("$") >= 0) {
+          insertTextRules = getSnippetInsertTextRule();
+        }
       }
 
       seen[name] = true;
@@ -230,6 +311,7 @@ window.momentumEditorAutocomplete = (function () {
           label: name,
           kind,
           insertText,
+          insertTextRules,
           detail: categoryName ? `Momentum ${categoryName}` : "Momentum",
           documentation: formatSignatureSummary(signatures),
           sortText: `0_${name}`,
@@ -786,16 +868,21 @@ window.momentumEditorAutocomplete = (function () {
     return entries;
   }
 
-  function buildMemberSuggestions(range, receiverType) {
+  function buildMemberSuggestions(range, receiverType, model, options) {
     if (typeof monaco === "undefined" || !receiverType) {
       return [];
     }
+
+    const hasTrailingParen = hasFollowingCallParen(model, range);
+    const suppressCallParens = !!(options && options.suppressCallParens);
 
     return getMethodEntriesForReceiver(receiverType).map((entry) =>
       createSuggestion(range, {
         label: entry.name,
         kind: monaco.languages.CompletionItemKind.Method,
-        insertText: buildFunctionInsertText(entry.name, entry.info && entry.info.signatures),
+        insertText: buildFunctionInsertText(entry.name, entry.info && entry.info.signatures, {
+          hasFollowingCallParen: hasTrailingParen || suppressCallParens,
+        }),
         detail: `Momentum ${receiverType} method`,
         documentation: formatSignatureSummary(entry.info && entry.info.signatures),
         sortText: `0_${entry.name}`,
@@ -891,7 +978,9 @@ window.momentumEditorAutocomplete = (function () {
             : null;
         if (receiverType && typeInference.hasKnownMethodReceiver(receiverType)) {
           return {
-            suggestions: buildMemberSuggestions(getCompletionRange(model, position), receiverType),
+            suggestions: buildMemberSuggestions(getCompletionRange(model, position), receiverType, model, {
+              suppressCallParens: isInsideExistingCallArguments(model, position),
+            }),
           };
         }
       }
@@ -922,7 +1011,9 @@ window.momentumEditorAutocomplete = (function () {
             : null;
         if (receiverType && typeInference.hasKnownMethodReceiver(receiverType)) {
           return {
-            suggestions: buildMemberSuggestions(getCompletionRange(model, position), receiverType),
+            suggestions: buildMemberSuggestions(getCompletionRange(model, position), receiverType, model, {
+              suppressCallParens: isInsideExistingCallArguments(model, position),
+            }),
           };
         }
       }
@@ -1013,7 +1104,7 @@ window.momentumEditorAutocomplete = (function () {
     return names;
   }
 
-  function buildUserBindingSuggestions(model, position, range, excludedNames) {
+  function buildUserBindingSuggestions(model, position, range, excludedNames, options) {
     if (typeof monaco === "undefined") {
       return [];
     }
@@ -1021,6 +1112,8 @@ window.momentumEditorAutocomplete = (function () {
     const code = model.getValue();
     const cursorOffset = model.getOffsetAt(position);
     const bindings = collectBindingsFromAst(code, cursorOffset);
+    const hasTrailingParen = hasFollowingCallParen(model, range);
+    const suppressCallParens = !!(options && options.suppressCallParens);
 
     return Object.keys(bindings)
       .filter((name) => !(excludedNames && excludedNames[name]))
@@ -1039,7 +1132,11 @@ window.momentumEditorAutocomplete = (function () {
           kind: isFunction
             ? monaco.languages.CompletionItemKind.Function
             : monaco.languages.CompletionItemKind.Variable,
-          insertText: isFunction ? `${name}($0)` : name,
+          insertText: isFunction
+            ? buildFunctionInsertText(name, [], {
+                hasFollowingCallParen: hasTrailingParen || suppressCallParens,
+              })
+            : name,
           detail,
           sortText: `2_${name}`,
         });
@@ -1082,11 +1179,14 @@ window.momentumEditorAutocomplete = (function () {
         provideCompletionItems(model, position) {
           const textFontContext = getTextFontFirstArgumentContext(model, position);
           if (textFontContext) {
+            const suppressCallParens = isInsideExistingCallArguments(model, position);
             return buildFontSuggestions(textFontContext).then((fontSuggestions) => {
               const bindingSuggestions = buildUserBindingSuggestions(
                 model,
                 position,
                 textFontContext.range,
+                null,
+                { suppressCallParens },
               );
               return {
                 suggestions: fontSuggestions.concat(bindingSuggestions),
@@ -1102,7 +1202,10 @@ window.momentumEditorAutocomplete = (function () {
           }
 
           const range = getCompletionRange(model, position);
-          const momentumSuggestions = buildMomentumSuggestions(range);
+          const suppressCallParens = isInsideExistingCallArguments(model, position);
+          const momentumSuggestions = buildMomentumSuggestions(range, model, {
+            suppressCallParens,
+          });
           const excludedNames = Object.create(null);
           momentumSuggestions.forEach((suggestion) => {
             excludedNames[suggestion.label] = true;
@@ -1110,7 +1213,9 @@ window.momentumEditorAutocomplete = (function () {
 
           return {
             suggestions: momentumSuggestions.concat(
-              buildUserBindingSuggestions(model, position, range, excludedNames)
+              buildUserBindingSuggestions(model, position, range, excludedNames, {
+                suppressCallParens,
+              })
             ),
           };
         },
