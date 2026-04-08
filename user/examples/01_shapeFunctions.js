@@ -1,0 +1,1 @@
+function setup() {  createCanvas(300, 400);  noStroke();}function draw() {  var t = frameCount * 0.04;  background(0);  fill(255, 230, 70);  rect(40 + sin(t) * 18, 48, 92, 92);  fill(255, 0, 170);  ellipse(214, 94 + cos(t * 1.3) * 20, 112, 78);  fill(150, 70, 255);  triangle(84, 326, 166, 220 + sin(t * 1.6) * 16, 248, 326);}

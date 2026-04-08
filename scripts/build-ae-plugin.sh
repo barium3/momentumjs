@@ -43,6 +43,26 @@ mark_seen_dependency() {
   printf '%s\n' "$1" >> "${SEEN_FILE}"
 }
 
+seed_pkg_config_dependency() {
+  module_name="$1"
+  dylib_name="$2"
+  lib_dir="$(pkg-config --variable=libdir "${module_name}")"
+  dylib_path="${lib_dir}/${dylib_name}"
+
+  if [ ! -f "${dylib_path}" ]; then
+    echo "Error: Missing ${module_name} dylib at ${dylib_path}" >&2
+    exit 1
+  fi
+
+  if has_seen_dependency "${dylib_path}"; then
+    return
+  fi
+
+  mark_seen_dependency "${dylib_path}"
+  cp -Lf "${dylib_path}" "${FRAMEWORKS_DIR}/$(basename "${dylib_path}")"
+  bundle_dependency_tree "${dylib_path}"
+}
+
 bundle_dependency_tree() {
   target="$1"
   for dep in $(list_dependencies "${target}"); do
@@ -94,6 +114,8 @@ mkdir -p "${FRAMEWORKS_DIR}"
 rm -f "${FRAMEWORKS_DIR}"/*.dylib
 
 SEEN_FILE="$(mktemp)"
+seed_pkg_config_dependency freetype2 libfreetype.6.dylib
+seed_pkg_config_dependency harfbuzz libharfbuzz.0.dylib
 bundle_dependency_tree "${PLUGIN_BINARY}"
 rewrite_plugin_dependency_paths
 rewrite_framework_dependency_paths

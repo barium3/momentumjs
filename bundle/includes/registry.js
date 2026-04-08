@@ -565,7 +565,6 @@ functionRegistry.instances = {
         signature(4, 4, "Image"),
       ],
       returns: "object",
-      runtimeModes: ["bitmap"],
     }),
     set: entry("set", {
       signatures: [signature(3, 3)],

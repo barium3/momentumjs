@@ -1,0 +1,1 @@
+function setup() {  createCanvas(200, 200);  noStroke();}function draw() {  var t = frameCount * 0.04;  background(0);  fill(255, 0, 170);  textSize(68 + sin(t) * 6);  textAlign(CENTER, CENTER);  text("AE", 100, 58);  fill(150, 70, 255);  textSize(24);  text("Type", 100, 130 + cos(t) * 8);}

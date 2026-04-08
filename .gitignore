@@ -22,6 +22,9 @@ npm-debug.log*
 *.tmp
 *.temp
 
+# Local-only sketch workspace
+.local-user/
+
 # Local build and release artifacts
 build/
 build-arm64/

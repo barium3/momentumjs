@@ -1,9 +1,0 @@
-{
-  "title": "Nested JSON",
-  "path": "user/io/nested/info.json",
-  "flags": {
-    "nested": true,
-    "deep": false
-  },
-  "values": [10, 20, 30, 40]
-}

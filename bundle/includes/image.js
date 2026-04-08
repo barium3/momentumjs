@@ -358,16 +358,19 @@ function createImageFromContext(
     "tintAlpha * fillAlpha * 100;"
   ].join("\n");
 
-  var tintEffect = imgLayer.Effects.addProperty("ADBE Tint");
-  tintEffect.property(2).expression = [
-    indexFind,
-    "var t = shape && shape.tintColor;",
-    "if (!t) [255, 255, 255, 255];",
-    "else if (t.length === 1) [t[0] * 255, t[0] * 255, t[0] * 255, 255];",
-    "else if (t.length === 2) [t[0] * 255, t[0] * 255, t[0] * 255, t[1] * 255];",
-    "else [t[0] * 255, t[1] * 255, t[2] * 255, (t[3] !== undefined ? t[3] * 255 : 255)]"
-  ].join("\n");
-  tintEffect.property(3).setValue(100);
+  imgLayer.property("Effects").property("ADBE Tint") && imgLayer.property("Effects").property("ADBE Tint").remove();
+  if (shapeData && shapeData.tintColor) {
+    var tintEffect = imgLayer.Effects.addProperty("ADBE Tint");
+    tintEffect.property(2).expression = [
+      indexFind,
+      "var t = shape && shape.tintColor;",
+      "if (!t) [1, 1, 1, 1];",
+      "else if (t.length === 1) [t[0], t[0], t[0], 1];",
+      "else if (t.length === 2) [t[0], t[0], t[0], t[1]];",
+      "else [t[0], t[1], t[2], (t[3] !== undefined ? t[3] : 1)]"
+    ].join("\n");
+    tintEffect.property(3).setValue(100);
+  }
 }
 
 // Resolve the extension user directory.

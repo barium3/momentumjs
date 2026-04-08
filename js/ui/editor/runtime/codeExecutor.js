@@ -756,6 +756,33 @@ window.codeExecutor = (function () {
         },
       };
     });
+
+    session.setValue("loadFont", function (path) {
+      const source = String(path == null ? "" : path);
+      return {
+        __momentumType: "Font",
+        _fontData: {
+          source: source,
+          fontName: "",
+          fontPath: source,
+          fontSourceKind: "file",
+          loaded: true,
+          loadError: "",
+        },
+        font: {
+          familyName: "",
+          path: source,
+          source: source,
+          loaded: true,
+        },
+        textBounds() {
+          return { x: 0, y: 0, w: 0, h: 0 };
+        },
+        textToPoints() {
+          return [];
+        },
+      };
+    });
   }
 
   function buildControllerBootstrapEntrypoints(sourceCode, targetWindow) {

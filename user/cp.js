@@ -1,1 +1,0 @@
-let myPicker;function setup() {  createCanvas(100, 100);  // Create a color picker and set its position.  myPicker = createColorPicker(255, 100, 0);}function draw() {  // Use the color picker to paint the background.  let c = myPicker.color();  background(c);}

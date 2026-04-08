@@ -501,7 +501,7 @@ img.updatePixels(x, y, w, h)
 
 ## `Image.get(...)`
 
-Mode: Bitmap
+Mode: Vector, Bitmap
 
 Reads pixels from an `Image` object.
 

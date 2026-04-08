@@ -123,9 +123,151 @@ window.momentumEditorAutocomplete = (function () {
   }
 
   function isInsideExistingCallArguments(model, position) {
+    function isInsideCallArgumentsByText() {
+      if (!model || !position || typeof model.getValue !== "function" || typeof model.getOffsetAt !== "function") {
+        return false;
+      }
+
+      const code = model.getValue();
+      if (!code) {
+        return false;
+      }
+
+      const offset = model.getOffsetAt(position);
+      if (offset <= 0) {
+        return false;
+      }
+
+      function previousNonWhitespaceIndex(index) {
+        let i = index;
+        while (i >= 0) {
+          const ch = code.charAt(i);
+          if (!/\s/.test(ch)) {
+            return i;
+          }
+          i -= 1;
+        }
+        return -1;
+      }
+
+      function previousIdentifierToken(endIndex) {
+        let i = endIndex;
+        while (i >= 0 && /[A-Za-z0-9_$]/.test(code.charAt(i))) {
+          i -= 1;
+        }
+        return code.slice(i + 1, endIndex + 1);
+      }
+
+      function isCallLikeParen(parenIndex) {
+        const prevIndex = previousNonWhitespaceIndex(parenIndex - 1);
+        if (prevIndex < 0) {
+          return false;
+        }
+
+        const prevChar = code.charAt(prevIndex);
+        if (/[A-Za-z0-9_$\]\)\}]/.test(prevChar)) {
+          const token = /[A-Za-z0-9_$]/.test(prevChar)
+            ? previousIdentifierToken(prevIndex)
+            : "";
+          if (token) {
+            const lower = token.toLowerCase();
+            if (
+              lower === "if" ||
+              lower === "for" ||
+              lower === "while" ||
+              lower === "switch" ||
+              lower === "catch" ||
+              lower === "function"
+            ) {
+              return false;
+            }
+          }
+          return true;
+        }
+
+        return false;
+      }
+
+      const stack = [];
+      let quote = null;
+      let escaped = false;
+      let lineComment = false;
+      let blockComment = false;
+
+      for (let i = 0; i < offset; i += 1) {
+        const ch = code.charAt(i);
+        const next = i + 1 < code.length ? code.charAt(i + 1) : "";
+
+        if (lineComment) {
+          if (ch === "\n") {
+            lineComment = false;
+          }
+          continue;
+        }
+
+        if (blockComment) {
+          if (ch === "*" && next === "/") {
+            blockComment = false;
+            i += 1;
+          }
+          continue;
+        }
+
+        if (quote) {
+          if (escaped) {
+            escaped = false;
+          } else if (ch === "\\") {
+            escaped = true;
+          } else if (ch === quote) {
+            quote = null;
+          }
+          continue;
+        }
+
+        if (ch === "/" && next === "/") {
+          lineComment = true;
+          i += 1;
+          continue;
+        }
+
+        if (ch === "/" && next === "*") {
+          blockComment = true;
+          i += 1;
+          continue;
+        }
+
+        if (ch === '"' || ch === "'" || ch === "`") {
+          quote = ch;
+          continue;
+        }
+
+        if (ch === "(") {
+          stack.push({
+            index: i,
+            callLike: isCallLikeParen(i),
+          });
+          continue;
+        }
+
+        if (ch === ")") {
+          if (stack.length) {
+            stack.pop();
+          }
+        }
+      }
+
+      for (let i = stack.length - 1; i >= 0; i -= 1) {
+        if (stack[i].callLike) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
     const astApi = getAstApi();
     if (!model || !position || !astApi || typeof astApi.parse !== "function" || typeof astApi.walk !== "function") {
-      return false;
+      return isInsideCallArgumentsByText();
     }
 
     const code = model.getValue();
@@ -153,10 +295,10 @@ window.momentumEditorAutocomplete = (function () {
         }
       });
     } catch (_parseError) {
-      return false;
+      return isInsideCallArgumentsByText();
     }
 
-    return inside;
+    return inside || isInsideCallArgumentsByText();
   }
 
   function buildArgPlaceholderList(count) {
@@ -210,13 +352,61 @@ window.momentumEditorAutocomplete = (function () {
     }
 
     if (exactSignature.minArgs <= 0) {
-      return `${name}()`;
+      return `${name}($0)`;
     }
 
     return `${name}(${buildArgPlaceholderList(exactSignature.minArgs)})`;
   }
 
+  function getEditorForModel(model) {
+    return window.editorManager &&
+      window.editorManager.editor &&
+      typeof window.editorManager.editor.getModel === "function" &&
+      window.editorManager.editor.getModel() === model
+        ? window.editorManager.editor
+        : null;
+  }
+
+  function getActiveSelectionRange(model, position) {
+    const editor = getEditorForModel(model);
+    const selection =
+      editor && typeof editor.getSelection === "function"
+        ? editor.getSelection()
+        : null;
+
+    if (
+      selection &&
+      typeof selection.isEmpty === "function" &&
+      !selection.isEmpty() &&
+      selection.startLineNumber === selection.endLineNumber &&
+      selection.startLineNumber === position.lineNumber
+    ) {
+      const startColumn = Math.min(selection.startColumn, selection.endColumn);
+      const endColumn = Math.max(selection.startColumn, selection.endColumn);
+
+      if (startColumn <= position.column && position.column <= endColumn) {
+        return new monaco.Range(
+          position.lineNumber,
+          startColumn,
+          position.lineNumber,
+          endColumn,
+        );
+      }
+    }
+
+    return null;
+  }
+
+  function isReplacingExistingArgumentValue(model, position) {
+    return !!getActiveSelectionRange(model, position) && isInsideExistingCallArguments(model, position);
+  }
+
   function getCompletionRange(model, position) {
+    const selectionRange = getActiveSelectionRange(model, position);
+    if (selectionRange) {
+      return selectionRange;
+    }
+
     const word = model.getWordUntilPosition(position);
     return new monaco.Range(
       position.lineNumber,
@@ -242,10 +432,12 @@ window.momentumEditorAutocomplete = (function () {
       kind: config.kind,
       insertText: config.insertText,
       insertTextRules,
+      command: config.command,
       detail: config.detail,
       documentation: config.documentation,
       range,
       filterText: config.filterText,
+      preselect: !!config.preselect,
       sortText: config.sortText,
     };
   }
@@ -287,6 +479,7 @@ window.momentumEditorAutocomplete = (function () {
       const signatures = item && item.signatures;
       let insertText = name;
       let insertTextRules;
+      let command;
 
       if (type === "constant") {
         kind = monaco.languages.CompletionItemKind.Constant;
@@ -302,6 +495,12 @@ window.momentumEditorAutocomplete = (function () {
         });
         if (insertText.indexOf("$") >= 0) {
           insertTextRules = getSnippetInsertTextRule();
+          if (name === "textFont") {
+            command = {
+              id: "editor.action.triggerSuggest",
+              title: "Trigger Suggest",
+            };
+          }
         }
       }
 
@@ -312,8 +511,10 @@ window.momentumEditorAutocomplete = (function () {
           kind,
           insertText,
           insertTextRules,
+          command,
           detail: categoryName ? `Momentum ${categoryName}` : "Momentum",
           documentation: formatSignatureSummary(signatures),
+          preselect: suppressCallParens && type !== "constant" && type !== "variable" && type !== "namespace",
           sortText: `0_${name}`,
         }),
       );
@@ -885,6 +1086,7 @@ window.momentumEditorAutocomplete = (function () {
         }),
         detail: `Momentum ${receiverType} method`,
         documentation: formatSignatureSummary(entry.info && entry.info.signatures),
+        preselect: suppressCallParens,
         sortText: `0_${entry.name}`,
       }),
     );
@@ -979,7 +1181,7 @@ window.momentumEditorAutocomplete = (function () {
         if (receiverType && typeInference.hasKnownMethodReceiver(receiverType)) {
           return {
             suggestions: buildMemberSuggestions(getCompletionRange(model, position), receiverType, model, {
-              suppressCallParens: isInsideExistingCallArguments(model, position),
+              suppressCallParens: isReplacingExistingArgumentValue(model, position),
             }),
           };
         }
@@ -1012,7 +1214,7 @@ window.momentumEditorAutocomplete = (function () {
         if (receiverType && typeInference.hasKnownMethodReceiver(receiverType)) {
           return {
             suggestions: buildMemberSuggestions(getCompletionRange(model, position), receiverType, model, {
-              suppressCallParens: isInsideExistingCallArguments(model, position),
+              suppressCallParens: isReplacingExistingArgumentValue(model, position),
             }),
           };
         }
@@ -1138,9 +1340,42 @@ window.momentumEditorAutocomplete = (function () {
               })
             : name,
           detail,
+          preselect: suppressCallParens && isFunction,
           sortText: `2_${name}`,
         });
       });
+  }
+
+  function configureJavaScriptDefaults() {
+    const defaults =
+      monaco &&
+      monaco.languages &&
+      monaco.languages.typescript &&
+      monaco.languages.typescript.javascriptDefaults
+        ? monaco.languages.typescript.javascriptDefaults
+        : null;
+
+    if (!defaults) {
+      return;
+    }
+
+    defaults.setCompilerOptions({
+      allowNonTsExtensions: true,
+      noLib: true,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+    });
+
+    if (typeof defaults.setModeConfiguration === "function") {
+      const currentModeConfiguration =
+        defaults.modeConfiguration && typeof defaults.modeConfiguration === "object"
+          ? defaults.modeConfiguration
+          : {};
+
+      defaults.setModeConfiguration({
+        ...currentModeConfiguration,
+        completionItems: false,
+      });
+    }
   }
 
   function createController() {
@@ -1156,11 +1391,7 @@ window.momentumEditorAutocomplete = (function () {
         return;
       }
 
-      monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
-        allowNonTsExtensions: true,
-        noLib: true,
-        target: monaco.languages.typescript.ScriptTarget.ES2020,
-      });
+      configureJavaScriptDefaults();
 
       if (completionProviderDisposable && typeof completionProviderDisposable.dispose === "function") {
         completionProviderDisposable.dispose();
@@ -1179,7 +1410,7 @@ window.momentumEditorAutocomplete = (function () {
         provideCompletionItems(model, position) {
           const textFontContext = getTextFontFirstArgumentContext(model, position);
           if (textFontContext) {
-            const suppressCallParens = isInsideExistingCallArguments(model, position);
+            const suppressCallParens = isReplacingExistingArgumentValue(model, position);
             return buildFontSuggestions(textFontContext).then((fontSuggestions) => {
               const bindingSuggestions = buildUserBindingSuggestions(
                 model,
@@ -1192,20 +1423,20 @@ window.momentumEditorAutocomplete = (function () {
                 suggestions: fontSuggestions.concat(bindingSuggestions),
               };
             });
-          }
+        }
 
-          const memberContext = getMemberCompletionContext(model, position);
-          if (memberContext && memberContext.suggestions) {
-            return {
+        const memberContext = getMemberCompletionContext(model, position);
+        if (memberContext && memberContext.suggestions) {
+          return {
               suggestions: memberContext.suggestions,
             };
-          }
+        }
 
-          const range = getCompletionRange(model, position);
-          const suppressCallParens = isInsideExistingCallArguments(model, position);
-          const momentumSuggestions = buildMomentumSuggestions(range, model, {
-            suppressCallParens,
-          });
+        const range = getCompletionRange(model, position);
+        const suppressCallParens = isReplacingExistingArgumentValue(model, position);
+        const momentumSuggestions = buildMomentumSuggestions(range, model, {
+          suppressCallParens,
+        });
           const excludedNames = Object.create(null);
           momentumSuggestions.forEach((suggestion) => {
             excludedNames[suggestion.label] = true;

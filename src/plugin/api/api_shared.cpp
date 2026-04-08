@@ -1542,8 +1542,8 @@ bool ReadNumericArgs(
   }
 
   out.clear();
-  out.reserve(requiredCount);
-  for (std::size_t i = 0; i < requiredCount; ++i) {
+  out.reserve(argumentCount);
+  for (std::size_t i = 0; i < argumentCount; ++i) {
     double numeric = 0.0;
     if (!JsValueToNumberSafe(ctx, arguments[i], numeric)) {
       return false;

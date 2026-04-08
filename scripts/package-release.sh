@@ -42,7 +42,10 @@ rsync -a \
   --exclude 'dist' \
   --exclude '.DS_Store' \
   --exclude '.vscode' \
-  --exclude 'user' \
+  --include 'user/' \
+  --include 'user/examples/' \
+  --include 'user/examples/***' \
+  --exclude 'user/***' \
   --exclude 'install.sh' \
   --exclude 'uninstall.sh' \
   "${ROOT_DIR}/" \
