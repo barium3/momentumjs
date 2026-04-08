@@ -82,6 +82,8 @@ Common math APIs:
 
 ## Constants
 
+Mode: Vector, Bitmap
+
 ### `PI`
 
 The value of pi.
@@ -108,6 +110,8 @@ arc(50, 50, 80, 80, 0, HALF_PI);
 ---
 
 ## Angle Functions
+
+Mode: Vector, Bitmap
 
 ### `degrees(rad)`
 
@@ -154,6 +158,8 @@ rotate(45);
 
 ## Trigonometric Functions
 
+Mode: Vector, Bitmap
+
 ### Functions
 
 - `sin(v)`
@@ -175,6 +181,8 @@ line(0, 0, x, y);
 ---
 
 ## Basic Numeric Functions
+
+Mode: Vector, Bitmap
 
 ### Functions
 
@@ -202,6 +210,8 @@ let c = floor(3.8);
 ---
 
 ## Range and Mapping Functions
+
+Mode: Vector, Bitmap
 
 ### `norm(v, a, b)`
 
@@ -231,6 +241,8 @@ let y = constrain(x, 20, 80);
 
 ## Distance and Magnitude
 
+Mode: Vector, Bitmap
+
 ### `mag(x, y)`
 
 Returns the magnitude of a 2D vector.
@@ -249,6 +261,8 @@ let m = mag(3, 4);
 ---
 
 ## Random Functions
+
+Mode: Vector, Bitmap
 
 ### `random()`
 

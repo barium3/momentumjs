@@ -147,18 +147,18 @@ functionRegistry.shapes = {
       signature(0, 0),
       signature(1, 1),
     ],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   clip: entry("clip", {
     signatures: [
       signature(1, 1),
       signature(2, 2),
     ],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   endClip: entry("endClip", {
     signatures: [signature(0, 0)],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   text: entry("_text", {
     baseType: "text",
@@ -220,11 +220,11 @@ functionRegistry.transforms = {
   }),
   shearX: entry("shearX", {
     signatures: [signature(1, 1)],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   shearY: entry("shearY", {
     signatures: [signature(1, 1)],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   push: entry("push"),
   pop: entry("pop"),
@@ -237,7 +237,7 @@ functionRegistry.colors = {
   }),
   clear: entry("clear", {
     signatures: [signature(0, 0)],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   noFill: entry("noFill"),
   stroke: entry("stroke", {
@@ -249,15 +249,15 @@ functionRegistry.colors = {
   }),
   strokeCap: entry("strokeCap", {
     signatures: [signature(1, 1)],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   strokeJoin: entry("strokeJoin", {
     signatures: [signature(1, 1)],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   blendMode: entry("blendMode", {
     signatures: [signature(1, 1)],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   erase: entry("erase", {
     signatures: [
@@ -265,11 +265,11 @@ functionRegistry.colors = {
       signature(1, 1),
       signature(2, 2),
     ],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   noErase: entry("noErase", {
     signatures: [signature(0, 0)],
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   color: entry("color", {
     signatures: COLOR_VALUE_SIGNATURES,
@@ -307,7 +307,7 @@ functionRegistry.typography = {
       signature(2, 3, "Font"),
     ],
     returns: "Font",
-    runtimeModes: ["scene"],
+    runtimeModes: ["bitmap"],
   }),
   textSize: entry("textSize", {
     signatures: [
@@ -371,21 +371,21 @@ functionRegistry.math = {
   ROUND: constant("ROUND"),
   SQUARE: constant("SQUARE"),
   PROJECT: constant("PROJECT"),
-  BLEND: constant("BLEND", { runtimeModes: ["scene"] }),
-  ADD: constant("ADD", { runtimeModes: ["scene"] }),
-  DARKEST: constant("DARKEST", { runtimeModes: ["scene"] }),
-  LIGHTEST: constant("LIGHTEST", { runtimeModes: ["scene"] }),
-  DIFFERENCE: constant("DIFFERENCE", { runtimeModes: ["scene"] }),
-  EXCLUSION: constant("EXCLUSION", { runtimeModes: ["scene"] }),
-  MULTIPLY: constant("MULTIPLY", { runtimeModes: ["scene"] }),
-  SCREEN: constant("SCREEN", { runtimeModes: ["scene"] }),
-  REPLACE: constant("REPLACE", { runtimeModes: ["scene"] }),
-  REMOVE: constant("REMOVE", { runtimeModes: ["scene"] }),
-  OVERLAY: constant("OVERLAY", { runtimeModes: ["scene"] }),
-  HARD_LIGHT: constant("HARD_LIGHT", { runtimeModes: ["scene"] }),
-  SOFT_LIGHT: constant("SOFT_LIGHT", { runtimeModes: ["scene"] }),
-  DODGE: constant("DODGE", { runtimeModes: ["scene"] }),
-  BURN: constant("BURN", { runtimeModes: ["scene"] }),
+  BLEND: constant("BLEND", { runtimeModes: ["bitmap"] }),
+  ADD: constant("ADD", { runtimeModes: ["bitmap"] }),
+  DARKEST: constant("DARKEST", { runtimeModes: ["bitmap"] }),
+  LIGHTEST: constant("LIGHTEST", { runtimeModes: ["bitmap"] }),
+  DIFFERENCE: constant("DIFFERENCE", { runtimeModes: ["bitmap"] }),
+  EXCLUSION: constant("EXCLUSION", { runtimeModes: ["bitmap"] }),
+  MULTIPLY: constant("MULTIPLY", { runtimeModes: ["bitmap"] }),
+  SCREEN: constant("SCREEN", { runtimeModes: ["bitmap"] }),
+  REPLACE: constant("REPLACE", { runtimeModes: ["bitmap"] }),
+  REMOVE: constant("REMOVE", { runtimeModes: ["bitmap"] }),
+  OVERLAY: constant("OVERLAY", { runtimeModes: ["bitmap"] }),
+  HARD_LIGHT: constant("HARD_LIGHT", { runtimeModes: ["bitmap"] }),
+  SOFT_LIGHT: constant("SOFT_LIGHT", { runtimeModes: ["bitmap"] }),
+  DODGE: constant("DODGE", { runtimeModes: ["bitmap"] }),
+  BURN: constant("BURN", { runtimeModes: ["bitmap"] }),
   MITER: constant("MITER"),
   BEVEL: constant("BEVEL"),
   CENTER: constant("CENTER"),
@@ -964,7 +964,7 @@ functionRegistry.instances = {
         signature(5, 5, "object"),
       ],
       returns: "object",
-      runtimeModes: ["scene"],
+      runtimeModes: ["bitmap"],
     }),
     textToPoints: entry("textToPoints", {
       signatures: [
@@ -972,7 +972,7 @@ functionRegistry.instances = {
         signature(5, 5, "array"),
       ],
       returns: "array",
-      runtimeModes: ["scene"],
+      runtimeModes: ["bitmap"],
     }),
   },
   Color: {

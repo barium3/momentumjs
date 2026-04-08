@@ -44,6 +44,8 @@ Common data APIs:
 
 ## Array Helpers
 
+Mode: Vector, Bitmap
+
 ### `append(list, value)`
 
 Appends a value to an array.
@@ -104,6 +106,8 @@ let part = subset(items, 1, 2);
 
 ## String and Token Helpers
 
+Mode: Vector, Bitmap
+
 ### `join(list, separator)`
 
 Joins an array into a string.
@@ -140,6 +144,8 @@ let s = trim("  hello  ");
 
 ## Matching Helpers
 
+Mode: Vector, Bitmap
+
 ### `match(str, pattern)`
 
 Returns the first regex-style match.
@@ -158,6 +164,8 @@ let all = matchAll("a1 b2 c3", "\\d");
 ---
 
 ## Number Formatting
+
+Mode: Vector, Bitmap
 
 ### `nf(value, [left], [right])`
 
@@ -185,6 +193,8 @@ let b = nfc(12345.67, 2);
 ---
 
 ## Type Conversion
+
+Mode: Vector, Bitmap
 
 ### `str(value)`
 
@@ -234,6 +244,8 @@ let c = hex(255);
 
 ## `print(...)`
 
+Mode: Vector, Bitmap
+
 Prints values to the console output.
 
 ### Signature
@@ -256,6 +268,8 @@ print("hello", 42);
 ---
 
 ## Common Pattern
+
+Mode: Vector, Bitmap
 
 Use data helpers to prepare values before drawing.
 

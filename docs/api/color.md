@@ -1,8 +1,10 @@
 # Color
 
-Color APIs control fill, stroke, opacity, and color conversion behavior for drawing.
+Color APIs control fill, stroke, background, blending, erasing, and color conversion behavior for drawing.
 
-These functions are modeled after p5.js-style color workflows and affect later drawing calls until the color state changes again.
+If you need bitmap-only features such as `clear()`, `blendMode()`, `erase()`, `noErase()`, `strokeCap()`, or `strokeJoin()`, switch the sketch to Bitmap mode.
+
+These functions affect later drawing calls until the current color state changes again.
 
 ---
 
@@ -19,6 +21,15 @@ Common color APIs:
 - `color(...)`
 - `lerpColor(c1, c2, amt)`
 - `colorMode(mode, ...)`
+
+Bitmap-only color APIs:
+
+- `clear()`
+- `strokeCap(mode)`
+- `strokeJoin(mode)`
+- `blendMode(mode)`
+- `erase([fillAlpha[, strokeAlpha]])`
+- `noErase()`
 
 Common color extraction APIs:
 
@@ -37,9 +48,37 @@ Supported color mode constants:
 - `HSB`
 - `HSL`
 
+Bitmap-only blend constants:
+
+- `BLEND`
+- `ADD`
+- `DARKEST`
+- `LIGHTEST`
+- `DIFFERENCE`
+- `EXCLUSION`
+- `MULTIPLY`
+- `SCREEN`
+- `REPLACE`
+- `REMOVE`
+- `OVERLAY`
+- `HARD_LIGHT`
+- `SOFT_LIGHT`
+- `DODGE`
+- `BURN`
+
+Bitmap-only stroke constants:
+
+- `ROUND`
+- `SQUARE`
+- `PROJECT`
+- `MITER`
+- `BEVEL`
+
 ---
 
 ## Color State
+
+Mode: Vector, Bitmap
 
 Momentum keeps a current drawing color state for later drawing calls.
 
@@ -56,7 +95,9 @@ Color-setting functions affect later shape, text, and image-related styling unti
 
 ## `background(...)`
 
-Sets the sketch background color.
+Mode: Vector, Bitmap
+
+Sets the background color of the current drawing surface.
 
 ### Signatures
 
@@ -80,13 +121,33 @@ background(255, 0, 0, 128);
 
 ### Notes
 
-- `background()` affects the sketch background, not the current fill or stroke state.
-- Unlike `fill()`, `background()` is treated as a separate background operation.
-- Transparent background values can affect how previous frame imagery is retained in animated workflows.
+- `background()` affects the current surface background, not the current fill or stroke state.
+- In bitmap mode, this also works on `Graphics` buffers.
+
+---
+
+## `clear()`
+
+Mode: Bitmap
+
+Clears the current bitmap drawing surface.
+
+### Signature
+
+```js
+clear()
+```
+
+### Notes
+
+- This is only available in Bitmap mode.
+- Use `clear()` when you want to reset the current bitmap surface instead of painting a new background color over it.
 
 ---
 
 ## `fill(...)`
+
+Mode: Vector, Bitmap
 
 Sets the fill color used by later drawing calls.
 
@@ -116,6 +177,8 @@ rect(10, 10, 40, 40);
 
 ## `noFill()`
 
+Mode: Vector, Bitmap
+
 Disables fill for later drawing calls.
 
 ### Signature
@@ -135,6 +198,8 @@ rect(10, 10, 80, 40);
 ---
 
 ## `stroke(...)`
+
+Mode: Vector, Bitmap
 
 Sets the stroke color used by later drawing calls.
 
@@ -163,6 +228,8 @@ line(0, 0, 100, 100);
 
 ## `noStroke()`
 
+Mode: Vector, Bitmap
+
 Disables stroke for later drawing calls.
 
 ### Signature
@@ -182,6 +249,8 @@ circle(50, 50, 40);
 ---
 
 ## `strokeWeight(w)`
+
+Mode: Vector, Bitmap
 
 Sets the stroke width used by later drawing calls.
 
@@ -205,7 +274,146 @@ line(10, 10, 90, 90);
 
 ---
 
+## `strokeCap(mode)`
+
+Mode: Bitmap
+
+Sets the cap style used for stroked lines.
+
+### Signature
+
+```js
+strokeCap(mode)
+```
+
+### Parameters
+
+- `mode`: `ROUND`, `SQUARE`, or `PROJECT`
+
+### Supported modes
+
+- `ROUND`: Rounded line caps.
+- `SQUARE`: Square caps that stop at the line endpoint.
+- `PROJECT`: Square caps that extend past the line endpoint.
+
+### Notes
+
+- This is only available in Bitmap mode.
+
+---
+
+## `strokeJoin(mode)`
+
+Mode: Bitmap
+
+Sets the join style used where stroked segments meet.
+
+### Signature
+
+```js
+strokeJoin(mode)
+```
+
+### Parameters
+
+- `mode`: `MITER`, `BEVEL`, or `ROUND`
+
+### Supported modes
+
+- `MITER`: Sharp corner joins.
+- `BEVEL`: Flattened corner joins.
+- `ROUND`: Rounded corner joins.
+
+### Notes
+
+- This is only available in Bitmap mode.
+
+---
+
+## `blendMode(mode)`
+
+Mode: Bitmap
+
+Sets the blend mode used by later bitmap drawing calls.
+
+### Signature
+
+```js
+blendMode(mode)
+```
+
+### Parameters
+
+- `mode`: One of the bitmap blend constants listed above
+
+### Supported modes
+
+- `BLEND`: Normal alpha compositing.
+- `ADD`: Additive blending.
+- `DARKEST`: Keeps the darker result.
+- `LIGHTEST`: Keeps the lighter result.
+- `DIFFERENCE`: Uses absolute channel difference.
+- `EXCLUSION`: Softer difference-style blend.
+- `MULTIPLY`: Darkens by multiplying colors.
+- `SCREEN`: Lightens by screening colors.
+- `REPLACE`: Replaces destination pixels directly.
+- `REMOVE`: Removes overlapping color contribution.
+- `OVERLAY`: Combines multiply and screen behavior.
+- `HARD_LIGHT`: Strong directional light blend.
+- `SOFT_LIGHT`: Softer light blend.
+- `DODGE`: Brightens highlights.
+- `BURN`: Darkens shadows.
+
+### Example
+
+```js
+blendMode(MULTIPLY);
+```
+
+### Notes
+
+- This is only available in Bitmap mode.
+
+---
+
+## `erase([fillAlpha[, strokeAlpha]])`
+
+Mode: Bitmap
+
+Enters bitmap erase mode for later drawing calls.
+
+### Signatures
+
+```js
+erase()
+erase(fillAlpha)
+erase(fillAlpha, strokeAlpha)
+```
+
+### Notes
+
+- This is only available in Bitmap mode.
+- Use `noErase()` to return to normal drawing.
+
+---
+
+## `noErase()`
+
+Mode: Bitmap
+
+Leaves bitmap erase mode and returns to normal drawing.
+
+### Signature
+
+```js
+noErase()
+```
+
+---
+
 ## `color(...)`
+
+Mode: Vector, Bitmap
 
 Creates a color value.
 
@@ -234,6 +442,8 @@ rect(10, 10, 40, 40);
 
 ## `lerpColor(c1, c2, amt)`
 
+Mode: Vector, Bitmap
+
 Interpolates between two colors.
 
 ### Signature
@@ -261,6 +471,8 @@ rect(10, 10, 40, 40);
 ---
 
 ## `colorMode(mode, ...)`
+
+Mode: Vector, Bitmap
 
 Changes how color values are interpreted.
 
@@ -298,37 +510,55 @@ fill(30, 80, 100, 1);
 
 ## Channel Extraction
 
+Mode: Vector, Bitmap
+
 These functions read components from a color value.
 
 ### `red(c)`
+
+Mode: Vector, Bitmap
 
 Returns the red component.
 
 ### `green(c)`
 
+Mode: Vector, Bitmap
+
 Returns the green component.
 
 ### `blue(c)`
+
+Mode: Vector, Bitmap
 
 Returns the blue component.
 
 ### `alpha(c)`
 
+Mode: Vector, Bitmap
+
 Returns the alpha component.
 
 ### `hue(c)`
+
+Mode: Vector, Bitmap
 
 Returns the hue component.
 
 ### `saturation(c)`
 
+Mode: Vector, Bitmap
+
 Returns the saturation component.
 
 ### `brightness(c)`
 
+Mode: Vector, Bitmap
+
 Returns the brightness component.
 
 ### `lightness(c)`
+
+Mode: Vector, Bitmap
 
 Returns the lightness component.
 

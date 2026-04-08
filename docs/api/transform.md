@@ -1,6 +1,6 @@
 # Transform
 
-Transform APIs control how later drawing commands are positioned, rotated, and scaled.
+Transform APIs control how later drawing commands are positioned, rotated, scaled, and otherwise transformed.
 
 These functions affect subsequent shape, image, and text calls until the transform state is changed again or restored.
 
@@ -8,19 +8,27 @@ These functions affect subsequent shape, image, and text calls until the transfo
 
 ## Overview
 
-Transform APIs:
+Common transform APIs:
 
 - `translate(x, y)`
 - `rotate(angle)`
 - `scale(s)`
 - `scale(x, y)`
+- `applyMatrix(...)`
 - `push()`
 - `pop()`
 - `resetMatrix()`
 
+Bitmap-only transform APIs:
+
+- `shearX(angle)`
+- `shearY(angle)`
+
 ---
 
 ## Transform State
+
+Mode: Vector, Bitmap
 
 Momentum keeps a current transform state that affects later drawing calls.
 
@@ -42,12 +50,15 @@ translate(10, 0);
 
 ## `translate(x, y)`
 
+Mode: Vector, Bitmap
+
 Moves the coordinate system for subsequent drawing.
 
-### Signature
+### Signatures
 
 ```js
 translate(x, y)
+translate(vec)
 ```
 
 ### Parameters
@@ -70,6 +81,8 @@ rect(0, 0, 40, 20);
 ---
 
 ## `rotate(angle)`
+
+Mode: Vector, Bitmap
 
 Rotates the coordinate system for subsequent drawing.
 
@@ -95,11 +108,13 @@ rect(0, 0, 40, 20);
 
 - `rotate()` affects all later draw calls until the transform state changes again.
 - Rotation is cumulative.
-- Angle interpretation follows the current angle-related math behavior in the sketch.
+- Angle interpretation follows the current angle mode in the sketch.
 
 ---
 
 ## `scale(s)`
+
+Mode: Vector, Bitmap
 
 Scales the coordinate system uniformly.
 
@@ -123,6 +138,8 @@ circle(20, 20, 10);
 ---
 
 ## `scale(x, y)`
+
+Mode: Vector, Bitmap
 
 Scales the coordinate system independently on each axis.
 
@@ -152,7 +169,67 @@ ellipse(50, 50, 40, 40);
 
 ---
 
+## `applyMatrix(...)`
+
+Mode: Vector, Bitmap
+
+Applies a custom transform matrix.
+
+### Signatures
+
+```js
+applyMatrix(mat)
+applyMatrix(a, b, c, d, e, f)
+```
+
+### Notes
+
+- Use this when you need direct control over the transform matrix.
+- `shearX()` and `shearY()` are built on top of `applyMatrix(...)`.
+
+---
+
+## `shearX(angle)`
+
+Mode: Bitmap
+
+Applies an X-axis shear transform.
+
+### Signature
+
+```js
+shearX(angle)
+```
+
+### Notes
+
+- This is currently documented as Bitmap-only.
+- Internally it is implemented through `applyMatrix(...)`.
+
+---
+
+## `shearY(angle)`
+
+Mode: Bitmap
+
+Applies a Y-axis shear transform.
+
+### Signature
+
+```js
+shearY(angle)
+```
+
+### Notes
+
+- This is currently documented as Bitmap-only.
+- Internally it is implemented through `applyMatrix(...)`.
+
+---
+
 ## `push()`
+
+Mode: Vector, Bitmap
 
 Saves the current drawing state.
 
@@ -185,6 +262,8 @@ rect(0, 0, 40, 20);
 
 ## `pop()`
 
+Mode: Vector, Bitmap
+
 Restores the most recently saved drawing state.
 
 ### Signature
@@ -213,6 +292,8 @@ circle(0, 0, 20);
 
 ## `resetMatrix()`
 
+Mode: Vector, Bitmap
+
 Resets the current transform state.
 
 ### Signature
@@ -240,6 +321,8 @@ rect(0, 0, 20, 20);
 
 ## Common Pattern
 
+Mode: Vector, Bitmap
+
 Use `push()` and `pop()` to apply local transforms without affecting later drawing.
 
 ```js
@@ -260,22 +343,16 @@ rect(80, 0, 20, 20);
 
 ```js
 function setup() {
-  createCanvas(100, 100);
+  createCanvas(120, 120);
+}
+
+function draw() {
   background(30);
 
   push();
-  translate(50, 50);
+  translate(60, 60);
   rotate(PI / 4);
-  rectMode(CENTER);
-  rect(0, 0, 30, 20);
+  rect(-20, -10, 40, 20);
   pop();
 }
 ```
-
----
-
-## Related
-
-- [`README.md`](../../README.md)
-- [`bundle/includes/transformation.js`](../../bundle/includes/transformation.js)
-- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)

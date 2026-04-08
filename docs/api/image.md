@@ -1,16 +1,14 @@
 # Image
 
-Image APIs load bitmap assets from `user/` and render them into the Momentum runtime.
+Image APIs cover image loading, drawing, offscreen bitmap buffers, and pixel operations.
 
-These functions are modeled after p5.js, but the final output is rendered through the Momentum compiler, analyzer, and After Effects pipeline.
-
-Because rendering is constrained by the After Effects environment, Momentum only supports p5.js-style pixel reading, not direct pixel modification. In practice, this means pixel sampling workflows such as `img.get(...)` are supported, while workflows that depend on editing image pixels in place are not.
+If you need bitmap-only features such as mutable image buffers, pixel access, offscreen graphics, filters, masking, or blend operations, switch the sketch to Bitmap mode.
 
 ---
 
 ## Overview
 
-Image-related APIs:
+Core image APIs:
 
 - `loadImage(path)`
 - `image(img, x, y)`
@@ -18,8 +16,33 @@ Image-related APIs:
 - `imageMode(mode)`
 - `tint(...)`
 - `noTint()`
-- `img.get(x, y)`
-- `img.resize(w, h)`
+
+Bitmap-only image and pixel APIs:
+
+- `createGraphics(w, h)`
+- `createImage(w, h)`
+- `pixelDensity([value])`
+- `loadPixels()`
+- `updatePixels([x, y, w, h])`
+- `get(...)`
+- `set(x, y, value)`
+- `copy(...)`
+- `blend(...)`
+- `filter(kind, [value])`
+- `pixels`
+
+Bitmap-only `Image` methods:
+
+- `Image.pixelDensity([value])`
+- `Image.loadPixels()`
+- `Image.updatePixels([x, y, w, h])`
+- `Image.get(...)`
+- `Image.set(x, y, value)`
+- `Image.copy(...)`
+- `Image.blend(...)`
+- `Image.filter(kind, [value])`
+- `Image.resize(w, h)`
+- `Image.mask(maskImage)`
 
 Supported image mode constants:
 
@@ -27,30 +50,42 @@ Supported image mode constants:
 - `CORNERS`
 - `CENTER`
 
+Bitmap-only filter constants:
+
+- `THRESHOLD`
+- `GRAY`
+- `OPAQUE`
+- `INVERT`
+- `POSTERIZE`
+- `BLUR`
+- `ERODE`
+- `DILATE`
+
 ---
 
-## `loadImage(path)`
+## `loadImage(path[, successCallback[, failureCallback]])`
+
+Mode: Vector, Bitmap
 
 Loads an image from the `user/` directory.
 
-### Signature
+### Signatures
 
 ```js
 loadImage(path)
+loadImage(path, successCallback)
+loadImage(path, successCallback, failureCallback)
 ```
 
 ### Parameters
 
 - `path`: Relative file path under `user/`, for example `"pic.png"` or `"images/pic.png"`.
+- `successCallback`: Optional callback for bitmap-style loading flows.
+- `failureCallback`: Optional callback if loading fails.
 
 ### Returns
 
-An image object with:
-
-- `width`
-- `height`
-- `get(...)`
-- `resize(...)`
+An image object.
 
 ### Example
 
@@ -64,13 +99,15 @@ function preload() {
 
 ### Notes
 
-- Paths are relative to the extension's `user/` folder.
-- Image metadata is collected on the frontend before execution.
-- If the file cannot be resolved, the image may behave like an empty image with size `0`.
+- For where `user/` lives and how relative asset paths work, see [The `user/` Directory](../getting-started.md#the-user-directory).
+- In vector mode, images are ultimately placed through the AE generation pipeline.
+- In bitmap mode, the returned image can also participate in pixel workflows.
 
 ---
 
 ## `image(img, x, y, [w], [h])`
+
+Mode: Vector, Bitmap
 
 Draws an image at a given position, optionally with an explicit output size.
 
@@ -83,31 +120,23 @@ image(img, x, y, w, h)
 
 ### Parameters
 
-- `img`: Image object returned by `loadImage()` or `img.get(...)`
+- `img`: Image object
 - `x`: X position
 - `y`: Y position
 - `w`: Optional target width
 - `h`: Optional target height
 
-### Behavior
-
-- If `w` and `h` are omitted, the image is drawn using its current width and height.
-- If `w` and `h` are provided, the image is drawn at that output size.
-
-### Examples
-
-```js
-image(img, 20, 30);
-image(img, 0, 0, 100, 100);
-```
-
 ### Notes
 
 - Providing `w` and `h` changes the rendered size, not the source pixels.
+- In vector mode this maps to AE-side image placement.
+- In bitmap mode this draws into the current bitmap canvas or graphics buffer.
 
 ---
 
 ## `imageMode(mode)`
+
+Mode: Vector, Bitmap
 
 Changes how `image()` interprets `x`, `y`, `w`, and `h`.
 
@@ -127,18 +156,13 @@ imageMode(mode)
 - `CORNERS`: `x`, `y` is one corner. `w`, `h` is the opposite corner.
 - `CENTER`: `x`, `y` is the center point. `w`, `h` are width and height.
 
-### Example
-
-```js
-imageMode(CENTER);
-image(img, width / 2, height / 2, 80, 80);
-```
-
 ---
 
 ## `tint(...)`
 
-Applies a color tint to image rendering.
+Mode: Vector, Bitmap
+
+Applies a color tint to later `image()` calls.
 
 ### Signature
 
@@ -147,13 +171,6 @@ tint(gray)
 tint(gray, alpha)
 tint(r, g, b)
 tint(r, g, b, alpha)
-```
-
-### Example
-
-```js
-tint(255, 128);
-image(img, 0, 0);
 ```
 
 ### Notes
@@ -165,6 +182,8 @@ image(img, 0, 0);
 
 ## `noTint()`
 
+Mode: Vector, Bitmap
+
 Clears the current tint state.
 
 ### Signature
@@ -173,50 +192,231 @@ Clears the current tint state.
 noTint()
 ```
 
-### Example
-
-```js
-tint(255, 0, 0);
-image(img, 0, 0);
-
-noTint();
-image(img, 120, 0);
-```
-
 ---
 
-## `img.get(x, y)`
+## `createGraphics(w, h)`
 
-Samples a single pixel from the image.
+Mode: Bitmap
 
-The `x` and `y` coordinates are interpreted in the original image's pixel space.
+Creates an offscreen bitmap drawing buffer.
 
 ### Signature
 
 ```js
-img.get(x, y)
+createGraphics(w, h)
 ```
 
 ### Returns
 
-A color array in normalized color format.
+A `Graphics` object.
 
-### Example
+### Notes
+
+- `Graphics` supports drawing commands plus bitmap-only pixel operations.
+- Use this when you want an offscreen surface, then draw it back with `image(pg, ...)`.
+
+---
+
+## `createImage(w, h)`
+
+Mode: Bitmap
+
+Creates a mutable bitmap image buffer.
+
+### Signature
 
 ```js
-let c = img.get(10, 20);
-fill(c);
-square(0, 0, 20);
+createImage(w, h)
+```
+
+### Returns
+
+An `Image` object.
+
+---
+
+## `pixelDensity([value])`
+
+Mode: Bitmap
+Available on: canvas, `Image`, `Graphics`
+
+Gets or sets the current canvas pixel density.
+
+### Signatures
+
+```js
+pixelDensity()
+pixelDensity(value)
 ```
 
 ### Notes
 
-- `x` and `y` refer to coordinates in the source image, not the drawn output size on the canvas.
-- If `img.resize(...)` has been applied, `img.get(x, y)` samples based on the resized image space.
+- This API is bitmap-only.
+- The same method name also exists on `Image` and `Graphics` instances.
 
 ---
 
-## `img.resize(w, h)`
+## `loadPixels()`
+
+Mode: Bitmap
+Available on: canvas, `Image`, `Graphics`
+
+Loads the current canvas pixels into the `pixels` array.
+
+### Signature
+
+```js
+loadPixels()
+```
+
+### Notes
+
+- Bitmap-only.
+- Use before reading or modifying `pixels`.
+- The same method name also exists on `Image` and `Graphics` instances.
+
+---
+
+## `updatePixels([x, y, w, h])`
+
+Mode: Bitmap
+Available on: canvas, `Image`, `Graphics`
+
+Commits changes from `pixels` back to the current canvas.
+
+### Signatures
+
+```js
+updatePixels()
+updatePixels(x, y, w, h)
+```
+
+### Notes
+
+- Bitmap-only.
+- The 4-argument form updates a sub-rectangle.
+- The same method name also exists on `Image` and `Graphics` instances.
+
+---
+
+## `pixels`
+
+Mode: Bitmap
+
+The current canvas pixel array.
+
+### Notes
+
+- Bitmap-only.
+- Use together with `loadPixels()` and `updatePixels()`.
+
+---
+
+## `get(...)`
+
+Mode: Bitmap
+Available on: canvas, `Image`, `Graphics`
+
+Reads pixels from the current canvas.
+
+### Signatures
+
+```js
+get()
+get(x, y)
+get(x, y, w, h)
+```
+
+### Returns
+
+- `get()` returns an `Image`
+- `get(x, y)` returns a color array
+- `get(x, y, w, h)` returns an `Image`
+
+---
+
+## `set(x, y, value)`
+
+Mode: Bitmap
+Available on: canvas, `Image`, `Graphics`
+
+Writes a color or image into the current canvas.
+
+### Signature
+
+```js
+set(x, y, value)
+```
+
+---
+
+## `copy(...)`
+
+Mode: Bitmap
+Available on: canvas, `Image`, `Graphics`
+
+Copies pixels between image sources and destinations.
+
+### Signatures
+
+```js
+copy(sx, sy, sw, sh, dx, dy, dw, dh)
+copy(src, sx, sy, sw, sh, dx, dy, dw, dh)
+```
+
+---
+
+## `blend(...)`
+
+Mode: Bitmap
+Available on: canvas, `Image`, `Graphics`
+
+Copies pixels using a blend mode.
+
+### Signatures
+
+```js
+blend(sx, sy, sw, sh, dx, dy, dw, dh, mode)
+blend(src, sx, sy, sw, sh, dx, dy, dw, dh, mode)
+```
+
+### Notes
+
+- `blend(...)` uses the same bitmap blend constants as `blendMode()`. See [Color](./color.md#blendmodemode).
+
+---
+
+## `filter(kind, [value])`
+
+Mode: Bitmap
+Available on: canvas, `Image`, `Graphics`
+
+Applies a bitmap filter to the current canvas.
+
+### Signatures
+
+```js
+filter(kind)
+filter(kind, value)
+```
+
+### Supported filter constants
+
+- `THRESHOLD`: Converts pixels into a thresholded black/white result.
+- `GRAY`: Converts the image to grayscale.
+- `OPAQUE`: Forces pixels fully opaque.
+- `INVERT`: Inverts the color channels.
+- `POSTERIZE`: Reduces the number of color levels.
+- `BLUR`: Applies a blur filter.
+- `ERODE`: Shrinks bright regions.
+- `DILATE`: Expands bright regions.
+
+---
+
+## `resize(w, h)`
+
+Mode: Bitmap
+Available on: `Image`, `Graphics`
 
 Resizes an image object while preserving aspect ratio when one dimension is omitted.
 
@@ -226,25 +426,203 @@ Resizes an image object while preserving aspect ratio when one dimension is omit
 img.resize(w, h)
 ```
 
-### Behavior
+### Notes
 
-- If both `w` and `h` are provided, both are used.
 - If only one dimension is provided, the other is derived from the current aspect ratio.
-- Resizing affects later `image(img, ...)` calls that use the image object's own dimensions.
-- Resizing also affects how `img.get(x, y)` maps coordinates when sampling pixels.
 
-### Example
+---
+
+## `mask(maskImage)`
+
+Mode: Bitmap
+Available on: `Image`, `Graphics`
+
+Applies an image mask to an image buffer.
+
+### Signature
 
 ```js
-img.resize(100, 100);
-image(img, 0, 0);
+img.mask(maskImage)
 ```
 
-### Example: preserve aspect ratio
+---
+
+## `Image.pixelDensity([value])`
+
+Mode: Bitmap
+
+Gets or sets pixel density on an `Image` object.
+
+### Signatures
 
 ```js
-img.resize(100);
-image(img, 0, 0);
+img.pixelDensity()
+img.pixelDensity(value)
+```
+
+### Notes
+
+- This is the `Image` instance form of `pixelDensity([value])`.
+
+---
+
+## `Image.loadPixels()`
+
+Mode: Bitmap
+
+Loads image pixels into the image's `pixels` array.
+
+### Signature
+
+```js
+img.loadPixels()
+```
+
+### Notes
+
+- Use before reading or modifying `img.pixels`.
+
+---
+
+## `Image.updatePixels([x, y, w, h])`
+
+Mode: Bitmap
+
+Commits changes from `img.pixels` back to the image.
+
+### Signatures
+
+```js
+img.updatePixels()
+img.updatePixels(x, y, w, h)
+```
+
+---
+
+## `Image.get(...)`
+
+Mode: Bitmap
+
+Reads pixels from an `Image` object.
+
+### Signatures
+
+```js
+img.get()
+img.get(x, y)
+img.get(x, y, w, h)
+```
+
+### Returns
+
+- `img.get()` returns an `Image`
+- `img.get(x, y)` returns a color array
+- `img.get(x, y, w, h)` returns an `Image`
+
+---
+
+## `Image.set(x, y, value)`
+
+Mode: Bitmap
+
+Writes a color or image into an `Image` object.
+
+### Signature
+
+```js
+img.set(x, y, value)
+```
+
+---
+
+## `Image.copy(...)`
+
+Mode: Bitmap
+
+Copies pixels into an `Image` object.
+
+### Signatures
+
+```js
+img.copy(sx, sy, sw, sh, dx, dy, dw, dh)
+img.copy(src, sx, sy, sw, sh, dx, dy, dw, dh)
+```
+
+---
+
+## `Image.blend(...)`
+
+Mode: Bitmap
+
+Copies pixels into an `Image` object using a blend mode.
+
+### Signatures
+
+```js
+img.blend(sx, sy, sw, sh, dx, dy, dw, dh, mode)
+img.blend(src, sx, sy, sw, sh, dx, dy, dw, dh, mode)
+```
+
+### Notes
+
+- `Image.blend(...)` uses the same bitmap blend constants as `blendMode()`. See [Color](./color.md#blendmodemode).
+
+---
+
+## `Image.filter(kind, [value])`
+
+Mode: Bitmap
+
+Applies a bitmap filter to an `Image` object.
+
+### Signatures
+
+```js
+img.filter(kind)
+img.filter(kind, value)
+```
+
+### Supported filter constants
+
+- `THRESHOLD`: Converts pixels into a thresholded black/white result.
+- `GRAY`: Converts the image to grayscale.
+- `OPAQUE`: Forces pixels fully opaque.
+- `INVERT`: Inverts the color channels.
+- `POSTERIZE`: Reduces the number of color levels.
+- `BLUR`: Applies a blur filter.
+- `ERODE`: Shrinks bright regions.
+- `DILATE`: Expands bright regions.
+
+---
+
+## `Image.resize(w, h)`
+
+Mode: Bitmap
+
+Resizes an `Image` object while preserving aspect ratio when one dimension is omitted.
+
+### Signature
+
+```js
+img.resize(w, h)
+```
+
+### Notes
+
+- If only one dimension is provided, the other is derived from the current aspect ratio.
+
+---
+
+## `Image.mask(maskImage)`
+
+Mode: Bitmap
+
+Applies an image mask to an `Image` object.
+
+### Signature
+
+```js
+img.mask(maskImage)
 ```
 
 ---
@@ -259,16 +637,11 @@ function preload() {
 }
 
 function setup() {
-  createCanvas(100, 100);
-  background(50);
-  image(img, 0, 0, 100, 100);
+  createCanvas(200, 200);
+}
+
+function draw() {
+  background(30);
+  image(img, 50, 50, 100, 100);
 }
 ```
-
----
-
-## Related
-
-- [`README.md`](../../README.md)
-- [`bundle/includes/image.js`](../../bundle/includes/image.js)
-- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)

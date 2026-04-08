@@ -1,12 +1,10 @@
 # Typography
 
-Typography APIs control text content, font settings, layout, alignment, and text measurement.
+Typography APIs control text content, font settings, layout, alignment, text measurement, and font metadata workflows.
 
-Because of limitations in the After Effects environment, Momentum does not support loading fonts with `loadFont()`. Fonts must be installed on the computer before they can be used. For the recommended font-selection workflow, see [`textFont()`](#textfontfont-size).
+Bitmap mode also supports font loading and font metadata APIs such as `loadFont(...)`, `textBounds(...)`, and `textToPoints(...)`.
 
-Because of limitations in the After Effects environment, paragraph text does not support a second correction pass against paragraph bounds. For that reason, paragraph-style text in Momentum is implemented as point text with a custom line-breaking mechanism.
-
-These functions are modeled after p5.js-style text workflows and affect later text drawing calls until the text state changes again.
+Paragraph-style text is also not a direct browser text flow. Momentum uses its own layout behavior on top of After Effects and the bitmap runtime.
 
 ---
 
@@ -26,6 +24,12 @@ Common typography APIs:
 - `textWidth(str)`
 - `textAscent()`
 - `textDescent()`
+- `loadFont(path[, successCallback[, failureCallback]])`
+
+Bitmap-only `Font` methods:
+
+- `textBounds(text, x, y[, fontSize])`
+- `textToPoints(text, x, y[, fontSize[, options]])`
 
 Common text-related constants:
 
@@ -46,6 +50,8 @@ Common text-related constants:
 
 ## Text State
 
+Mode: Vector, Bitmap
+
 Momentum keeps a current text state for later `text()` calls.
 
 This state includes:
@@ -58,11 +64,13 @@ This state includes:
 - style
 - fill and stroke settings
 
-Text-setting functions affect later text drawing calls until changed again.
+In bitmap mode, the same state model also applies to `Graphics` buffers.
 
 ---
 
 ## `text(str, x, y, [maxWidth], [maxHeight])`
+
+Mode: Vector, Bitmap
 
 Draws text at a position, optionally inside a text box.
 
@@ -74,148 +82,97 @@ text(str, x, y, maxWidth)
 text(str, x, y, maxWidth, maxHeight)
 ```
 
-### Parameters
-
-- `str`: Text content
-- `x`: X position
-- `y`: Y position
-- `maxWidth`: Optional text box width
-- `maxHeight`: Optional text box height
-
-### Behavior
-
-- Without `maxWidth`, text is drawn as a single text item starting at `x`, `y`.
-- With `maxWidth`, Momentum treats the call as boxed text layout.
-- With both `maxWidth` and `maxHeight`, text is laid out inside the given bounds.
-
-### Example
-
-```js
-text("Hello", 20, 30);
-text("Hello world", 20, 30, 120);
-text("Hello world", 20, 30, 120, 60);
-```
-
 ### Notes
 
 - `text()` is affected by the current typography state and current fill/stroke state.
 - Boxed text behavior is also affected by `textAlign()`, `textWrap()`, and `rectMode()`.
-- When `maxWidth` or `maxHeight` is provided, the text box is interpreted using the current [`rectMode()`](shapes.md).
+- In vector mode, text ultimately becomes AE text output.
+- In bitmap mode, text is rasterized into the current bitmap surface.
 
 ---
 
 ## `textSize(size)`
 
+Mode: Vector, Bitmap
+
 Sets the text size for later `text()` calls.
 
-### Signature
+### Signatures
 
 ```js
+textSize()
 textSize(size)
-```
-
-### Parameters
-
-- `size`: Font size
-
-### Example
-
-```js
-textSize(24);
-text("Hello", 20, 30);
 ```
 
 ---
 
 ## `textLeading(leading)`
 
+Mode: Vector, Bitmap
+
 Sets the line spacing used for multi-line text.
 
-### Signature
+### Signatures
 
 ```js
+textLeading()
 textLeading(leading)
-```
-
-### Parameters
-
-- `leading`: Line spacing value
-
-### Example
-
-```js
-textLeading(28);
-text("Line 1\nLine 2", 20, 30);
 ```
 
 ---
 
 ## `textFont(font, [size])`
 
+Mode: Vector, Bitmap
+
 Sets the font used for later `text()` calls.
 
 ### Signatures
 
 ```js
+textFont()
 textFont(font)
 textFont(font, size)
 ```
 
-### Parameters
-
-- `font`: Font name string
-- `size`: Optional font size
-
-### Example
-
-```js
-textFont("Arial");
-text("Hello", 20, 30);
-```
-
-```js
-textFont("Arial", 24);
-text("Hello", 20, 30);
-```
-
 ### Notes
 
-- In the editor, `textFont()` shows a font dropdown/autocomplete list inside the first argument. It is recommended to choose fonts from that list instead of typing names manually.
+- In the editor, `textFont()` shows a font dropdown/autocomplete list inside the first argument.
 - If a size is provided, it also updates the current text size.
-- Final font resolution depends on the available font mapping in the application environment.
+- Final font resolution depends on fonts available on the machine.
+- In Bitmap mode, you can also pass a `Font` object returned by `loadFont(...)`.
 
 ---
 
 ## `textStyle(style)`
 
+Mode: Vector, Bitmap
+
 Sets the text style for later `text()` calls.
 
-### Signature
+### Signatures
 
 ```js
+textStyle()
 textStyle(style)
 ```
 
 ### Parameters
 
-- `style`: One of `NORMAL`, `BOLD`, `ITALIC`, or `BOLDITALIC`
-
-### Example
-
-```js
-textStyle(BOLD);
-text("Hello", 20, 30);
-```
+- `style`: `NORMAL`, `BOLD`, `ITALIC`, or `BOLDITALIC`
 
 ---
 
 ## `textWrap(mode)`
 
+Mode: Vector, Bitmap
+
 Sets the wrapping mode used for boxed text.
 
-### Signature
+### Signatures
 
 ```js
+textWrap()
 textWrap(mode)
 ```
 
@@ -223,27 +180,17 @@ textWrap(mode)
 
 - `mode`: `WORD` or `CHAR`
 
-### Example
-
-```js
-textWrap(WORD);
-text("Hello world from Momentum", 20, 30, 100);
-```
-
-### Notes
-
-- `textWrap()` mainly affects `text()` calls that use a text box width.
-
 ---
 
 ## `textAlign([horizontal], [vertical])`
+
+Mode: Vector, Bitmap
 
 Sets horizontal and optional vertical text alignment.
 
 ### Signatures
 
 ```js
-textAlign()
 textAlign(horizontal)
 textAlign(horizontal, vertical)
 ```
@@ -253,21 +200,11 @@ textAlign(horizontal, vertical)
 - `horizontal`: `LEFT`, `CENTER`, or `RIGHT`
 - `vertical`: `TOP`, `CENTER`, `BOTTOM`, or `BASELINE`
 
-### Example
-
-```js
-textAlign(CENTER, CENTER);
-text("Hello", 50, 50);
-```
-
-### Notes
-
-- Alignment affects later `text()` calls.
-- Vertical alignment is especially important for boxed text layout.
-
 ---
 
 ## `textWidth(str)`
+
+Mode: Vector, Bitmap
 
 Measures the width of a string using the current text state.
 
@@ -277,23 +214,11 @@ Measures the width of a string using the current text state.
 textWidth(str)
 ```
 
-### Parameters
-
-- `str`: Text to measure
-
-### Returns
-
-The measured width.
-
-### Example
-
-```js
-let w = textWidth("Hello");
-```
-
 ---
 
 ## `textAscent()`
+
+Mode: Vector, Bitmap
 
 Returns the ascent of the current font and text size.
 
@@ -303,15 +228,11 @@ Returns the ascent of the current font and text size.
 textAscent()
 ```
 
-### Example
-
-```js
-let a = textAscent();
-```
-
 ---
 
 ## `textDescent()`
+
+Mode: Vector, Bitmap
 
 Returns the descent of the current font and text size.
 
@@ -321,15 +242,160 @@ Returns the descent of the current font and text size.
 textDescent()
 ```
 
+---
+
+## `loadFont(path[, successCallback[, failureCallback]])`
+
+Mode: Bitmap
+
+Loads a font and returns a `Font` object for font metadata workflows.
+
+### Signatures
+
+```js
+loadFont(path)
+loadFont(path, successCallback)
+loadFont(path, successCallback, failureCallback)
+```
+
+### Notes
+
+- This is intended for Bitmap mode.
+- You can pass a font file path such as `"fonts/MyFont.otf"`.
+- For where `user/` lives and how relative asset paths work, see [The `user/` Directory](../getting-started.md#the-user-directory).
+- Use the returned `Font` object with `textBounds(...)`, `textToPoints(...)`, or `textFont(font)`.
+
 ### Example
 
 ```js
-let d = textDescent();
+let font;
+
+function preload() {
+  font = loadFont("fonts/SourceHanSansSC-Regular.otf");
+}
+
+function setup() {
+  createCanvas(600, 200);
+  textFont(font, 48);
+}
+
+function draw() {
+  background(20);
+  fill(255);
+  text("Momentum", 40, 110);
+}
+```
+
+---
+
+## `textBounds(text, x, y[, fontSize])`
+
+Mode: Bitmap
+
+Returns a bounds object for a piece of text using the loaded font.
+
+### Signatures
+
+```js
+font.textBounds(text, x, y)
+font.textBounds(text, x, y, fontSize)
+```
+
+### Returns
+
+An object describing the text bounds.
+
+### Notes
+
+- Use this when layout depends on exact font metrics.
+- If `fontSize` is omitted, Momentum uses the current text size.
+
+### Example
+
+```js
+let font;
+
+function preload() {
+  font = loadFont("fonts/SourceHanSansSC-Regular.otf");
+}
+
+function setup() {
+  createCanvas(700, 220);
+}
+
+function draw() {
+  background(20);
+  let bounds = font.textBounds("Momentum", 40, 120, 72);
+
+  noFill();
+  stroke(255, 120, 120);
+  rect(bounds.x, bounds.y, bounds.w, bounds.h);
+
+  fill(255);
+  noStroke();
+  textFont(font, 72);
+  text("Momentum", 40, 120);
+}
+```
+
+---
+
+## `textToPoints(text, x, y[, fontSize[, options]])`
+
+Mode: Bitmap
+
+Converts text outlines into sampled points using the loaded font.
+
+### Signatures
+
+```js
+font.textToPoints(text, x, y, fontSize)
+font.textToPoints(text, x, y, fontSize, options)
+```
+
+### Options
+
+- `sampleFactor`: Sampling density
+- `simplifyThreshold`: Optional point simplification amount
+
+### Notes
+
+- Use this when you want to build point clouds, particles, or custom outline-driven motion from text.
+- Higher `sampleFactor` produces more points.
+
+### Example
+
+```js
+let font;
+let pts = [];
+
+function preload() {
+  font = loadFont("fonts/SourceHanSansSC-Regular.otf");
+}
+
+function setup() {
+  createCanvas(800, 240);
+  pts = font.textToPoints("Hi", 80, 160, 160, {
+    sampleFactor: 0.18,
+  });
+}
+
+function draw() {
+  background(20);
+  stroke(255);
+  strokeWeight(3);
+
+  for (let i = 0; i < pts.length; i++) {
+    point(pts[i].x, pts[i].y);
+  }
+}
 ```
 
 ---
 
 ## Common Pattern
+
+Mode: Vector, Bitmap
 
 Set the text state before drawing text.
 
@@ -338,30 +404,5 @@ textFont("Arial");
 textSize(24);
 textAlign(CENTER, CENTER);
 fill(255);
-text("Hello", 50, 50);
+text("Hello", width / 2, height / 2);
 ```
-
----
-
-## Minimal Example
-
-```js
-function setup() {
-  createCanvas(200, 100);
-  background(30);
-
-  fill(255);
-  textFont("Arial");
-  textSize(24);
-  textAlign(CENTER, CENTER);
-  text("Hello", width / 2, height / 2);
-}
-```
-
----
-
-## Related
-
-- [`README.md`](../../README.md)
-- [`bundle/includes/typography.js`](../../bundle/includes/typography.js)
-- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)

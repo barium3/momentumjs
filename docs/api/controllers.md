@@ -2,7 +2,11 @@
 
 Controllers are one of Momentum's core features because they make it possible to drive sketch variables with After Effects keyframes.
 
-The main implementation is a dedicated layer named `__controller__`. When a user creates controllers in sketch code, Momentum maps them to After Effects expression controls attached to that layer. Once those expression controls exist, users can change their values directly in After Effects or animate them with keyframes. Those animated control values are then read back by the sketch and used as the values of the corresponding controller-driven variables.
+In vector mode, controllers are AE expression controls on a dedicated `__controller__` layer.
+
+In bitmap mode, controllers are plugin controls on the bitmap effect layer.
+
+In both cases, sketch code reads the host-side control values back into the runtime.
 
 ---
 
@@ -10,41 +14,18 @@ The main implementation is a dedicated layer named `__controller__`. When a user
 
 Controller APIs:
 
-- `createSlider(min, max, value, step)`
-- `createAngle(defaultDegrees)`
+- `createSlider([min], [max], [value], [step])`
+- `createAngle([defaultDegrees])`
 - `createColorPicker(...)`
-- `createCheckbox(label, checked)`
+- `createCheckbox([label], [checked])`
 - `createSelect()`
-- `createPoint(defaultX, defaultY)`
-
-Controller values are mapped to a controller layer in After Effects:
-
-- `Slider Control`
-- `Angle Control`
-- `Color Control`
-- `Checkbox Control`
-- `Dropdown Menu Control`
-- `Point Control`
+- `createPoint([defaultX], [defaultY])`
 
 ---
 
-## Controller Layer
+## `createSlider([min], [max], [value], [step])`
 
-Momentum stores controller definitions on a dedicated After Effects layer:
-
-`__controller__`
-
-Each controller call maps to one control entry on that layer.
-
-This means:
-
-- controller values can be edited in After Effects
-- the sketch reads those values at evaluation time
-- controller order matters because controls are assigned by call sequence
-
----
-
-## `createSlider(min, max, value, step)`
+Mode: Vector, Bitmap
 
 Creates a slider controller.
 
@@ -61,6 +42,11 @@ createSlider(min, max, value, step)
 - `value`: Default value
 - `step`: Step size
 
+### Notes
+
+- All parameters are optional.
+- Defaults are `min = 0`, `max = 100`, `step = 0`.
+
 ### Returns
 
 A controller object with:
@@ -74,14 +60,14 @@ let speed = createSlider(0, 100, 50, 1);
 let v = speed.value();
 ```
 
-### Notes
-
 - Values are clamped to the configured range.
 - If `step` is greater than `0`, values are snapped to that step.
 
 ---
 
-## `createAngle(defaultDegrees)`
+## `createAngle([defaultDegrees])`
+
+Mode: Vector, Bitmap
 
 Creates an angle controller.
 
@@ -94,6 +80,10 @@ createAngle(defaultDegrees)
 ### Parameters
 
 - `defaultDegrees`: Default angle in degrees
+
+### Notes
+
+- The argument is optional.
 
 ### Returns
 
@@ -110,19 +100,20 @@ let ang = createAngle(45);
 rotate(radians(ang.value()));
 ```
 
-### Notes
-
 - Internally, this controller is degree-based.
 
 ---
 
 ## `createColorPicker(...)`
 
+Mode: Vector, Bitmap
+
 Creates a color controller.
 
 ### Supported forms
 
 ```js
+createColorPicker()
 createColorPicker("#ff0000")
 createColorPicker(r, g, b)
 createColorPicker(r, g, b, a)
@@ -137,7 +128,7 @@ A controller object with:
 
 ### Behavior
 
-- `color()` returns a normalized color array
+- `color()` returns a Momentum color value
 - `value()` returns a hex-style string
 
 ### Example
@@ -149,7 +140,9 @@ fill(picker.color());
 
 ---
 
-## `createCheckbox(label, checked)`
+## `createCheckbox([label], [checked])`
+
+Mode: Vector, Bitmap
 
 Creates a checkbox controller.
 
@@ -163,6 +156,10 @@ createCheckbox(label, checked)
 
 - `label`: Controller label
 - `checked`: Default checked state
+
+### Notes
+
+- Both arguments are optional.
 
 ### Returns
 
@@ -185,6 +182,8 @@ if (enabled.checked()) {
 
 ## `createSelect()`
 
+Mode: Vector, Bitmap
+
 Creates a dropdown-style selection controller.
 
 ### Signature
@@ -200,6 +199,7 @@ A controller object with:
 - `option(label, [value])`
 - `index()`
 - `value()`
+- `selected()`
 - `selected(v)`
 
 ### Example
@@ -222,6 +222,8 @@ let v = sel.value();
 
 ## `createPoint(defaultX, defaultY)`
 
+Mode: Vector, Bitmap
+
 Creates a point controller.
 
 ### Signature
@@ -229,6 +231,10 @@ Creates a point controller.
 ```js
 createPoint(defaultX, defaultY)
 ```
+
+### Notes
+
+- Both arguments are optional.
 
 ### Returns
 
@@ -248,6 +254,8 @@ circle(pt.x(), pt.y(), 20);
 ---
 
 ## Common Pattern
+
+Mode: Vector, Bitmap
 
 Create controllers once, then read them in setup or draw logic.
 
@@ -269,6 +277,8 @@ function draw() {
 ---
 
 ## Minimal Example
+
+Mode: Vector, Bitmap
 
 ```js
 let sizeCtrl;

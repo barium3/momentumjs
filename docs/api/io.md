@@ -1,12 +1,12 @@
 # IO
 
-IO APIs load external structured data such as tables and JSON files from the `user/` directory.
+IO APIs load external structured data from the `user/` directory.
 
-After import, the loaded data is effectively baked into the current execution result. Changes made to the source table or JSON file are not automatically reflected until the sketch is executed again.
+If you need bitmap-only loaders such as `loadStrings()`, `loadBytes()`, or `loadXML()`, switch the sketch to Bitmap mode.
 
-For the same reason, Momentum does not support p5-style APIs that save modified data back to the original source file.
+After import, the loaded data is part of the current execution state. Changes made to source files are not reflected until the sketch is run again.
 
-These APIs are intended for read-heavy sketch workflows, with table objects also supporting a set of in-memory editing helpers.
+Momentum does not support p5-style save-back-to-disk workflows.
 
 ---
 
@@ -14,8 +14,14 @@ These APIs are intended for read-heavy sketch workflows, with table objects also
 
 Common IO APIs:
 
-- `loadTable(path)`
-- `loadJSON(path)`
+- `loadTable(path[, ...])`
+- `loadJSON(path[, ...])`
+
+Bitmap-only IO APIs:
+
+- `loadStrings(path[, ...])`
+- `loadBytes(path[, ...])`
+- `loadXML(path[, ...])`
 
 Common `Table` methods:
 
@@ -52,86 +58,151 @@ Common `TableRow` methods:
 - `setString(column, value)`
 - `setNum(column, value)`
 
+Bitmap-only `XML` methods:
+
+- `getParent()`
+- `getName()`
+- `setName(value)`
+- `hasChildren()`
+- `listChildren()`
+- `getChildren([name])`
+- `getChild(param)`
+- `getContent()`
+- `setContent(value)`
+- `listAttributes()`
+- `hasAttribute(name)`
+- `getAttributeCount()`
+- `getString(name[, defaultValue])`
+- `getNum(name[, defaultValue])`
+- `setAttribute(name, value)`
+- `removeAttribute(name)`
+- `serialize()`
+
 ---
 
-## `loadTable(path)`
+## `loadTable(path[, ...])`
+
+Mode: Vector, Bitmap
 
 Loads table data from the `user/` directory.
 
 ### Signature
 
 ```js
-loadTable(path)
+loadTable(path[, ...])
 ```
-
-### Parameters
-
-- `path`: Relative file path under `user/`
 
 ### Returns
 
 A `Table` object.
 
-### Example
-
-```js
-let table;
-
-function preload() {
-  table = loadTable("data.csv");
-}
-```
-
 ### Notes
 
-- Paths are relative to the extension's `user/` folder.
+- For where `user/` lives and how relative paths work, see [The `user/` Directory](../getting-started.md#the-user-directory).
 - Loaded table data is represented as a `Table` object with row and column helpers.
 
 ---
 
-## `loadJSON(path)`
+## `loadJSON(path[, ...])`
+
+Mode: Vector, Bitmap
 
 Loads JSON data from the `user/` directory.
 
 ### Signature
 
 ```js
-loadJSON(path)
+loadJSON(path[, ...])
 ```
-
-### Parameters
-
-- `path`: Relative file path under `user/`
 
 ### Returns
 
 A cloned JSON-compatible object or array.
 
-### Example
+### Notes
+
+- For where `user/` lives and how relative paths work, see [The `user/` Directory](../getting-started.md#the-user-directory).
+- Returned JSON data is intended to behave like normal JS objects and arrays.
+
+---
+
+## `loadStrings(path[, successCallback[, failureCallback]])`
+
+Mode: Bitmap
+
+Loads a text file and returns an array of lines.
+
+### Signature
 
 ```js
-let data;
-
-function preload() {
-  data = loadJSON("config.json");
-}
+loadStrings(path)
+loadStrings(path, successCallback)
+loadStrings(path, successCallback, failureCallback)
 ```
+
+### Returns
+
+An array of strings.
 
 ### Notes
 
-- Paths are relative to the extension's `user/` folder.
-- Returned JSON data is intended to behave like normal JS objects and arrays.
+- For where `user/` lives and how relative paths work, see [The `user/` Directory](../getting-started.md#the-user-directory).
+
+---
+
+## `loadBytes(path[, successCallback[, failureCallback]])`
+
+Mode: Bitmap
+
+Loads a file as raw bytes.
+
+### Signature
+
+```js
+loadBytes(path)
+loadBytes(path, successCallback)
+loadBytes(path, successCallback, failureCallback)
+```
+
+### Returns
+
+A byte container object.
+
+### Notes
+
+- For where `user/` lives and how relative paths work, see [The `user/` Directory](../getting-started.md#the-user-directory).
+
+---
+
+## `loadXML(path[, successCallback[, failureCallback]])`
+
+Mode: Bitmap
+
+Loads an XML file from the `user/` directory.
+
+### Signature
+
+```js
+loadXML(path)
+loadXML(path, successCallback)
+loadXML(path, successCallback, failureCallback)
+```
+
+### Returns
+
+An `XML` object.
+
+### Notes
+
+- For where `user/` lives and how relative paths work, see [The `user/` Directory](../getting-started.md#the-user-directory).
 
 ---
 
 ## Table Basics
 
-A `Table` object stores:
+Mode: Vector, Bitmap
 
-- rows
-- columns
-- row count
-- column count
+A `Table` object stores rows, columns, and row/column helpers.
 
 Columns can be accessed by:
 
@@ -157,6 +228,8 @@ function setup() {
 
 ## Reading Table Data
 
+Mode: Vector, Bitmap
+
 ### `getRowCount()`
 
 Returns the number of rows.
@@ -181,17 +254,11 @@ Returns a cell value as a number.
 
 Returns all values from a column.
 
-### Example
-
-```js
-let count = table.getRowCount();
-let age = table.getNum(0, "age");
-let names = table.getColumn("name");
-```
-
 ---
 
 ## Row Access
+
+Mode: Vector, Bitmap
 
 ### `getRow(row)`
 
@@ -205,19 +272,11 @@ Returns row data as an object.
 
 Returns the full table as nested arrays.
 
-### Example
-
-```js
-let row = table.getRow(0);
-print(row.getString("name"));
-
-let obj = table.getObject(0);
-print(obj.name);
-```
-
 ---
 
 ## Searching
+
+Mode: Vector, Bitmap
 
 ### `findRow(value, column)`
 
@@ -235,16 +294,11 @@ Returns the first row that matches a pattern.
 
 Returns all rows that match a pattern.
 
-### Example
-
-```js
-let first = table.findRow("Alice", "name");
-let matches = table.matchRows("^A", "name");
-```
-
 ---
 
 ## Editing Table Data
+
+Mode: Vector, Bitmap
 
 ### `set(row, column, value)`
 
@@ -278,14 +332,6 @@ Adds a column.
 
 Removes a column.
 
-### Example
-
-```js
-table.setString(0, "name", "Alice");
-table.addColumn("score");
-table.setNum(0, "score", 100);
-```
-
 ### Notes
 
 - These edits are in-memory changes to the loaded table object.
@@ -295,7 +341,7 @@ table.setNum(0, "score", 100);
 
 ## `TableRow` Helpers
 
-`TableRow` objects provide row-level convenience methods.
+Mode: Vector, Bitmap
 
 ### `arr()`
 
@@ -329,55 +375,76 @@ Sets a string value in the row.
 
 Sets a numeric value in the row.
 
-### Example
-
-```js
-let row = table.getRow(0);
-print(row.arr());
-print(row.obj());
-print(row.getString("name"));
-```
-
 ---
 
-## Common Pattern
+## XML Helpers
 
-Load external data in `preload()`, then use it during drawing or setup.
+Mode: Bitmap
 
-```js
-let table;
+### `getParent()`
 
-function preload() {
-  table = loadTable("people.csv");
-}
+Returns the parent XML node.
 
-function setup() {
-  createCanvas(100, 100);
-  let name = table.getString(0, "name");
-  print(name);
-}
-```
+### `getName()`
 
----
+Returns the node name.
 
-## Minimal Example
+### `setName(value)`
 
-```js
-let config;
+Sets the node name.
 
-function preload() {
-  config = loadJSON("config.json");
-}
+### `hasChildren()`
 
-function setup() {
-  print(config.title);
-}
-```
+Returns whether the node has children.
 
----
+### `listChildren()`
 
-## Related
+Returns child names.
 
-- [`README.md`](../../README.md)
-- [`bundle/includes/IO.js`](../../bundle/includes/IO.js)
-- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)
+### `getChildren([name])`
+
+Returns child nodes, optionally filtered by name.
+
+### `getChild(param)`
+
+Returns a child node by index or name.
+
+### `getContent()`
+
+Returns the node text content.
+
+### `setContent(value)`
+
+Sets the node text content.
+
+### `listAttributes()`
+
+Returns attribute names.
+
+### `hasAttribute(name)`
+
+Returns whether the node has a named attribute.
+
+### `getAttributeCount()`
+
+Returns the number of attributes.
+
+### `getString(name[, defaultValue])`
+
+Returns an attribute value as a string.
+
+### `getNum(name[, defaultValue])`
+
+Returns an attribute value as a number.
+
+### `setAttribute(name, value)`
+
+Sets an attribute value.
+
+### `removeAttribute(name)`
+
+Removes an attribute.
+
+### `serialize()`
+
+Returns the XML node as a serialized string.

@@ -38,8 +38,11 @@ mkdir -p "${RELEASE_DIR}/scripts"
 rsync -a \
   --exclude '.git' \
   --exclude 'build' \
+  --exclude 'build-*' \
   --exclude 'dist' \
   --exclude '.DS_Store' \
+  --exclude '.vscode' \
+  --exclude 'user' \
   --exclude 'install.sh' \
   --exclude 'uninstall.sh' \
   "${ROOT_DIR}/" \

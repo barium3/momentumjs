@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-`momentum.js` is an attempt to port the spirit of the [Processing](https://processing.org/) framework (including [p5.js](https://p5js.org/)), [openFrameworks](https://openframeworks.cc/), and [basil.js](https://basiljs2.netlify.app/) to Adobe After Effects. It aims to provide designers and developers with a powerful toolkit for procedural design and automation tasks within a user-friendly [WYSIWYG](https://en.wikipedia.org/wiki/WYSIWYG) interface in After Effects.
+`momentum.js` is an attempt to port the spirit of [Processing](https://processing.org/), [p5.js](https://p5js.org/), [openFrameworks](https://openframeworks.cc/), and [basil.js](https://basiljs2.netlify.app/) to Adobe After Effects. It aims to provide designers and developers with a powerful toolkit for procedural design and automation tasks within a user-friendly [WYSIWYG](https://en.wikipedia.org/wiki/WYSIWYG) interface in After Effects.
+
+![showcase](footage/showcase.png)
 
 ## Documentation
 
@@ -14,198 +16,88 @@ Browse the full API reference here:
 
 - [API Reference](docs/api/index.md)
 
-If you use AI to write Momentum code, you can give the following docs to the AI so it can understand Momentum syntax, supported APIs, and important limitations:
-
-- [Momentum For AI](docs/ai/momentum-for-ai.md)
-- [AI Quick Rules](docs/ai/ai-quick-rules.md) (short version, suitable for directly copying into an AI prompt)
-
 ## Features
 
 - Provides an API that is highly aligned with p5.js.
 - Provides users with controller interfaces that make it possible to drive variables with keyframes.
 - Seamless integration with After Effects.
 
+## Runtime Modes
+
+Momentum currently has two runtime modes:
+
+- `Vector`
+  Sketch output is converted into native AE vector shapes, text objects, image layers, and controller layers.
+- `Bitmap`
+  Sketch output is rendered by the native `Momentum.plugin` effect, which unlocks a more complete API surface, GPU rendering, and larger renderable object counts.
+
+Use `Vector` when you want AE-native vector graphics and text objects that remain easy to adjust after generation.
+
+Use `Bitmap` when you need fuller rendering APIs such as `createGraphics()`, `loadPixels()`, `updatePixels()`, `filter()`, `blend()`, `loadFont()`, or `Font.textToPoints()`, and when you want the plugin's GPU-backed rendering path.
+
+Bitmap mode is currently much more mature on macOS. Windows bitmap compatibility is still weaker.
+
+## Requirements
+
+- Adobe After Effects installed on the machine
+
 ## Install
 
-Momentum currently ships as two pieces on macOS:
+#### macOS
 
-- A CEP extension
-- A native `Momentum.plugin` bundle for bitmap mode
-
-### Install From A Release
-
-Download a release package that already contains a prebuilt `Momentum.plugin`, then run:
+Run:
 
 ```bash
-curl -L https://github.com/yourname/momentumjs/releases/download/vX.Y.Z/momentumjs.zip -o momentumjs.zip
+curl -L https://github.com/barium3/momentumjs/releases/download/v1.1.0/momentumjs.zip -o momentumjs.zip
 unzip momentumjs.zip
 cd momentumjs
 ./install.sh
 ```
 
-The installer copies:
+Then restart After Effects.
 
-- The CEP extension to `~/Library/Application Support/Adobe/CEP/extensions/momentumjs`
-- The native plugin to `~/Library/Application Support/Adobe/Common/Plug-ins/.../MediaCore/Momentum/Momentum.plugin`
-- The bitmap runtime to `.../MediaCore/Momentum/runtime`
+#### Windows
 
-Restart After Effects after installation.
+Windows currently supports the CEP panel and `Vector` mode installation path only. `Bitmap` mode is not currently supported on Windows.
 
-### Install From Source
+1. Download and unzip the release package.
+2. Copy the unpacked `momentumjs` folder into:
 
-If you are working from the repository, first set `AE_SDK_ROOT`, then run:
-
-```bash
-bash scripts/install-dev.sh
+```text
+C:\Users\YourUsername\AppData\Roaming\Adobe\CEP\extensions\momentumjs
 ```
 
-This will:
-
-1. Build the native plugin
-2. Install the CEP extension
-3. Install the native plugin
-
-### Update
-
-Run the same install command again:
-
-```bash
-./install.sh
-```
-
-or, from source:
-
-```bash
-bash scripts/install-dev.sh
-```
+3. Restart After Effects.
 
 ### Uninstall
 
+#### macOS
+
 ```bash
-./uninstall.sh
+rm -rf "$HOME/Library/Application Support/Adobe/CEP/extensions/momentumjs"
+find "$HOME/Library/Application Support/Adobe/Common/Plug-ins" -maxdepth 2 -type d -name MediaCore -exec rm -rf "{}/Momentum" \;
 ```
 
-### Notes
+#### Windows
 
-- The install scripts currently support macOS only.
-- `scripts/install.sh` expects a prebuilt `Momentum.plugin` either at the repo root or in `build/Debug/Momentum.plugin`.
-- A plain GitHub source download is not enough for non-developers unless it includes a prebuilt plugin bundle.
-- To prepare a release directory locally, run `bash scripts/package-release.sh`.
+Remove:
 
-## Example Code
-
-![showcase](footage/showcase.png)
-Momentum includes an IDE inside After Effects for writing and testing sketches.
-
-<details>
-<summary><u>Show full example</u></summary>
-
-```javascript
-// Example code: Casey reas Structure 3
-
-var numCircle = 5;
-var circles = [];
-
-function setup() {
-  createCanvas(200, 200);
-  frameRate(30);
-  for (var i = 0; i < numCircle; i++) {
-    var x = random(width);
-    var y = random(height);
-    var r = random(20, 60);
-    var xspeed = random(-0.25, 0.25);
-    var yspeed = random(-0.25, 0.25);
-    circles[i] = new Circle(x, y, r, xspeed, yspeed, i);
-  }
-  background(255);
-}
-
-function draw() {
-  for (var i = 0; i < 5; i++) {
-    circles[i].update();
-  }
-  for (var j = 0; j < 5; j++) {
-    circles[j].move();
-  }
-}
-
-function Circle(px, py, pr, psp, pysp, pid) {
-  this.x = px;
-  this.y = py;
-  this.r = pr;
-  this.r2 = this.r * this.r;
-  this.sp = psp;
-  this.ysp = pysp;
-  this.id = pid;
-
-  this.update = function() {
-    for (var i = this.id + 1; i < numCircle; i++) {
-      intersect(circles[this.id], circles[i]);
-    }
-  }
-
-  this.makePoint = function() {
-    stroke(0);
-    point(this.x, this.y);
-  }
-
-  this.move = function() {
-    this.x += this.sp;
-    this.y += this.ysp;
-    if (this.sp > 0) {
-      if (this.x > width + this.r) {
-        this.x = -this.r;
-      }
-    } else {
-      if (this.x < -this.r) {
-        this.x = width + this.r;
-      }
-    }
-    if (this.ysp > 0) {
-      if (this.y > height + this.r) {
-        this.y = -this.r;
-      }
-    } else {
-      if (this.y < -this.r) {
-        this.y = height + this.r;
-      }
-    }
-  }
-}
-
-function intersect(cA, cB) {
-
-  var dx = cA.x - cB.x;
-  var dy = cA.y - cB.y;
-  var d2 = dx * dx + dy * dy;
-  var d = sqrt(d2);
-
-  if ((d > cA.r + cB.r) || (d < abs(cA.r - cB.r))) {
-    return;
-  }
-
-  var a = (cA.r2 - cB.r2 + d2) / (2 * d);
-  var h = sqrt(cA.r2 - a * a);
-  var x2 = cA.x + a * (cB.x - cA.x) / d;
-  var y2 = cA.y + a * (cB.y - cA.y) / d;
-
-  var paX = x2 + h * (cB.y - cA.y) / d;
-  var paY = y2 - h * (cB.x - cA.x) / d;
-  var pbX = x2 - h * (cB.y - cA.y) / d;
-  var pbY = y2 + h * (cB.x - cA.x) / d;
-
-  stroke(dist(paX, paY, pbX, pbY)*4, 12); 
-  line(paX, paY, pbX, pbY);
-
-}
+```text
+C:\Users\YourUsername\AppData\Roaming\Adobe\CEP\extensions\momentumjs
 ```
 
-</details>
+## Open in After Effects
+
+- After installation, open the Momentum panel in After Effects from `Window > Extensions > momentum.js`
+- Before using `Bitmap` mode, enable GPU acceleration in `File > Project Settings > Video Rendering and Effects > Use > Mercury GPU Acceleration`. This is the preparation step for Bitmap GPU rendering.
 
 ## Contribution
 
-- Contributors are welcome to submit issues, feature requests, and code improvements.
-- Please read our contribution guidelines before submitting.
+Contributors are welcome to submit issues, feature requests, and code improvements.
+
+Please read our contribution guidelines for more information:
+
+- [Contributor Guide](docs/contributor.md)
 
 ## License
 

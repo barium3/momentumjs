@@ -1,14 +1,8 @@
 # Shapes
 
-Shape APIs create vector-based geometry as shape groups inside After Effects layers.
+Shape APIs cover primitive drawing, shape modes, and custom path construction.
 
-In After Effects terms, the smallest shape unit in Momentum is:
-
-`Layer -> Contents -> Shape Group`
-
-Each shape call such as `rect()`, `circle()`, or `triangle()` is represented as one shape group under a layer's `Contents`. This is the basic unit used to build and organize shape output.
-
-These functions are modeled after p5.js and are intended for sketch-style drawing workflows such as primitives, paths, fills, and strokes.
+These functions are modeled after p5.js-style drawing workflows and are used for geometry, fills, strokes, and path building.
 
 ---
 
@@ -25,6 +19,11 @@ Common shape APIs:
 - `triangle(x1, y1, x2, y2, x3, y3)`
 - `quad(x1, y1, x2, y2, x3, y3, x4, y4)`
 - `arc(x, y, w, h, start, stop, [mode])`
+- `ellipseMode(mode)`
+- `rectMode(mode)`
+
+Custom shape APIs:
+
 - `beginShape()`
 - `vertex(x, y)`
 - `bezierVertex(...)`
@@ -56,6 +55,8 @@ Common related mode constants:
 ---
 
 ## Shape Styling
+
+Mode: Vector, Bitmap
 
 Most shape functions use the current drawing style.
 
@@ -92,6 +93,8 @@ circle(50, 50, 40);
 
 ## `ellipse(x, y, w, [h])`
 
+Mode: Vector, Bitmap
+
 Draws an ellipse.
 
 ### Signatures
@@ -123,6 +126,8 @@ ellipse(50, 50, 40);
 
 ## `circle(x, y, d)`
 
+Mode: Vector, Bitmap
+
 Draws a circle.
 
 ### Signature
@@ -150,6 +155,8 @@ circle(50, 50, 40);
 ---
 
 ## `rect(x, y, w, [h])`
+
+Mode: Vector, Bitmap
 
 Draws a rectangle.
 
@@ -182,6 +189,8 @@ rect(20, 20, 40);
 
 ## `square(x, y, s)`
 
+Mode: Vector, Bitmap
+
 Draws a square.
 
 ### Signature
@@ -210,6 +219,8 @@ square(20, 20, 40);
 
 ## `line(x1, y1, x2, y2)`
 
+Mode: Vector, Bitmap
+
 Draws a line segment.
 
 ### Signature
@@ -233,12 +244,15 @@ line(0, 0, 100, 100);
 
 ## `point(x, y)`
 
+Mode: Vector, Bitmap
+
 Draws a point.
 
-### Signature
+### Signatures
 
 ```js
 point(x, y)
+point(vec)
 ```
 
 ### Example
@@ -256,6 +270,8 @@ point(50, 50);
 ---
 
 ## `triangle(x1, y1, x2, y2, x3, y3)`
+
+Mode: Vector, Bitmap
 
 Draws a triangle.
 
@@ -275,6 +291,8 @@ triangle(20, 80, 50, 20, 80, 80);
 
 ## `quad(x1, y1, x2, y2, x3, y3, x4, y4)`
 
+Mode: Vector, Bitmap
+
 Draws a quadrilateral.
 
 ### Signature
@@ -293,9 +311,11 @@ quad(20, 20, 80, 20, 90, 80, 10, 80);
 
 ## `arc(x, y, w, h, start, stop, [mode])`
 
+Mode: Vector, Bitmap
+
 Draws an arc.
 
-### Signature
+### Signatures
 
 ```js
 arc(x, y, w, h, start, stop)
@@ -350,15 +370,19 @@ arc(50, 50, 80, 80, 0, PI, PIE);
 
 ---
 
-## Shape Modes
+## `ellipseMode(mode)`
 
-Some shape functions depend on drawing mode.
-
-### `ellipseMode(mode)`
+Mode: Vector, Bitmap
 
 Controls how `ellipse()` interprets its arguments.
 
-Supported modes:
+### Signature
+
+```js
+ellipseMode(mode)
+```
+
+### Supported modes
 
 - `CENTER`
 - `RADIUS`
@@ -387,8 +411,6 @@ ellipseMode(RADIUS);
 ellipse(50, 50, 40, 20);
 ```
 
-This produces the same final size as `ellipse(50, 50, 80, 40)` in `CENTER` mode.
-
 #### `CORNER`
 
 - `x`, `y`: top-left corner of the ellipse bounds
@@ -410,11 +432,21 @@ ellipseMode(CORNERS);
 ellipse(10, 20, 90, 60);
 ```
 
-### `rectMode(mode)`
+---
+
+## `rectMode(mode)`
+
+Mode: Vector, Bitmap
 
 Controls how `rect()` interprets its arguments.
 
-Supported modes:
+### Signature
+
+```js
+rectMode(mode)
+```
+
+### Supported modes
 
 - `CENTER`
 - `RADIUS`
@@ -443,8 +475,6 @@ rectMode(RADIUS);
 rect(50, 50, 20, 10);
 ```
 
-This produces the same final size as `rect(50, 50, 40, 20)` in `CENTER` mode.
-
 #### `CORNER`
 
 - `x`, `y`: top-left corner
@@ -466,16 +496,11 @@ rectMode(CORNERS);
 rect(10, 20, 50, 40);
 ```
 
-### Example
-
-```js
-rectMode(CENTER);
-rect(50, 50, 40, 20);
-```
-
 ---
 
 ## Custom Shapes
+
+Mode: Vector, Bitmap
 
 Use `beginShape()` and related vertex functions to build custom geometry.
 
@@ -489,15 +514,53 @@ vertex(50, 90);
 endShape(CLOSE);
 ```
 
-### Supported builder functions
+### `beginShape()`
 
-- `vertex(x, y)`
-- `bezierVertex(...)`
-- `quadraticVertex(...)`
-- `curveVertex(x, y)`
-- `beginContour()`
-- `endContour()`
-- `endShape([mode])`
+Mode: Vector, Bitmap
+
+Starts a custom shape.
+
+### `vertex(x, y)`
+
+Mode: Vector, Bitmap
+
+Adds a straight vertex to the current shape.
+
+### `bezierVertex(...)`
+
+Mode: Vector, Bitmap
+
+Adds a bezier segment to the current shape.
+
+### `quadraticVertex(...)`
+
+Mode: Vector, Bitmap
+
+Adds a quadratic bezier segment to the current shape.
+
+### `curveVertex(x, y)`
+
+Mode: Vector, Bitmap
+
+Adds a curve vertex to the current shape.
+
+### `beginContour()`
+
+Mode: Vector, Bitmap
+
+Starts an inner contour in the current shape.
+
+### `endContour()`
+
+Mode: Vector, Bitmap
+
+Ends the current contour.
+
+### `endShape([mode])`
+
+Mode: Vector, Bitmap
+
+Finishes the current custom shape.
 
 ### Notes
 
@@ -518,11 +581,3 @@ function setup() {
   circle(50, 50, 40);
 }
 ```
-
----
-
-## Related
-
-- [`README.md`](../../README.md)
-- [`bundle/includes/shape.js`](../../bundle/includes/shape.js)
-- [`bundle/includes/registry.js`](../../bundle/includes/registry.js)
