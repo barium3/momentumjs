@@ -28,26 +28,12 @@ Browse the full API reference here:
 - Extend the native motion graphics workflow with a programmable system for building procedural and generative compositions inside AE, then integrate the results directly into conventional animation comps.
 - Overcome the limits of AE's fragmented tool model by connecting logic across expressions, scripts, plugins, and layers without relying on brittle index-based setups.
 
-## Runtime Modes
-
-Momentum currently has two runtime modes:
-
-- `Vector`
-  Sketch output is converted into native AE vector shapes, text objects, image layers, and controller layers.
-- `Bitmap`
-  Sketch output is rendered by the native `Momentum.plugin` effect, which unlocks a more complete API surface, GPU rendering, and larger renderable object counts.
-
-Use `Vector` when you want AE-native vector graphics and text objects that remain easy to adjust after generation.
-
-Use `Bitmap` when you need fuller rendering APIs such as `createGraphics()`, `loadPixels()`, `updatePixels()`, `filter()`, `blend()`, `loadFont()`, or `Font.textToPoints()`, and when you want the plugin's GPU-backed rendering path.
-
-Bitmap mode is currently much more mature on macOS. Windows bitmap compatibility is still weaker.
-
-## Requirements
-
-- Adobe After Effects installed on the machine
 
 ## Install
+
+#### Requirements
+
+- Adobe After Effects installed on the machine
 
 #### macOS
 
@@ -96,6 +82,21 @@ C:\Users\YourUsername\AppData\Roaming\Adobe\CEP\extensions\momentumjs
 
 - After installation, open the Momentum panel in After Effects from `Window > Extensions > momentum.js`
 - Before using `Bitmap` mode, enable GPU acceleration in `File > Project Settings > Video Rendering and Effects > Use > Mercury GPU Acceleration`. This is the preparation step for Bitmap GPU rendering.
+
+## Runtime Modes
+
+Momentum currently has two runtime modes:
+
+- `Vector`
+  Sketch output is converted into native AE vector shapes, text objects, image layers, and controller layers.
+- `Bitmap`
+  Sketch output is rendered by the native `Momentum.plugin` effect, which unlocks a more complete API surface, GPU rendering, and larger renderable object counts.
+
+Use `Vector` when you want AE-native vector graphics and text objects that remain easy to adjust after generation.
+
+Use `Bitmap` when you need fuller rendering APIs such as `createGraphics()`, `loadPixels()`, `updatePixels()`, `filter()`, `blend()`, `loadFont()`, or `Font.textToPoints()`, and when you want the plugin's GPU-backed rendering path.
+
+Bitmap mode is currently much more mature on macOS. Windows bitmap compatibility is still weaker.
 
 ## Contribution
 
