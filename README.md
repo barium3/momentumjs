@@ -18,9 +18,15 @@ Browse the full API reference here:
 
 ## Features
 
-- Provides an API that is highly aligned with p5.js.
-- Provides users with controller interfaces that make it possible to drive variables with keyframes.
-- Seamless integration with After Effects.
+### For Processing and p5.js users
+
+- Bring the spirit of Processing and p5.js into After Effects, pairing code-driven generative art with a user-friendly environment for creating offline-rendered generative art videos.
+- Drive generative systems directly from the AE timeline, with controller interfaces that let you animate sketch variables through keyframes.
+
+### For After Effects users
+
+- Extend the native motion graphics workflow with a programmable system for building procedural and generative compositions inside AE, then integrate the results directly into conventional animation comps.
+- Overcome the limits of AE's fragmented tool model by connecting logic across expressions, scripts, plugins, and layers without relying on brittle index-based setups.
 
 ## Runtime Modes
 
