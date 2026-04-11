@@ -1,6 +1,8 @@
-![logoType](footage/logoType.gif)
-
 # momentum.js
+
+<p align="center">
+  <img src="footage/logoType.gif" alt="logoType" width="480">
+</p>
 
 ## Project Overview
 
