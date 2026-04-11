@@ -13,13 +13,11 @@
 
 #include <atomic>
 #include <array>
-#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <mutex>
@@ -57,26 +55,6 @@ std::uintptr_t GetEffectRefKey(PF_InData* in_data) {
   return (in_data && in_data->effect_ref)
     ? reinterpret_cast<std::uintptr_t>(in_data->effect_ref)
     : 0;
-}
-
-std::string GetColorTraceLogPath() {
-  return runtime_internal::GetRuntimeDirectoryPath() + "/color_trace.log";
-}
-
-void AppendColorTraceLine(const std::string& line) {
-  const std::string logPath = GetColorTraceLogPath();
-  if (logPath.empty()) {
-    return;
-  }
-  std::ofstream stream(logPath.c_str(), std::ios::out | std::ios::app);
-  if (!stream.is_open()) {
-    return;
-  }
-  const auto now = std::chrono::system_clock::now();
-  const auto timestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-    now.time_since_epoch()
-  ).count();
-  stream << "ts_ms=" << timestampMs << ' ' << line << '\n';
 }
 
 std::mutex gEffectInstanceRegistryMutex;
@@ -1759,23 +1737,6 @@ bool IsColorArbRefcon(void* refconPV) {
   return refconPV == &gColorArbRefconTag;
 }
 
-const char* DescribeColorArbitrarySelector(int which) {
-  switch (which) {
-    case PF_Arbitrary_NEW_FUNC: return "new";
-    case PF_Arbitrary_DISPOSE_FUNC: return "dispose";
-    case PF_Arbitrary_COPY_FUNC: return "copy";
-    case PF_Arbitrary_FLAT_SIZE_FUNC: return "flat_size";
-    case PF_Arbitrary_FLATTEN_FUNC: return "flatten";
-    case PF_Arbitrary_UNFLATTEN_FUNC: return "unflatten";
-    case PF_Arbitrary_INTERP_FUNC: return "interp";
-    case PF_Arbitrary_COMPARE_FUNC: return "compare";
-    case PF_Arbitrary_PRINT_SIZE_FUNC: return "print_size";
-    case PF_Arbitrary_PRINT_FUNC: return "print";
-    case PF_Arbitrary_SCAN_FUNC: return "scan";
-    default: return "unknown";
-  }
-}
-
 ControllerColorValue SanitizeColorValue(const ControllerColorValue& color) {
   ControllerColorValue safe = color;
   if (!std::isfinite(safe.r) || std::isnan(safe.r)) safe.r = 1.0;
@@ -1804,13 +1765,6 @@ PF_Err AllocateColorArbHandle(
     return PF_Err_OUT_OF_MEMORY;
   }
   *data = SanitizeColorValue(color);
-  AppendColorTraceLine(
-    "phase=allocate_color_arb"
-    " r=" + std::to_string(data->r) +
-    " g=" + std::to_string(data->g) +
-    " b=" + std::to_string(data->b) +
-    " a=" + std::to_string(data->a)
-  );
   PF_UNLOCK_HANDLE(handle);
   *outHandle = handle;
   return PF_Err_NONE;
@@ -1827,13 +1781,6 @@ ControllerColorValue ReadColorArbHandle(PF_InData* in_data, PF_ArbitraryH arbH) 
     return color;
   }
   color = SanitizeColorValue(*data);
-  AppendColorTraceLine(
-    "phase=read_color_arb"
-    " r=" + std::to_string(color.r) +
-    " g=" + std::to_string(color.g) +
-    " b=" + std::to_string(color.b) +
-    " a=" + std::to_string(color.a)
-  );
   PF_UNLOCK_HANDLE(arbH);
   return color;
 }
@@ -1923,18 +1870,6 @@ void WriteColorControllerValueToParams(
     colorParam->u.arb_d.value = nextHandle;
   }
   colorParam->uu.change_flags |= PF_ChangeFlag_CHANGED_VALUE;
-  AppendColorTraceLine(
-    "phase=write_color_param"
-    " slot=" + std::to_string(slot) +
-    " param_slot=" + std::to_string(colorParamSlot) +
-    " r=" + std::to_string(safeColor.r) +
-    " g=" + std::to_string(safeColor.g) +
-    " b=" + std::to_string(safeColor.b) +
-    " a=" + std::to_string(safeColor.a) +
-    " changed=1" +
-    " wrote_in_place=" + std::string(wroteInPlace ? "1" : "0") +
-    " had_previous_handle=" + std::string(existingHandle ? "1" : "0")
-  );
 }
 
 PF_Err PersistColorControllerValue(
@@ -2311,16 +2246,9 @@ PF_Err HandleColorArbitraryCallbacks(
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
-  AppendColorTraceLine(
-    "phase=arb_callback"
-    " which=" + std::to_string(static_cast<int>(extra->which_function)) +
-    " name=" + DescribeColorArbitrarySelector(extra->which_function)
-  );
-
   switch (extra->which_function) {
     case PF_Arbitrary_NEW_FUNC:
       if (!IsColorArbRefcon(extra->u.new_func_params.refconPV)) {
-        AppendColorTraceLine("phase=arb_callback_refcon_mismatch name=new");
         return PF_Err_NONE;
       }
       return AllocateDefaultColorArbHandleForSlot(
@@ -2331,7 +2259,6 @@ PF_Err HandleColorArbitraryCallbacks(
 
     case PF_Arbitrary_DISPOSE_FUNC:
       if (!IsColorArbRefcon(extra->u.dispose_func_params.refconPV)) {
-        AppendColorTraceLine("phase=arb_callback_refcon_mismatch name=dispose");
         return PF_Err_NONE;
       }
       if (extra->u.dispose_func_params.arbH) {
@@ -2341,7 +2268,6 @@ PF_Err HandleColorArbitraryCallbacks(
 
     case PF_Arbitrary_COPY_FUNC: {
       if (!IsColorArbRefcon(extra->u.copy_func_params.refconPV)) {
-        AppendColorTraceLine("phase=arb_callback_refcon_mismatch name=copy");
         return PF_Err_NONE;
       }
       const ControllerColorValue color =
@@ -2465,10 +2391,6 @@ PF_Err HandleColorArbitraryCallbacks(
     }
 
     default:
-      AppendColorTraceLine(
-        "phase=arb_callback_unhandled"
-        " which=" + std::to_string(static_cast<int>(extra->which_function))
-      );
       return PF_Err_NONE;
   }
 }
@@ -2504,18 +2426,6 @@ PF_Err PromptForColorControllerValue(
     &sampleColor,
     TRUE,
     &nextColor
-  );
-  AppendColorTraceLine(
-    "phase=picker_result"
-    " err=" + std::to_string(err) +
-    " in_r=" + std::to_string(sampleColor.red) +
-    " in_g=" + std::to_string(sampleColor.green) +
-    " in_b=" + std::to_string(sampleColor.blue) +
-    " in_a=" + std::to_string(sampleColor.alpha) +
-    " out_r=" + std::to_string(nextColor.red) +
-    " out_g=" + std::to_string(nextColor.green) +
-    " out_b=" + std::to_string(nextColor.blue) +
-    " out_a=" + std::to_string(nextColor.alpha)
   );
   if (err != PF_Err_NONE) {
     return err;

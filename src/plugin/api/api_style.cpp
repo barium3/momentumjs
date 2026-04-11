@@ -2,23 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 
 namespace momentum {
 
 namespace {
-
-void AppendStyleTraceLine(const std::string& line) {
-  const std::string logPath = runtime_internal::GetRuntimeDirectoryPath() + "/style_trace.log";
-  if (logPath.empty()) {
-    return;
-  }
-  std::ofstream stream(logPath.c_str(), std::ios::out | std::ios::app);
-  if (!stream.is_open()) {
-    return;
-  }
-  stream << line << '\n';
-}
 
 int NormalizeBlendModeValue(long value, int fallback) {
   switch (value) {
@@ -141,13 +128,6 @@ JSValueRef JsFill(
   g_activeRuntime->currentFill = ParseColorArgs(ctx, argumentCount, arguments, g_activeRuntime->currentFill);
   g_activeRuntime->hasFill = true;
   g_activeRuntime->fillExplicit = true;
-  AppendStyleTraceLine(
-    "fill"
-    " r=" + std::to_string(static_cast<int>(g_activeRuntime->currentFill.red)) +
-    " g=" + std::to_string(static_cast<int>(g_activeRuntime->currentFill.green)) +
-    " b=" + std::to_string(static_cast<int>(g_activeRuntime->currentFill.blue)) +
-    " a=" + std::to_string(static_cast<int>(g_activeRuntime->currentFill.alpha))
-  );
   return JSValueMakeUndefined(ctx);
 }
 

@@ -3,9 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
-#include <chrono>
 #include <cmath>
-#include <fstream>
 #include <iomanip>
 #include <mutex>
 #include <optional>
@@ -50,7 +48,6 @@ std::unordered_map<std::uint64_t, std::unordered_map<long, GpuRenderPlan>> g_cac
 std::unordered_map<std::uintptr_t, ControllerPoolState> g_liveControllerStates;
 std::recursive_mutex gSketchRuntimeMutex;
 std::mutex gLiveControllerStateMutex;
-void AppendColorTraceLine(const std::string& line);
 
 ControllerColorValue ResolveColorControllerValue(
   PF_InData* in_data,
@@ -66,35 +63,8 @@ ControllerColorValue ResolveColorControllerValue(
     return color;
   }
   color = *data;
-  AppendColorTraceLine(
-    "phase=runtime_read_color_arb"
-    " r=" + std::to_string(color.r) +
-    " g=" + std::to_string(color.g) +
-    " b=" + std::to_string(color.b) +
-    " a=" + std::to_string(color.a)
-  );
   PF_UNLOCK_HANDLE(colorParam->u.arb_d.value);
   return color;
-}
-
-std::string GetColorTraceLogPath() {
-  return runtime_internal::GetRuntimeDirectoryPath() + "/color_trace.log";
-}
-
-void AppendColorTraceLine(const std::string& line) {
-  const std::string logPath = GetColorTraceLogPath();
-  if (logPath.empty()) {
-    return;
-  }
-  std::ofstream stream(logPath.c_str(), std::ios::out | std::ios::app);
-  if (!stream.is_open()) {
-    return;
-  }
-  const auto now = std::chrono::system_clock::now();
-  const auto timestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-    now.time_since_epoch()
-  ).count();
-  stream << "ts_ms=" << timestampMs << ' ' << line << '\n';
 }
 
 unsigned long long HashBytes(const void* data, std::size_t size) {
@@ -468,18 +438,13 @@ bool CheckoutControllerStateAtTime(
     }
     if (kind == RuntimeControllerSlotKind::kColor) {
       if (colorSlot < kControllerColorSlotCount) {
-        if (hasLiveOverride) {
-          outState->colors[static_cast<std::size_t>(colorSlot)] =
-            liveOverrideState.colors[static_cast<std::size_t>(colorSlot)];
-        } else {
-          PF_ParamDef colorParam;
-          if (!checkoutParam(ControllerColorValueParamIndex(logicalSlot), timeValue, &colorParam)) {
-            return false;
-          }
-          outState->colors[static_cast<std::size_t>(colorSlot)] =
-            ResolveColorControllerValue(in_data, &colorParam);
-          PF_CHECKIN_PARAM(in_data, &colorParam);
+        PF_ParamDef colorParam;
+        if (!checkoutParam(ControllerColorValueParamIndex(logicalSlot), timeValue, &colorParam)) {
+          return false;
         }
+        outState->colors[static_cast<std::size_t>(colorSlot)] =
+          ResolveColorControllerValue(in_data, &colorParam);
+        PF_CHECKIN_PARAM(in_data, &colorParam);
       }
       colorSlot += 1;
       continue;
@@ -500,9 +465,7 @@ bool CheckoutControllerStateAtTime(
     } else if (kind == RuntimeControllerSlotKind::kAngle) {
       if (angleSlot < kControllerAngleSlotCount) {
         outState->angles[static_cast<std::size_t>(angleSlot)].degrees =
-          hasLiveOverride
-            ? liveOverrideState.angles[static_cast<std::size_t>(angleSlot)].degrees
-            : static_cast<double>(param.u.fs_d.value);
+          static_cast<double>(param.u.fs_d.value);
       }
       angleSlot += 1;
     } else if (kind == RuntimeControllerSlotKind::kCheckbox) {
@@ -515,32 +478,15 @@ bool CheckoutControllerStateAtTime(
       if (selectSlot < kControllerSelectSlotCount) {
         const RuntimeSelectControllerSpec config =
           ResolveSelectControllerSpecWithDefaults(bundle, logicalSlot);
-        int clampedIndex = 0;
-        if (hasLiveOverride) {
-          // AE popup checkout is not reliable enough for select controllers across
-          // test/revision switches, so prefer the instance-scoped live snapshot
-          // whenever the UI thread has one.
+        int rawValue = static_cast<int>(param.u.pd.value);
+        int clampedIndex = config.defaultValue;
+        if (IsValidRawSelectControllerValue(rawValue, config)) {
+          clampedIndex = ClampSelectControllerIndex(rawValue - 1, config);
+        } else if (hasLiveOverride && in_data->current_time == timeValue) {
           clampedIndex = ClampSelectControllerIndex(
             liveOverrideState.selects[static_cast<std::size_t>(selectSlot)].index,
             config
           );
-        } else {
-          int rawValue = static_cast<int>(param.u.pd.value);
-          // AE popup params sometimes come back as 0 during smart-render historical checkout.
-          // When that happens, retry at the live comp time so non-animated selects still reflect
-          // the user's current controller choice instead of snapping back to the default frame.
-          if (!IsValidRawSelectControllerValue(rawValue, config) &&
-              in_data->current_time != timeValue) {
-            PF_ParamDef currentTimeParam;
-            if (checkoutParam(paramIndex, in_data->current_time, &currentTimeParam, false)) {
-              const int currentTimeRawValue = static_cast<int>(currentTimeParam.u.pd.value);
-              if (IsValidRawSelectControllerValue(currentTimeRawValue, config)) {
-                rawValue = currentTimeRawValue;
-              }
-              PF_CHECKIN_PARAM(in_data, &currentTimeParam);
-            }
-          }
-          clampedIndex = ClampSelectControllerIndex(rawValue - 1, config);
         }
         outState->selects[static_cast<std::size_t>(selectSlot)].index = clampedIndex;
       }
