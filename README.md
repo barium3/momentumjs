@@ -1,7 +1,7 @@
 # momentum.js
 
 <p align="center">
-  <img src="footage/logoType.gif" alt="logoType" width="360">
+  <img src="footage/logoType.gif" alt="logoType" width="300">
 </p>
 
 ## Project Overview
