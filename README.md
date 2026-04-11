@@ -1,3 +1,5 @@
+![logoType](footage/logoType.gif)
+
 # momentum.js
 
 ## Project Overview
