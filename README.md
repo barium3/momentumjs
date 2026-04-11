@@ -1,8 +1,14 @@
 # momentum.js
 
-<p align="center">
-  <img src="footage/logoType.gif" alt="logoType" width="360">
-</p>
+<table width="100%">
+  <tr>
+    <td align="center" bgcolor="#000000">
+      <br>
+      <img src="footage/logoType.gif" alt="logoType" width="360">
+      <br><br>
+    </td>
+  </tr>
+</table>
 
 ## Project Overview
 
