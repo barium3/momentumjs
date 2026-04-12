@@ -69,8 +69,8 @@ C:\Users\YourUsername\AppData\Roaming\Adobe\CEP\extensions\momentumjs
 #### macOS
 
 ```bash
-rm -rf "$HOME/Library/Application Support/Adobe/CEP/extensions/momentumjs"
-find "$HOME/Library/Application Support/Adobe/Common/Plug-ins" -maxdepth 2 -type d -name MediaCore -exec rm -rf "{}/Momentum" \;
+sudo rm -rf "$HOME/Library/Application Support/Adobe/CEP/extensions/momentumjs"
+sudo find "$HOME/Library/Application Support/Adobe/Common/Plug-ins" -maxdepth 2 -type d -name MediaCore -exec rm -rf "{}/Momentum" \;
 ```
 
 #### Windows
