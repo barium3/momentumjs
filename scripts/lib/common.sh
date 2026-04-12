@@ -34,6 +34,61 @@ load_local_signing_env() {
   fi
 }
 
+resolve_install_owner() {
+  if [ -n "${MOMENTUM_INSTALL_OWNER:-}" ]; then
+    printf '%s\n' "${MOMENTUM_INSTALL_OWNER}"
+    return 0
+  fi
+
+  case "${APP_SUPPORT_USER_DIR}" in
+    /Users/*/Library/Application\ Support/Adobe*)
+      owner_path="${APP_SUPPORT_USER_DIR#/Users/}"
+      printf '%s\n' "${owner_path%%/*}"
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+resolve_install_group() {
+  owner="$1"
+
+  if [ -n "${MOMENTUM_INSTALL_GROUP:-}" ]; then
+    printf '%s\n' "${MOMENTUM_INSTALL_GROUP}"
+    return 0
+  fi
+
+  if [ -n "${owner}" ] && command -v id >/dev/null 2>&1; then
+    owner_group="$(id -gn "${owner}" 2>/dev/null || true)"
+    if [ -n "${owner_group}" ]; then
+      printf '%s\n' "${owner_group}"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "staff"
+}
+
+ensure_install_ownership() {
+  if [ "$(id -u)" != "0" ]; then
+    return 0
+  fi
+
+  owner="$(resolve_install_owner || true)"
+  if [ -z "${owner}" ]; then
+    return 0
+  fi
+
+  group="$(resolve_install_group "${owner}")"
+
+  for target in "$@"; do
+    if [ -n "${target}" ] && [ -e "${target}" ]; then
+      chown -R "${owner}:${group}" "${target}"
+    fi
+  done
+}
+
 read_extension_version() {
   extension_dir="$1"
   manifest_path="${extension_dir}/CSXS/manifest.xml"

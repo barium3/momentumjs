@@ -39,10 +39,14 @@ if [ -z "${USER_HOME}" ] || [ ! -d "${USER_HOME}" ]; then
   exit 1
 fi
 
+USER_GROUP="$(id -gn "${CONSOLE_USER}" 2>/dev/null || echo staff)"
+
 HOME="${USER_HOME}" \
 MOMENTUM_APP_SUPPORT_USER_DIR="${USER_HOME}/Library/Application Support/Adobe" \
 MOMENTUM_EXTENSION_SOURCE="${EXTENSION_SOURCE_DIR}" \
 MOMENTUM_PLUGIN_SOURCE="${PLUGIN_SOURCE_DIR}" \
+MOMENTUM_INSTALL_OWNER="${CONSOLE_USER}" \
+MOMENTUM_INSTALL_GROUP="${USER_GROUP}" \
 MOMENTUM_CEP_SCOPE=user \
 sh "${SCRIPT_ROOT}/install.sh"
 

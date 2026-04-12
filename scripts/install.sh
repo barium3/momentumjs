@@ -51,6 +51,7 @@ fi
 
 ensure_dir "${RUNTIME_TARGET_DIR}"
 remove_quarantine "${CEP_TARGET_DIR}" "${PLUGIN_CONTAINER_DIR}"
+ensure_install_ownership "${CEP_TARGET_DIR}" "${PLUGIN_CONTAINER_DIR}"
 
 echo "Momentum installed."
 echo "CEP scope: ${MOMENTUM_CEP_SCOPE:-user}"
