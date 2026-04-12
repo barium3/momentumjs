@@ -4,26 +4,17 @@ set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
+export ROOT_DIR
+. "${SCRIPT_DIR}/lib/common.sh"
+
 DIST_DIR="${ROOT_DIR}/dist"
 RELEASE_DIR="${DIST_DIR}/momentumjs"
-EXTENSION_PAYLOAD_DIR="${RELEASE_DIR}/momentumjs"
+ARCHIVE_PATH="${DIST_DIR}/momentumjs.zip"
 
-if [ "$(uname -s)" != "Darwin" ]; then
-  echo "Error: scripts/package-release.sh currently supports macOS only."
-  exit 1
-fi
+require_macos
 
-PLUGIN_SOURCE_DIR=""
-for candidate in \
-  "${ROOT_DIR}/Momentum.plugin" \
-  "${ROOT_DIR}/build-universal/Debug/Momentum.plugin" \
-  "${ROOT_DIR}/build/Debug/Momentum.plugin"
-do
-  if [ -d "${candidate}/Contents/MacOS" ]; then
-    PLUGIN_SOURCE_DIR="${candidate}"
-    break
-  fi
-done
+PLUGIN_SOURCE_DIR="$(resolve_plugin_source || true)"
+EXTENSION_SOURCE_DIR="$(resolve_extension_source || true)"
 
 if [ -z "${PLUGIN_SOURCE_DIR}" ]; then
   echo "Error: Could not find a prebuilt Momentum.plugin bundle."
@@ -31,38 +22,17 @@ if [ -z "${PLUGIN_SOURCE_DIR}" ]; then
   exit 1
 fi
 
+if [ -z "${EXTENSION_SOURCE_DIR}" ]; then
+  echo "Error: Could not find a Momentum CEP extension payload."
+  exit 1
+fi
+
 rm -rf "${RELEASE_DIR}"
-mkdir -p "${RELEASE_DIR}"
-mkdir -p "${RELEASE_DIR}/scripts"
-
-rsync -a \
-  --exclude '.git' \
-  --exclude 'build' \
-  --exclude 'build-*' \
-  --exclude 'dist' \
-  --exclude '.DS_Store' \
-  --exclude '.vscode' \
-  --include 'user/' \
-  --include 'user/examples/' \
-  --include 'user/examples/***' \
-  --exclude 'user/***' \
-  --exclude 'install.sh' \
-  --exclude 'uninstall.sh' \
-  "${ROOT_DIR}/" \
-  "${EXTENSION_PAYLOAD_DIR}/"
-
+copy_release_extension_tree "${EXTENSION_SOURCE_DIR}" "${RELEASE_DIR}"
 rsync -a "${PLUGIN_SOURCE_DIR}/" "${RELEASE_DIR}/Momentum.plugin/"
-
-cp "${ROOT_DIR}/install.sh" "${RELEASE_DIR}/install.sh"
-cp "${ROOT_DIR}/uninstall.sh" "${RELEASE_DIR}/uninstall.sh"
-cp "${ROOT_DIR}/scripts/install.sh" "${RELEASE_DIR}/scripts/install.sh"
-cp "${ROOT_DIR}/scripts/uninstall.sh" "${RELEASE_DIR}/scripts/uninstall.sh"
-
-chmod +x \
-  "${RELEASE_DIR}/install.sh" \
-  "${RELEASE_DIR}/uninstall.sh" \
-  "${RELEASE_DIR}/scripts/install.sh" \
-  "${RELEASE_DIR}/scripts/uninstall.sh"
+copy_release_docs "${RELEASE_DIR}"
+copy_release_support_scripts "${RELEASE_DIR}"
+create_zip_archive "${RELEASE_DIR}" "${ARCHIVE_PATH}"
 
 echo "Release directory created at: ${RELEASE_DIR}"
-echo "Suggested archive name: momentumjs.zip"
+echo "Release archive created at: ${ARCHIVE_PATH}"

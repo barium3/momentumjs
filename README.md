@@ -44,13 +44,11 @@ Browse the full API reference here:
 Run:
 
 ```bash
-curl -L https://github.com/barium3/momentumjs/releases/download/v1.1.0/momentumjs.zip -o momentumjs.zip
-unzip momentumjs.zip
-cd momentumjs
-./install.sh
+curl -L https://github.com/barium3/momentumjs/releases/latest/download/momentumjs.zip -o momentumjs.zip && unzip -q momentumjs.zip && cd momentumjs && bash scripts/install.sh
 ```
 
 Then restart After Effects.
+
 
 #### Windows
 

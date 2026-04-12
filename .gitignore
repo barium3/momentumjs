@@ -24,6 +24,13 @@ npm-debug.log*
 
 # Local-only sketch workspace
 .local-user/
+.local-signing/
+.local-tools/
+.adobe-*/
+.ae2023-*/
+user/lissajousM.js
+user/logo.svg
+user/logoType.js
 
 # Local build and release artifacts
 build/

@@ -2,14 +2,17 @@
 
 set -eu
 
-if [ "$(uname -s)" != "Darwin" ]; then
-  echo "Error: scripts/uninstall.sh currently supports macOS only."
-  exit 1
-fi
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
+export ROOT_DIR
+. "${SCRIPT_DIR}/lib/common.sh"
 
-APP_SUPPORT_DIR="${HOME}/Library/Application Support/Adobe"
-CEP_TARGET_DIR="${APP_SUPPORT_DIR}/CEP/extensions/momentumjs"
-COMMON_PLUGINS_DIR="${APP_SUPPORT_DIR}/Common/Plug-ins"
+require_macos
+
+USER_CEP_TARGET_DIR="${APP_SUPPORT_USER_DIR}/CEP/extensions/momentumjs"
+SYSTEM_CEP_TARGET_DIR="${SYSTEM_CEP_EXTENSIONS_DIR}/momentumjs"
+COMMON_PLUGINS_DIR="${APP_SUPPORT_USER_DIR}/Common/Plug-ins"
+CEP_SCOPE="${MOMENTUM_CEP_SCOPE:-user}"
 
 remove_if_exists() {
   if [ -e "$1" ]; then
@@ -18,7 +21,22 @@ remove_if_exists() {
   fi
 }
 
-remove_if_exists "${CEP_TARGET_DIR}"
+case "${CEP_SCOPE}" in
+  user)
+    remove_if_exists "${USER_CEP_TARGET_DIR}"
+    ;;
+  system)
+    remove_if_exists "${SYSTEM_CEP_TARGET_DIR}"
+    ;;
+  all)
+    remove_if_exists "${USER_CEP_TARGET_DIR}"
+    remove_if_exists "${SYSTEM_CEP_TARGET_DIR}"
+    ;;
+  *)
+    echo "Error: Unsupported MOMENTUM_CEP_SCOPE='${CEP_SCOPE}'. Use 'user', 'system', or 'all'." >&2
+    exit 1
+    ;;
+esac
 
 if [ -d "${COMMON_PLUGINS_DIR}" ]; then
   remove_if_exists "${COMMON_PLUGINS_DIR}/Momentum"

@@ -20,6 +20,7 @@ function __momentumResolve(relativePath) {
   return file;
 }
 
+$.evalFile(__momentumResolve("polyfills/json.jsx"));
 $.evalFile(__momentumResolve("plugin/payloadBuffer.jsx"));
 $.evalFile(__momentumResolve("plugin/runtimeFiles.jsx"));
 $.evalFile(__momentumResolve("plugin/bitmapApply.jsx"));
