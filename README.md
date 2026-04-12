@@ -44,7 +44,8 @@ Browse the full API reference here:
 Run:
 
 ```bash
-curl -L https://github.com/barium3/momentumjs/releases/latest/download/momentumjs.zip -o momentumjs.zip && unzip -q momentumjs.zip && cd momentumjs && bash scripts/install.sh
+curl -L https://github.com/barium3/momentumjs/releases/latest/download/momentumjs.zxp -o momentumjs.zxp
+open momentumjs.zxp
 ```
 
 Then restart After Effects.
