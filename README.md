@@ -48,6 +48,8 @@ curl -L https://github.com/barium3/momentumjs/releases/latest/download/momentumj
 open momentumjs-installer.pkg
 ```
 
+Or manually download: [latest release](https://github.com/barium3/momentumjs/releases/latest) / `momentumjs-installer.pkg`
+
 Then restart After Effects.
 
 
