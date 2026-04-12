@@ -1,0 +1,49 @@
+#!/bin/sh
+
+set -eu
+
+TARGET_VOLUME="${3:-/}"
+PAYLOAD_ROOT="${TARGET_VOLUME%/}/private/tmp/momentumjs-installer"
+SCRIPT_ROOT="${PAYLOAD_ROOT}/scripts"
+EXTENSION_SOURCE_DIR="${PAYLOAD_ROOT}/extension"
+PLUGIN_SOURCE_DIR="${PAYLOAD_ROOT}/Momentum.plugin"
+
+if [ ! -d "${EXTENSION_SOURCE_DIR}" ]; then
+  echo "Error: Missing signed CEP payload at ${EXTENSION_SOURCE_DIR}." >&2
+  exit 1
+fi
+
+if [ ! -d "${PLUGIN_SOURCE_DIR}/Contents/MacOS" ]; then
+  echo "Error: Missing Momentum.plugin payload at ${PLUGIN_SOURCE_DIR}." >&2
+  exit 1
+fi
+
+if [ ! -f "${SCRIPT_ROOT}/install.sh" ]; then
+  echo "Error: Missing installer helper script at ${SCRIPT_ROOT}/install.sh." >&2
+  exit 1
+fi
+
+CONSOLE_USER="$(stat -f%Su /dev/console 2>/dev/null || true)"
+if [ -z "${CONSOLE_USER}" ] || [ "${CONSOLE_USER}" = "root" ]; then
+  echo "Error: Could not determine the logged-in macOS user." >&2
+  exit 1
+fi
+
+USER_HOME="$(dscl . -read "/Users/${CONSOLE_USER}" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+if [ -z "${USER_HOME}" ] || [ ! -d "${USER_HOME}" ]; then
+  USER_HOME="$(eval echo "~${CONSOLE_USER}")"
+fi
+
+if [ -z "${USER_HOME}" ] || [ ! -d "${USER_HOME}" ]; then
+  echo "Error: Could not resolve home directory for ${CONSOLE_USER}." >&2
+  exit 1
+fi
+
+HOME="${USER_HOME}" \
+MOMENTUM_APP_SUPPORT_USER_DIR="${USER_HOME}/Library/Application Support/Adobe" \
+MOMENTUM_EXTENSION_SOURCE="${EXTENSION_SOURCE_DIR}" \
+MOMENTUM_PLUGIN_SOURCE="${PLUGIN_SOURCE_DIR}" \
+MOMENTUM_CEP_SCOPE=user \
+sh "${SCRIPT_ROOT}/install.sh"
+
+rm -rf "${PAYLOAD_ROOT}"

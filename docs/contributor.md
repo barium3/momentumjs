@@ -59,6 +59,14 @@ Creates `dist/momentumjs.zip`, a clean macOS runtime bundle with:
 2. `Momentum.plugin`
 3. install and uninstall helpers
 
+To build the one-step macOS installer package that installs both the signed CEP panel and `Momentum.plugin`, run:
+
+```bash
+bash scripts/package-installer.sh
+```
+
+This creates `dist/momentumjs-installer.pkg`. It expects `dist/momentumjs.zxp` to already exist.
+
 ## Script Layout
 
 The repository now uses `scripts/` as the single CLI entrypoint layer:
@@ -66,6 +74,7 @@ The repository now uses `scripts/` as the single CLI entrypoint layer:
 - `scripts/install.sh` and `scripts/uninstall.sh` hold the real macOS install logic.
 - `scripts/install-dev.sh` is the contributor shortcut that builds `Momentum.plugin` and then runs the source install flow.
 - `scripts/package-release.sh` assembles the macOS release zip with the CEP payload, `Momentum.plugin`, and install helpers.
+- `scripts/package-installer.sh` assembles a macOS `.pkg` installer for the signed panel and native plugin.
 - `scripts/lib/common.sh` is the shared path and packaging helper layer used by the install and packaging scripts.
 
 ## Notes

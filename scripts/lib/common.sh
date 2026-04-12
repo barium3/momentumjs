@@ -5,8 +5,8 @@ if [ -z "${ROOT_DIR:-}" ]; then
   exit 1
 fi
 
-APP_SUPPORT_USER_DIR="${HOME}/Library/Application Support/Adobe"
-SYSTEM_CEP_EXTENSIONS_DIR="/Library/Application Support/Adobe/CEP/extensions"
+APP_SUPPORT_USER_DIR="${MOMENTUM_APP_SUPPORT_USER_DIR:-${HOME}/Library/Application Support/Adobe}"
+SYSTEM_CEP_EXTENSIONS_DIR="${MOMENTUM_SYSTEM_CEP_EXTENSIONS_DIR:-/Library/Application Support/Adobe/CEP/extensions}"
 
 require_macos() {
   if [ "$(uname -s)" != "Darwin" ]; then
@@ -32,6 +32,17 @@ load_local_signing_env() {
   if [ -f "${env_file}" ]; then
     . "${env_file}"
   fi
+}
+
+read_extension_version() {
+  extension_dir="$1"
+  manifest_path="${extension_dir}/CSXS/manifest.xml"
+
+  if [ ! -f "${manifest_path}" ]; then
+    return 1
+  fi
+
+  sed -n 's/.*ExtensionBundleVersion="\([^"]*\)".*/\1/p' "${manifest_path}" | sed -n '1p'
 }
 
 resolve_extension_source() {
