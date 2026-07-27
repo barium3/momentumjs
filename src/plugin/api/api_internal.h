@@ -15,8 +15,6 @@ bool JsValueToNumberSafe(JSContextRef ctx, JSValueRef value, double& result);
 bool JsValueToLongSafe(JSContextRef ctx, JSValueRef value, long& result);
 RuntimeSnapshot CaptureRuntimeStyleState(const JsHostRuntime& runtime);
 void RestoreRuntimeStyleState(JsHostRuntime* runtime, const RuntimeSnapshot& snapshot);
-RuntimeEngineState CaptureRuntimeEngineStateSnapshot(const JsHostRuntime& runtime);
-void RestoreRuntimeEngineStateSnapshot(JsHostRuntime* runtime, const RuntimeEngineState& state);
 void MarkSceneDirty(JsHostRuntime* runtime);
 void AppendSceneCommand(JsHostRuntime* runtime, const SceneCommand& command);
 void ClearSceneCommands(JsHostRuntime* runtime);
@@ -31,11 +29,6 @@ int ParseBeginShapeKind(JSContextRef ctx, JSValueRef value, int fallbackKind);
 void NormalizeRectArgs(int mode, double* x, double* y, double* width, double* height);
 void NormalizeEllipseArgs(int mode, double* x, double* y, double* width, double* height);
 SceneCommand MakePathCommandFromPath(const VectorPath& path);
-SceneCommand MakePolygonCommandFromVertices(
-  const std::vector<VertexSpec>& vertices,
-  bool closePath,
-  const std::vector<std::vector<VertexSpec>>* contours = NULL
-);
 PathSegment MakeMoveToSegment(double x, double y);
 PathSegment MakeLineToSegment(double x, double y);
 PathSegment MakeQuadraticToSegment(double cx, double cy, double x, double y);
@@ -53,52 +46,7 @@ void AppendCurvePathSegment(
   const VertexSpec& p3,
   double tightness = 0.0
 );
-void AppendBezierSegmentVertices(
-  std::vector<VertexSpec>* vertices,
-  double x0,
-  double y0,
-  double x1,
-  double y1,
-  double x2,
-  double y2,
-  double x3,
-  double y3,
-  int segments
-);
-void AppendQuadraticSegmentVertices(
-  std::vector<VertexSpec>* vertices,
-  double x0,
-  double y0,
-  double cx,
-  double cy,
-  double x1,
-  double y1,
-  int segments
-);
-void AppendCurveSegmentVertices(
-  std::vector<VertexSpec>* vertices,
-  const VertexSpec& p0,
-  const VertexSpec& p1,
-  const VertexSpec& p2,
-  const VertexSpec& p3,
-  int segments,
-  double tightness = 0.0
-);
-std::vector<VertexSpec> BuildCurveShapeVertices(
-  const std::vector<VertexSpec>& controlVertices,
-  bool closePath,
-  double tightness = 0.0
-);
 void ApplyCurrentStyle(SceneCommand* command);
-std::vector<VertexSpec> BuildArcVertices(
-  double cx,
-  double cy,
-  double width,
-  double height,
-  double start,
-  double stop,
-  bool includeCenter
-);
 PathSubpath BuildArcSubpath(
   double cx,
   double cy,
@@ -107,16 +55,6 @@ PathSubpath BuildArcSubpath(
   double start,
   double stop,
   bool includeCenter
-);
-std::vector<VertexSpec> BuildRoundedRectVertices(
-  double x,
-  double y,
-  double width,
-  double height,
-  double tl,
-  double tr,
-  double br,
-  double bl
 );
 PathSubpath BuildRoundedRectSubpath(
   double x,
@@ -127,12 +65,6 @@ PathSubpath BuildRoundedRectSubpath(
   double tr,
   double br,
   double bl
-);
-std::vector<VertexSpec> BuildRectVertices(
-  double x,
-  double y,
-  double width,
-  double height
 );
 PathSubpath BuildRectSubpath(
   double x,

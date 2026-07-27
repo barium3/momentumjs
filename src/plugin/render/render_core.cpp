@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <type_traits>
 #include <utility>
 
 namespace momentum {
@@ -33,6 +35,37 @@ struct RenderCommandState {
 };
 
 thread_local RenderCommandState g_renderCommandState;
+thread_local const std::function<bool()>* g_cpuRenderCancel = NULL;
+thread_local bool g_cpuRenderWasCancelled = false;
+
+bool CpuRenderCancellationRequested() {
+  if (g_cpuRenderWasCancelled) {
+    return true;
+  }
+  if (g_cpuRenderCancel && *g_cpuRenderCancel && (*g_cpuRenderCancel)()) {
+    g_cpuRenderWasCancelled = true;
+  }
+  return g_cpuRenderWasCancelled;
+}
+
+class ScopedCpuRenderCancellation final {
+ public:
+  explicit ScopedCpuRenderCancellation(const std::function<bool()>* callback)
+    : previousCallback_(g_cpuRenderCancel),
+      previousCancelled_(g_cpuRenderWasCancelled) {
+    g_cpuRenderCancel = callback;
+    g_cpuRenderWasCancelled = false;
+  }
+
+  ~ScopedCpuRenderCancellation() {
+    g_cpuRenderCancel = previousCallback_;
+    g_cpuRenderWasCancelled = previousCancelled_;
+  }
+
+ private:
+  const std::function<bool()>* previousCallback_ = NULL;
+  bool previousCancelled_ = false;
+};
 
 double ClampUnit(double value) {
   return std::max(0.0, std::min(1.0, value));
@@ -40,89 +73,6 @@ double ClampUnit(double value) {
 
 double ClampByteLike(double value, double channelMax) {
   return std::max(0.0, std::min(channelMax, value));
-}
-
-ScalarSpec ScaleScalarSpecForRender(const ScalarSpec& spec, double scale) {
-  ScalarSpec scaled = spec;
-  if (scaled.mode == "pixels") {
-    scaled.value *= scale;
-  }
-  return scaled;
-}
-
-VertexSpec ScaleVertexSpecForRender(const VertexSpec& vertex, double scale) {
-  VertexSpec scaled = vertex;
-  scaled.x = ScaleScalarSpecForRender(vertex.x, scale);
-  scaled.y = ScaleScalarSpecForRender(vertex.y, scale);
-  return scaled;
-}
-
-PathSegment ScalePathSegmentForRender(const PathSegment& segment, double scale) {
-  PathSegment scaled = segment;
-  scaled.point = ScaleVertexSpecForRender(segment.point, scale);
-  scaled.control1 = ScaleVertexSpecForRender(segment.control1, scale);
-  scaled.control2 = ScaleVertexSpecForRender(segment.control2, scale);
-  return scaled;
-}
-
-PathSubpath ScalePathSubpathForRender(const PathSubpath& subpath, double scale) {
-  PathSubpath scaled = subpath;
-  scaled.segments.clear();
-  scaled.segments.reserve(subpath.segments.size());
-  for (const PathSegment& segment : subpath.segments) {
-    scaled.segments.push_back(ScalePathSegmentForRender(segment, scale));
-  }
-  return scaled;
-}
-
-VectorPath ScaleVectorPathForRender(const VectorPath& path, double scale) {
-  VectorPath scaled = path;
-  scaled.subpaths.clear();
-  scaled.subpaths.reserve(path.subpaths.size());
-  for (const PathSubpath& subpath : path.subpaths) {
-    scaled.subpaths.push_back(ScalePathSubpathForRender(subpath, scale));
-  }
-  return scaled;
-}
-
-std::vector<VertexSpec> ScaleVertexListForRender(
-  const std::vector<VertexSpec>& vertices,
-  double scale
-) {
-  std::vector<VertexSpec> scaled;
-  scaled.reserve(vertices.size());
-  for (const VertexSpec& vertex : vertices) {
-    scaled.push_back(ScaleVertexSpecForRender(vertex, scale));
-  }
-  return scaled;
-}
-
-SceneCommand ScaleSceneCommandForRender(const SceneCommand& command, double scale) {
-  SceneCommand scaled = command;
-  scaled.x = ScaleScalarSpecForRender(command.x, scale);
-  scaled.y = ScaleScalarSpecForRender(command.y, scale);
-  scaled.width = ScaleScalarSpecForRender(command.width, scale);
-  scaled.height = ScaleScalarSpecForRender(command.height, scale);
-  scaled.x1 = ScaleScalarSpecForRender(command.x1, scale);
-  scaled.y1 = ScaleScalarSpecForRender(command.y1, scale);
-  scaled.x2 = ScaleScalarSpecForRender(command.x2, scale);
-  scaled.y2 = ScaleScalarSpecForRender(command.y2, scale);
-  scaled.strokeWeight = command.strokeWeight * scale;
-  scaled.textSize = command.textSize * scale;
-  scaled.textLeading = command.textLeading * scale;
-  if (scaled.filterHasValue) {
-    scaled.filterValue *= scale;
-  }
-  scaled.transform.tx = command.transform.tx * scale;
-  scaled.transform.ty = command.transform.ty * scale;
-  scaled.path = ScaleVectorPathForRender(command.path, scale);
-  scaled.vertices = ScaleVertexListForRender(command.vertices, scale);
-  scaled.contours.clear();
-  scaled.contours.reserve(command.contours.size());
-  for (const std::vector<VertexSpec>& contour : command.contours) {
-    scaled.contours.push_back(ScaleVertexListForRender(contour, scale));
-  }
-  return scaled;
 }
 
 double SampleClipMask(const std::vector<double>* clipMask, PF_LayerDef* output, A_long x, A_long y) {
@@ -187,18 +137,6 @@ PixelType BlendPixelColor(
 );
 
 template <typename PixelType>
-void BlendBackground(PF_LayerDef* output, const PixelType& color) {
-  for (A_long y = 0; y < output->height; ++y) {
-    auto* row = reinterpret_cast<PixelType*>(
-      reinterpret_cast<A_u_char*>(output->data) + y * output->rowbytes
-    );
-    for (A_long x = 0; x < output->width; ++x) {
-      row[x] = BlendPixelColor(row[x], color, 1.0, BLEND_MODE_BLEND, false, 1.0);
-    }
-  }
-}
-
-template <typename PixelType>
 void PutPixel(
   PF_LayerDef* output,
   A_long x,
@@ -235,11 +173,6 @@ double GetChannelMax();
 template <>
 double GetChannelMax<PF_Pixel>() {
   return 255.0;
-}
-
-template <>
-double GetChannelMax<PF_Pixel16>() {
-  return 65535.0;
 }
 
 double BlendChannel(double destination, double source, int blendMode) {
@@ -552,6 +485,9 @@ void DrawRectAt(
   const A_long inset = std::max<A_long>(1, static_cast<A_long>(std::round(strokeWeight)));
 
   for (A_long py = top; py < bottom; ++py) {
+    if (CpuRenderCancellationRequested()) {
+      return;
+    }
     for (A_long px = left; px < right; ++px) {
       const bool onStroke =
         px < left + inset || px >= right - inset || py < top + inset || py >= bottom - inset;
@@ -614,6 +550,9 @@ void DrawRectTransformedAt(
   };
 
   for (A_long py = static_cast<A_long>(std::floor(minY)); py <= static_cast<A_long>(std::ceil(maxY)); ++py) {
+    if (CpuRenderCancellationRequested()) {
+      return;
+    }
     for (A_long px = static_cast<A_long>(std::floor(minX)); px <= static_cast<A_long>(std::ceil(maxX)); ++px) {
       int strokeSamples = 0;
       int fillSamples = 0;
@@ -698,43 +637,10 @@ void DrawLineAt(
   const double maxY = std::max(y1, y2) + halfWidth + extension + 1.0;
 
   for (A_long py = static_cast<A_long>(std::floor(minY)); py <= static_cast<A_long>(std::ceil(maxY)); ++py) {
+    if (CpuRenderCancellationRequested()) {
+      return;
+    }
     for (A_long px = static_cast<A_long>(std::floor(minX)); px <= static_cast<A_long>(std::ceil(maxX)); ++px) {
-      const double sampleX = static_cast<double>(px) + 0.5;
-      const double sampleY = static_cast<double>(py) + 0.5;
-
-      double signedDistance = 0.0;
-      if (length <= 1e-9) {
-        const double ddx = sampleX - x1;
-        const double ddy = sampleY - y1;
-        signedDistance = std::sqrt(ddx * ddx + ddy * ddy) - halfWidth;
-      } else {
-        const double ux = dx / length;
-        const double uy = dy / length;
-        const double vx = sampleX - x1;
-        const double vy = sampleY - y1;
-        const double along = vx * ux + vy * uy;
-        const double perp = vx * (-uy) + vy * ux;
-
-        if (strokeCap == STROKE_CAP_ROUND) {
-          const double clampedAlong = std::max(0.0, std::min(length, along));
-          const double projectionX = x1 + ux * clampedAlong;
-          const double projectionY = y1 + uy * clampedAlong;
-          const double ddx = sampleX - projectionX;
-          const double ddy = sampleY - projectionY;
-          signedDistance = std::sqrt(ddx * ddx + ddy * ddy) - halfWidth;
-        } else {
-          const double halfSegment = (length + extension * 2.0) * 0.5;
-          const double centerAlong = along - (length * 0.5);
-          const double qx = std::fabs(centerAlong) - halfSegment;
-          const double qy = std::fabs(perp) - halfWidth;
-          const double ox = std::max(qx, 0.0);
-          const double oy = std::max(qy, 0.0);
-          signedDistance =
-            std::sqrt(ox * ox + oy * oy) +
-            std::min(std::max(qx, qy), 0.0);
-        }
-      }
-
       const double coverage = SampleCoverageAtPixel(px, py, [&](double sampleX, double sampleY) {
         double sampleDistance = 0.0;
         if (length <= 1e-9) {
@@ -844,34 +750,6 @@ void DrawPointTransformedAt(
 }
 
 template <typename PixelType>
-void DrawRoundJoinAt(
-  PF_LayerDef* output,
-  const PixelType& color,
-  double x,
-  double y,
-  double strokeWeight,
-  bool erase = false,
-  double eraseStrength = 1.0
-) {
-  const double radius = std::max(0.5, strokeWeight * 0.5);
-  DrawEllipseTransformedAt(
-    output,
-    &color,
-    &color,
-    x,
-    y,
-    radius,
-    radius,
-    strokeWeight,
-    MakeIdentityTransform(),
-    erase,
-    eraseStrength,
-    erase,
-    eraseStrength
-  );
-}
-
-template <typename PixelType>
 bool PointInPolygon(const std::vector<std::pair<double, double>>& vertices, double x, double y) {
   if (vertices.size() < 3) {
     return false;
@@ -934,65 +812,6 @@ double PolygonWithContoursCoverageAt(
   });
 }
 
-double DistancePointToSegment(
-  double px,
-  double py,
-  const std::pair<double, double>& start,
-  const std::pair<double, double>& end
-) {
-  const double dx = end.first - start.first;
-  const double dy = end.second - start.second;
-  const double lengthSquared = dx * dx + dy * dy;
-  if (lengthSquared <= 1e-12) {
-    const double ddx = px - start.first;
-    const double ddy = py - start.second;
-    return std::sqrt(ddx * ddx + ddy * ddy);
-  }
-
-  const double t = std::max(
-    0.0,
-    std::min(
-      1.0,
-      ((px - start.first) * dx + (py - start.second) * dy) / lengthSquared
-    )
-  );
-  const double projX = start.first + dx * t;
-  const double projY = start.second + dy * t;
-  const double ddx = px - projX;
-  const double ddy = py - projY;
-  return std::sqrt(ddx * ddx + ddy * ddy);
-}
-
-double SignedDistanceToButtSegment(
-  double px,
-  double py,
-  const std::pair<double, double>& start,
-  const std::pair<double, double>& end,
-  double halfWidth
-) {
-  const double dx = end.first - start.first;
-  const double dy = end.second - start.second;
-  const double length = std::sqrt(dx * dx + dy * dy);
-  if (length <= 1e-9) {
-    const double ddx = px - start.first;
-    const double ddy = py - start.second;
-    return std::sqrt(ddx * ddx + ddy * ddy) - halfWidth;
-  }
-
-  const double ux = dx / length;
-  const double uy = dy / length;
-  const double vx = px - start.first;
-  const double vy = py - start.second;
-  const double along = vx * ux + vy * uy;
-  const double perp = vx * (-uy) + vy * ux;
-  const double centerAlong = along - length * 0.5;
-  const double qx = std::fabs(centerAlong) - length * 0.5;
-  const double qy = std::fabs(perp) - halfWidth;
-  const double ox = std::max(qx, 0.0);
-  const double oy = std::max(qy, 0.0);
-  return std::sqrt(ox * ox + oy * oy) + std::min(std::max(qx, qy), 0.0);
-}
-
 bool PointInSimplePolygon(const std::vector<std::pair<double, double>>& vertices, double x, double y) {
   return PointInPolygon<PF_Pixel>(vertices, x, y);
 }
@@ -1032,34 +851,6 @@ VertexSpec MakePixelVertexSpec(double x, double y) {
   vertex.x = {"pixels", x};
   vertex.y = {"pixels", y};
   return vertex;
-}
-
-std::vector<VertexSpec> BuildRectVertexSpecs(
-  double x,
-  double y,
-  double width,
-  double height
-) {
-  std::vector<VertexSpec> vertices;
-  vertices.reserve(4);
-  vertices.push_back(MakePixelVertexSpec(x, y));
-  vertices.push_back(MakePixelVertexSpec(x + width, y));
-  vertices.push_back(MakePixelVertexSpec(x + width, y + height));
-  vertices.push_back(MakePixelVertexSpec(x, y + height));
-  return vertices;
-}
-
-std::vector<VertexSpec> BuildLineVertexSpecs(
-  double x1,
-  double y1,
-  double x2,
-  double y2
-) {
-  std::vector<VertexSpec> vertices;
-  vertices.reserve(2);
-  vertices.push_back(MakePixelVertexSpec(x1, y1));
-  vertices.push_back(MakePixelVertexSpec(x2, y2));
-  return vertices;
 }
 
 std::pair<double, double> Normalize(
@@ -1536,6 +1327,9 @@ void DrawPathStrokeAt(
     );
     if (outline.size() >= 3) {
       for (A_long py = startY; py <= endY; ++py) {
+        if (CpuRenderCancellationRequested()) {
+          return;
+        }
         for (A_long px = startX; px <= endX; ++px) {
           double coverage = PolygonCoverageAt(
             static_cast<double>(px) + 0.5,
@@ -1566,6 +1360,9 @@ void DrawPathStrokeAt(
   }
 
   for (A_long py = startY; py <= endY; ++py) {
+    if (CpuRenderCancellationRequested()) {
+      return;
+    }
     for (A_long px = startX; px <= endX; ++px) {
       const double sampleX = static_cast<double>(px) + 0.5;
       const double sampleY = static_cast<double>(py) + 0.5;
@@ -1698,6 +1495,9 @@ void DrawClosedLoopStrokeAt(
     std::vector<std::vector<std::pair<double, double>>> innerContours(1);
     innerContours[0] = ring.inner;
     for (A_long py = startY; py <= endY; ++py) {
+      if (CpuRenderCancellationRequested()) {
+        return;
+      }
       for (A_long px = startX; px <= endX; ++px) {
         const double coverage = PolygonWithContoursCoverageAt(
           static_cast<double>(px) + 0.5,
@@ -2088,6 +1888,9 @@ void DrawPolygonTransformedAt(
 
   if (fillColor && transformedVertices.size() >= 3) {
     for (A_long py = static_cast<A_long>(std::floor(minY)); py <= static_cast<A_long>(std::ceil(maxY)); ++py) {
+      if (CpuRenderCancellationRequested()) {
+        return;
+      }
       for (A_long px = static_cast<A_long>(std::floor(minX)); px <= static_cast<A_long>(std::ceil(maxX)); ++px) {
         const double coverage = SampleCoverageAtPixel(px, py, [&](double sampleX, double sampleY) {
           return PointInPolygonWithContours<PixelType>(
@@ -2150,29 +1953,6 @@ void DrawPolygonTransformedAt(
   }
 }
 
-template <typename PixelType>
-void DrawDiagnosticImpl(PF_LayerDef* output, const PixelType& background, const PixelType& accent) {
-  FillBackground(output, background);
-
-  const double width = static_cast<double>(output->width);
-  const double height = static_cast<double>(output->height);
-  const double insetX = width * 0.18;
-  const double insetY = height * 0.18;
-
-  DrawRectAt(
-    output,
-    static_cast<const PixelType*>(NULL),
-    &accent,
-    insetX,
-    insetY,
-    width - insetX * 2.0,
-    height - insetY * 2.0,
-    8.0
-  );
-  DrawLineAt(output, accent, insetX, insetY, width - insetX, height - insetY, 8.0, STROKE_CAP_ROUND);
-  DrawLineAt(output, accent, width - insetX, insetY, insetX, height - insetY, 8.0, STROKE_CAP_ROUND);
-}
-
 bool IsDrawableCommand(const SceneCommand& command) {
   return
     command.type == "point" ||
@@ -2180,16 +1960,6 @@ bool IsDrawableCommand(const SceneCommand& command) {
     command.type == "path" ||
     command.type == "text" ||
     command.type == "image";
-}
-
-bool IsIdentityTransformValue(const Transform2D& transform) {
-  return
-    std::fabs(transform.a - 1.0) <= 1e-6 &&
-    std::fabs(transform.b) <= 1e-6 &&
-    std::fabs(transform.c) <= 1e-6 &&
-    std::fabs(transform.d - 1.0) <= 1e-6 &&
-    std::fabs(transform.tx) <= 1e-6 &&
-    std::fabs(transform.ty) <= 1e-6;
 }
 
 template <typename PixelType>
@@ -2200,22 +1970,12 @@ PF_Pixel ToRenderPixel<PF_Pixel>(const PF_Pixel& color) {
   return color;
 }
 
-template <>
-PF_Pixel16 ToRenderPixel<PF_Pixel16>(const PF_Pixel& color) {
-  return ToPixel16(color);
-}
-
 template <typename PixelType>
 PixelType TransparentPixel();
 
 template <>
 PF_Pixel TransparentPixel<PF_Pixel>() {
   return PF_Pixel{0, 0, 0, 0};
-}
-
-template <>
-PF_Pixel16 TransparentPixel<PF_Pixel16>() {
-  return PF_Pixel16{0, 0, 0, 0};
 }
 
 PF_Pixel ApplyTintToPixel(const PF_Pixel& pixel, const PF_Pixel& tint) {
@@ -2318,7 +2078,7 @@ void RenderDrawableCommand(PF_LayerDef* output, const ScenePayload& scene, const
   } else if (command.type == "image" && command.imageId > 0) {
     const auto imageIt = scene.imageAssets.find(command.imageId);
     if (imageIt == scene.imageAssets.end() || !imageIt->second.loaded || imageIt->second.width <= 0 ||
-        imageIt->second.height <= 0 || imageIt->second.pixels.empty()) {
+        imageIt->second.height <= 0 || !HasImagePixels(imageIt->second)) {
       return;
     }
 
@@ -2374,6 +2134,9 @@ void RenderDrawableCommand(PF_LayerDef* output, const ScenePayload& scene, const
     const A_long endX = std::min(output->width, static_cast<A_long>(std::ceil(maxX)));
     const A_long endY = std::min(output->height, static_cast<A_long>(std::ceil(maxY)));
     for (A_long py = startY; py < endY; ++py) {
+      if (CpuRenderCancellationRequested()) {
+        return;
+      }
       for (A_long px = startX; px < endX; ++px) {
         double localX = 0.0;
         double localY = 0.0;
@@ -2488,7 +2251,60 @@ void RenderSceneImpl(
   const std::size_t startIndex = std::min(startCommandIndex, scene.commands.size());
   const std::size_t stopIndex = std::min(endCommandIndex, scene.commands.size());
   for (std::size_t i = startIndex; i < stopIndex; ++i) {
+    if (CpuRenderCancellationRequested()) {
+      break;
+    }
     const SceneCommand& command = scene.commands[i];
+
+    if constexpr (std::is_same_v<PixelType, PF_Pixel>) {
+      if (command.type == "filter" || command.type == "mask") {
+        std::vector<PF_Pixel> canvasPixels(
+          static_cast<std::size_t>(output->width * output->height),
+          PF_Pixel{0, 0, 0, 0}
+        );
+        for (A_long y = 0; y < output->height; ++y) {
+          const auto* sourceRow = reinterpret_cast<const PF_Pixel*>(
+            reinterpret_cast<const A_u_char*>(output->data) + y * output->rowbytes
+          );
+          std::copy(
+            sourceRow,
+            sourceRow + output->width,
+            canvasPixels.begin() + static_cast<std::ptrdiff_t>(y * output->width)
+          );
+        }
+        RuntimeImageAsset canvasAsset = CreateBlankImageAsset(
+          0,
+          output->width,
+          output->height
+        );
+        ReplaceImagePixels(&canvasAsset, std::move(canvasPixels));
+        bool applied = false;
+        if (command.type == "filter") {
+          applied = ApplyFilterToImageAsset(
+            &canvasAsset,
+            command.filterKind,
+            command.filterValue
+          );
+        } else {
+          const auto mask = scene.imageAssets.find(command.maskImageId);
+          if (mask != scene.imageAssets.end()) {
+            applied = ApplyMaskToImageAsset(&canvasAsset, mask->second);
+          }
+        }
+        if (applied) {
+          const std::vector<PF_Pixel>& filteredPixels = ReadImagePixels(canvasAsset);
+          for (A_long y = 0; y < output->height; ++y) {
+            auto* destinationRow = reinterpret_cast<PF_Pixel*>(
+              reinterpret_cast<A_u_char*>(output->data) + y * output->rowbytes
+            );
+            const PF_Pixel* sourceRow = filteredPixels.data() +
+              static_cast<std::ptrdiff_t>(y * output->width);
+            std::copy(sourceRow, sourceRow + output->width, destinationRow);
+          }
+        }
+        continue;
+      }
+    }
 
     if (command.type == "push_state") {
       clipMaskStack.push_back(currentClipMask);
@@ -2729,25 +2545,6 @@ void CopySurface8To16(PF_LayerDef* output, const std::vector<PF_Pixel>& pixels) 
   }
 }
 
-void CopySurface8To32(PF_LayerDef* output, const std::vector<PF_Pixel>& pixels) {
-  if (!output) {
-    return;
-  }
-
-  for (A_long y = 0; y < output->height; ++y) {
-    auto* row = reinterpret_cast<PF_PixelFloat*>(
-      reinterpret_cast<A_u_char*>(output->data) + y * output->rowbytes
-    );
-    const PF_Pixel* sourceRow = &pixels[static_cast<std::size_t>(y * output->width)];
-    for (A_long x = 0; x < output->width; ++x) {
-      row[x].alpha = static_cast<PF_FpShort>(static_cast<double>(sourceRow[x].alpha) / 255.0);
-      row[x].red = static_cast<PF_FpShort>(static_cast<double>(sourceRow[x].red) / 255.0);
-      row[x].green = static_cast<PF_FpShort>(static_cast<double>(sourceRow[x].green) / 255.0);
-      row[x].blue = static_cast<PF_FpShort>(static_cast<double>(sourceRow[x].blue) / 255.0);
-    }
-  }
-}
-
 double ResolveScalarSpec(const ScalarSpec& spec, PF_LayerDef* output) {
   if (spec.mode == "fractionWidth") {
     return static_cast<double>(output->width) * spec.value;
@@ -2774,87 +2571,6 @@ double GetSceneHeight(const ScenePayload& scene, PF_LayerDef* output) {
   return output ? static_cast<double>(output->height) : 0.0;
 }
 
-void RenderScene8(PF_LayerDef* output, const ScenePayload& scene) {
-  RenderSceneImpl<PF_Pixel>(output, scene);
-}
-
-void RenderScene16(PF_LayerDef* output, const ScenePayload& scene) {
-  RenderSceneImpl<PF_Pixel16>(output, scene);
-}
-
-void ApplySceneToSurface8(PF_LayerDef* output, const ScenePayload& scene) {
-  if (!output) {
-    return;
-  }
-
-  if (scene.clearsSurface) {
-    FillBackground(output, PF_Pixel{0, 0, 0, 0});
-  }
-
-  RenderScene8(output, scene);
-}
-
-bool SceneFullyClearsSurface(const ScenePayload& scene) {
-  bool clearsSurface = scene.clearsSurface || (scene.hasBackground && scene.background.alpha >= 255);
-  int clipDepth = 0;
-  for (std::size_t index = 0; index < scene.commands.size(); ++index) {
-    const SceneCommand& command = scene.commands[index];
-    if (command.type == "clip_begin") {
-      clipDepth += 1;
-      continue;
-    }
-    if (command.type == "clip_end") {
-      clipDepth = std::max(0, clipDepth - 1);
-      continue;
-    }
-    if (command.type == "clear") {
-      clearsSurface = true;
-      continue;
-    }
-    if (command.type != "background") {
-      continue;
-    }
-    const bool blendClears =
-      command.blendMode == BLEND_MODE_BLEND || command.blendMode == BLEND_MODE_REPLACE;
-    const bool noClip = clipDepth == 0 && !command.clipPath;
-    const bool noErase = !command.eraseFill && !command.eraseStroke;
-    if (blendClears &&
-        noClip &&
-        noErase &&
-        command.fill.alpha >= 255 &&
-        IsIdentityTransformValue(command.transform)) {
-      clearsSurface = true;
-    }
-  }
-  return clearsSurface;
-}
-
-void ApplySceneBackgroundToRaster8(
-  std::vector<PF_Pixel>* raster,
-  A_long width,
-  A_long height,
-  const ScenePayload& scene
-) {
-  if (!raster) {
-    return;
-  }
-
-  raster->assign(static_cast<std::size_t>(width * height), PF_Pixel{0, 0, 0, 0});
-  PF_LayerDef surface = MakeSurface8(width, height, raster);
-
-  if (scene.clearsSurface) {
-    FillBackground(&surface, PF_Pixel{0, 0, 0, 0});
-  }
-
-  if (scene.hasBackground) {
-    if (scene.background.alpha >= 255) {
-      FillBackground(&surface, scene.background);
-    } else if (scene.background.alpha > 0) {
-      BlendBackground(&surface, scene.background);
-    }
-  }
-}
-
 void ApplySceneToRaster8(
   std::vector<PF_Pixel>* raster,
   A_long width,
@@ -2866,69 +2582,62 @@ void ApplySceneToRaster8(
   }
 
   PF_LayerDef surface = MakeSurface8(width, height, raster);
-  ApplySceneToSurface8(&surface, scene);
+  if (scene.clearsSurface) {
+    FillBackground(&surface, PF_Pixel{0, 0, 0, 0});
+  }
+  RenderSceneImpl<PF_Pixel>(&surface, scene);
 }
 
-void ApplySceneCommandRangeToRaster8(
+bool RenderBitmapFramePlanToCpuRaster(
+  const BitmapFramePlan& plan,
   std::vector<PF_Pixel>* raster,
-  A_long width,
-  A_long height,
-  const ScenePayload& scene,
-  std::size_t startCommandIndex,
-  std::size_t endCommandIndex
+  const std::function<bool()>& shouldCancel,
+  std::string* errorMessage
 ) {
-  if (!raster) {
-    return;
-  }
-
-  PF_LayerDef surface = MakeSurface8(width, height, raster);
-  RenderSceneImpl<PF_Pixel>(&surface, scene, startCommandIndex, endCommandIndex);
-}
-
-void CompositeRasterBlockToRaster8(
-  std::vector<PF_Pixel>* raster,
-  A_long width,
-  A_long height,
-  const std::vector<PF_Pixel>& blockRaster,
-  int x,
-  int y,
-  int blockWidth,
-  int blockHeight
-) {
-  if (!raster || width <= 0 || height <= 0 || blockWidth <= 0 || blockHeight <= 0) {
-    return;
-  }
-  if (blockRaster.size() < static_cast<std::size_t>(blockWidth * blockHeight)) {
-    return;
-  }
-
-  PF_LayerDef surface = MakeSurface8(width, height, raster);
-  for (int row = 0; row < blockHeight; ++row) {
-    const int dstY = y + row;
-    if (dstY < 0 || dstY >= height) {
-      continue;
+  if (!raster || plan.width <= 0 || plan.height <= 0) {
+    if (errorMessage) {
+      *errorMessage = "Bitmap CPU executor received an invalid frame plan.";
     }
-    for (int col = 0; col < blockWidth; ++col) {
-      const int dstX = x + col;
-      if (dstX < 0 || dstX >= width) {
-        continue;
-      }
+    return false;
+  }
+  if (!plan.supported) {
+    if (errorMessage) {
+      *errorMessage = plan.unsupportedReason.empty()
+        ? "Bitmap frame plan is not supported by the CPU executor."
+        : plan.unsupportedReason;
+    }
+    return false;
+  }
 
-      const PF_Pixel& source = blockRaster[static_cast<std::size_t>(row * blockWidth + col)];
-      if (source.alpha == 0) {
-        continue;
+  ScopedCpuRenderCancellation cancellationScope(&shouldCancel);
+  raster->assign(
+    static_cast<std::size_t>(plan.width * plan.height),
+    PF_Pixel{0, 0, 0, 0}
+  );
+  for (const BitmapFramePlanOp& operation : plan.operations) {
+    if (CpuRenderCancellationRequested()) {
+      if (errorMessage) {
+        *errorMessage = "render-cancelled";
       }
-      BlendPixel(&surface, dstX, dstY, source, 1.0, false, 1.0);
+      return false;
+    }
+    if (operation.drawPlan.resetsHistory) {
+      std::fill(raster->begin(), raster->end(), PF_Pixel{0, 0, 0, 0});
+    }
+    ApplySceneToRaster8(
+      raster,
+      plan.width,
+      plan.height,
+      operation.drawPlan.scene
+    );
+    if (CpuRenderCancellationRequested()) {
+      if (errorMessage) {
+        *errorMessage = "render-cancelled";
+      }
+      return false;
     }
   }
-}
-
-void DrawDiagnostic(PF_LayerDef* output, const PF_Pixel& background, const PF_Pixel& accent) {
-  DrawDiagnosticImpl(output, background, accent);
-}
-
-void DrawDiagnostic(PF_LayerDef* output, const PF_Pixel16& background, const PF_Pixel16& accent) {
-  DrawDiagnosticImpl(output, background, accent);
+  return true;
 }
 
 }  // namespace momentum

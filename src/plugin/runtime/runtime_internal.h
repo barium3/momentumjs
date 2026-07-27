@@ -30,19 +30,43 @@ std::string GetRuntimeBundlePath();
 std::string GetRuntimeInstanceSketchPath(A_long instanceId);
 std::string GetRuntimeInstanceBundlePath(A_long instanceId);
 
-std::uintptr_t GetEffectCacheKey(PF_InData* in_data);
+using EffectRuntimeKey = std::uintptr_t;
+
+PF_ConstHandle ResolveEffectSequenceDataHandle(PF_InData* in_data);
+EffectRuntimeKey ResolveEffectRuntimeKey(PF_InData* in_data);
+void AppendEffectRuntimeDiagnostic(
+  PF_InData* in_data,
+  const char* eventName,
+  A_long instanceId,
+  PF_ParamIndex paramIndex,
+  long frame,
+  const std::string& detail
+);
+void AppendEffectUiDiagnostic(
+  PF_InData* in_data,
+  const char* eventName,
+  const std::string& detail
+);
 std::optional<std::string> ReadTextFile(const std::string& path);
 bool FileExists(const std::string& path);
 
 RuntimeSketchBundle ReadRuntimeSketchBundle(std::string* errorMessage);
+RuntimeSketchBundle ReadRuntimeSketchBundleFromText(
+  const std::string& bundleText,
+  const std::string& defaultSketchPath,
+  std::string* errorMessage
+);
 RuntimeSketchBundle ReadRuntimeSketchBundleForEffect(
   PF_InData* in_data,
   A_long instanceId,
   std::string* errorMessage
 );
+std::optional<std::string> ReadRuntimeSketchDependencyBytes(
+  PF_InData* in_data,
+  A_long instanceId,
+  std::string* errorMessage
+);
 std::optional<std::string> ReadRuntimeSketchSource(const RuntimeSketchBundle& bundle);
-bool IsDirectTimeProfile(const RuntimeSketchBundle& bundle);
-bool IsOpaqueBackgroundProfile(const RuntimeSketchBundle& bundle);
 
 bool EvaluateScript(
   JSContextRef ctx,

@@ -187,11 +187,7 @@ function _momentumAngleControllerParamIndex(slotIndex) {
   return _momentumControllerSlotParamBaseIndex(slotIndex) + 5;
 }
 
-function _momentumAngleControllerUiParamIndex(slotIndex) {
-  return _momentumControllerSlotParamBaseIndex(slotIndex) + 6;
-}
-
-function _momentumResolveControllerProp(effect, cfg, slotIndex, controllerConfigs) {
+function _momentumResolveControllerProp(effect, cfg, slotIndex) {
   if (!effect) {
     return null;
   }
@@ -201,7 +197,7 @@ function _momentumResolveControllerProp(effect, cfg, slotIndex, controllerConfig
   if (type === "slider") {
     numericProp = _momentumResolveSliderControllerProp(effect, slotIndex);
   } else if (type === "angle") {
-    numericProp = _momentumResolveAngleControllerProp(effect, cfg, slotIndex);
+    numericProp = _momentumResolveAngleControllerProp(effect, slotIndex);
   } else if (type === "color") {
     numericProp = _momentumResolveColorControllerProp(effect, slotIndex);
   } else if (type === "checkbox") {
@@ -229,7 +225,7 @@ function _momentumResolveSliderControllerProp(effect, slotIndex) {
   return effect.property(_momentumSliderControllerParamIndex(slotIndex));
 }
 
-function _momentumResolveAngleControllerProp(effect, cfg, slotIndex) {
+function _momentumResolveAngleControllerProp(effect, slotIndex) {
   if (!effect) {
     return null;
   }
@@ -294,11 +290,7 @@ function _momentumBindControllerParams(effect, controllerConfigs, options) {
       continue;
     }
 
-    if (controllerType === "angle") {
-      continue;
-    }
-
-    var targetProp = _momentumResolveControllerProp(effect, cfg, idx, controllerConfigs);
+    var targetProp = _momentumResolveControllerProp(effect, cfg, idx);
     if (!targetProp) {
       continue;
     }
@@ -525,15 +517,10 @@ function applyMomentum(encodedPayload) {
       return "Error: Momentum effect parameters are unavailable.";
     }
 
-    var instanceId = 0;
-    try {
-      instanceId = Math.floor(_momentumReadNumber(instanceProp.value, 0));
-    } catch (_instanceReadError) {
-      instanceId = 0;
-    }
-    if (instanceId <= 0) {
-      instanceId = _momentumNextBitmapInstanceId();
-    }
+    // applyMomentum always creates a new composition/effect. Give that effect
+    // a fresh transport id instead of accepting sequence/plugin defaults that
+    // may have been copied or regenerated in another AE session.
+    var instanceId = _momentumNextBitmapInstanceId();
 
     var debugTracePath = "";
     var debugSessionId = String(instanceId);

@@ -6,8 +6,6 @@ namespace momentum {
 
 bool BitmapGpuBackendAvailable();
 
-bool BitmapGpuFrameworkSupported(PF_GPU_Framework framework);
-
 PF_Err CreateBitmapGpuDeviceContext(
   PF_InData* in_data,
   PF_OutData* out_data,
@@ -31,6 +29,12 @@ bool QueryBitmapGpuCanvasCursor(
   bool* outInitialized
 );
 
+bool QueryBitmapGpuRecoveryCanvasCursor(
+  std::uint64_t cacheKey,
+  long* outLastFrame,
+  bool* outInitialized
+);
+
 bool QueryBitmapGpuNearestCheckpoint(
   std::uint64_t cacheKey,
   long targetFrame,
@@ -45,8 +49,10 @@ PF_Err RenderBitmapFramePlan(
   void* gpuData,
   PF_EffectWorld* outputWorld,
   PF_PixelFormat pixelFormat,
-  A_long sourceOriginX,
-  A_long sourceOriginY,
+  double sourceOriginX,
+  double sourceOriginY,
+  double sourceStepX,
+  double sourceStepY,
   const BitmapFramePlan& plan,
   std::string* errorMessage
 );

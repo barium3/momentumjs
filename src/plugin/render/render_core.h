@@ -2,6 +2,8 @@
 
 #include "../model/momentum_types.h"
 
+#include <functional>
+
 namespace momentum {
 
 PF_Pixel16 ToPixel16(const PF_Pixel& color);
@@ -18,24 +20,21 @@ double ApproximateTransformScale(const Transform2D& transform);
 PF_LayerDef MakeSurface8(A_long width, A_long height, std::vector<PF_Pixel>* pixels);
 void CopySurface8To8(PF_LayerDef* output, const std::vector<PF_Pixel>& pixels);
 void CopySurface8To16(PF_LayerDef* output, const std::vector<PF_Pixel>& pixels);
-void CopySurface8To32(PF_LayerDef* output, const std::vector<PF_Pixel>& pixels);
-void CopySurface8To32(PF_LayerDef* output, const std::vector<PF_Pixel>& pixels);
 
 double ResolveScalarSpec(const ScalarSpec& spec, PF_LayerDef* output);
 double GetSceneWidth(const ScenePayload& scene, PF_LayerDef* output);
 double GetSceneHeight(const ScenePayload& scene, PF_LayerDef* output);
-void RenderScene8(PF_LayerDef* output, const ScenePayload& scene);
-void RenderScene16(PF_LayerDef* output, const ScenePayload& scene);
-void ApplySceneToSurface8(PF_LayerDef* output, const ScenePayload& scene);
-bool SceneFullyClearsSurface(const ScenePayload& scene);
 void ApplySceneToRaster8(
   std::vector<PF_Pixel>* raster,
   A_long width,
   A_long height,
   const ScenePayload& scene
 );
-
-void DrawDiagnostic(PF_LayerDef* output, const PF_Pixel& background, const PF_Pixel& accent);
-void DrawDiagnostic(PF_LayerDef* output, const PF_Pixel16& background, const PF_Pixel16& accent);
+bool RenderBitmapFramePlanToCpuRaster(
+  const BitmapFramePlan& plan,
+  std::vector<PF_Pixel>* raster,
+  const std::function<bool()>& shouldCancel,
+  std::string* errorMessage
+);
 
 }  // namespace momentum

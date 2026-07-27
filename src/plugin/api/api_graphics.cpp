@@ -220,11 +220,11 @@ RuntimeImageAsset* SnapshotActiveRuntimeToCanvasImage() {
   asset.loaded = true;
   asset.loadError.clear();
   asset.version = nextVersion;
-  asset.pixels.clear();
-  asset.gpuSceneBacked = true;
-  asset.gpuScene = std::make_shared<ScenePayload>(g_activeRuntime->scene);
-  if (asset.gpuScene) {
-    asset.gpuScene->imageAssets.erase(imageId);
+  ClearImagePixels(&asset);
+  asset.sceneBacked = true;
+  asset.sceneSource = std::make_shared<ScenePayload>(g_activeRuntime->scene);
+  if (asset.sceneSource) {
+    asset.sceneSource->imageAssets.erase(imageId);
   }
 
   g_activeRuntime->imageAssets[imageId] = asset;
@@ -253,9 +253,9 @@ RuntimeImageAsset SnapshotGraphicsSurfaceToOutputAsset(const GraphicsSurfaceStat
     PF_Pixel{0, 0, 0, 0}
   );
   ApplySceneToRaster8(&raster, width, height, surface.scene);
-  asset.pixels.swap(raster);
-  asset.gpuSceneBacked = false;
-  asset.gpuScene.reset();
+  ReplaceImagePixels(&asset, std::move(raster));
+  asset.sceneBacked = false;
+  asset.sceneSource.reset();
   return asset;
 }
 
@@ -490,16 +490,16 @@ JSValueRef JsMomentumNativeExitGraphics(
     std::max(1, static_cast<int>(std::round(std::max(1.0, updatedSurface.scene.canvasWidth))));
   outputAsset.height =
     std::max(1, static_cast<int>(std::round(std::max(1.0, updatedSurface.scene.canvasHeight))));
-  outputAsset.source = outputAsset.gpuSceneBacked ? "__graphics_output_gpu__" : "__graphics_output__";
+  outputAsset.source = outputAsset.sceneBacked ? "__graphics_output_scene__" : "__graphics_output__";
   outputAsset.path.clear();
   outputAsset.loaded = true;
   outputAsset.pixelDensity = std::max(1.0, updatedSurface.pixelDensity);
-  if (outputAsset.gpuSceneBacked && outputAsset.gpuScene) {
-    outputAsset.pixels.clear();
-    outputAsset.gpuScene->imageAssets.erase(outputImageId);
+  if (outputAsset.sceneBacked && outputAsset.sceneSource) {
+    ClearImagePixels(&outputAsset);
+    outputAsset.sceneSource->imageAssets.erase(outputImageId);
   } else {
-    outputAsset.gpuSceneBacked = false;
-    outputAsset.gpuScene.reset();
+    outputAsset.sceneBacked = false;
+    outputAsset.sceneSource.reset();
   }
   auto existing = g_activeRuntime->imageAssets.find(outputImageId);
   if (existing != g_activeRuntime->imageAssets.end()) {
@@ -507,7 +507,7 @@ JSValueRef JsMomentumNativeExitGraphics(
   }
   if (updatedSurface.bitmapTouchedThisSession) {
     updatedSurface.bitmapMode = true;
-  } else if (outputAsset.gpuSceneBacked) {
+  } else if (outputAsset.sceneBacked) {
     updatedSurface.bitmapMode = false;
   }
   updatedSurface.bitmapTouchedThisSession = false;
@@ -554,7 +554,7 @@ JSValueRef JsMomentumNativePrepareGraphicsBitmap(
     surface.bitmapMode &&
     existing != surface.imageAssets.end() &&
     existing->second.loaded &&
-    !existing->second.gpuSceneBacked &&
+    !existing->second.sceneBacked &&
     surface.canvasImageSceneVersion == surface.sceneVersion;
 
   if (!canReuseBitmap) {
@@ -610,8 +610,8 @@ JSValueRef JsMomentumNativeCommitGraphicsBitmap(
   outputAsset.source = "__graphics_output__";
   outputAsset.path.clear();
   outputAsset.loaded = true;
-  outputAsset.gpuSceneBacked = false;
-  outputAsset.gpuScene.reset();
+  outputAsset.sceneBacked = false;
+  outputAsset.sceneSource.reset();
 
   surface.bitmapMode = true;
   surface.bitmapTouchedThisSession = true;

@@ -1,5 +1,4 @@
 #include "api_internal.h"
-#include "api_controller.cpp"
 
 #include <fstream>
 #include <iomanip>

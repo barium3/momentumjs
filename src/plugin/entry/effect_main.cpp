@@ -1,7 +1,9 @@
 #include "../model/momentum_types.h"
+#include "../model/controller_schema.h"
+#include "../momentum_effect_contract.h"
 #include "../api/api_internal.h"
 #include "../gpu/bitmap_gpu_backend.h"
-#include "../gpu/bitmap_gpu_plan.h"
+#include "../gpu/bitmap_draw_plan.h"
 #include "../render/render_core.h"
 #include "../runtime/runtime_core.h"
 #include "../runtime/runtime_internal.h"
@@ -14,6 +16,7 @@
 #include <atomic>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -26,23 +29,49 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace momentum {
 
 namespace {
 
 constexpr PF_OutFlags kMomentumBaseOutFlags =
+  PF_OutFlag_WIDE_TIME_INPUT |
   PF_OutFlag_PIX_INDEPENDENT |
   PF_OutFlag_DEEP_COLOR_AWARE |
   PF_OutFlag_CUSTOM_UI |
   PF_OutFlag_NON_PARAM_VARY |
+  PF_OutFlag_SEQUENCE_DATA_NEEDS_FLATTENING |
   PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
 constexpr PF_OutFlags2 kMomentumBaseOutFlags2 =
   PF_OutFlag2_SUPPORTS_QUERY_DYNAMIC_FLAGS |
   PF_OutFlag2_FLOAT_COLOR_AWARE |
   PF_OutFlag2_SUPPORTS_SMART_RENDER |
+  PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT |
+  PF_OutFlag2_I_MIX_GUID_DEPENDENCIES |
+  PF_OutFlag2_SUPPORTS_GET_FLATTENED_SEQUENCE_DATA |
+  PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
   PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+
+static_assert(
+  kMomentumBaseOutFlags == static_cast<PF_OutFlags>(MOMENTUM_EFFECT_OUT_FLAGS),
+  "C++ and PiPL out_flags contract diverged"
+);
+static_assert(
+  kMomentumBaseOutFlags2 == static_cast<PF_OutFlags2>(MOMENTUM_EFFECT_OUT_FLAGS2),
+  "C++ and PiPL out_flags2 contract diverged"
+);
+static_assert(
+  MOMENTUM_VERSION_PIPL == PF_VERSION(
+    MOMENTUM_VERSION_MAJOR,
+    MOMENTUM_VERSION_MINOR,
+    MOMENTUM_VERSION_BUG,
+    MOMENTUM_VERSION_STAGE,
+    MOMENTUM_VERSION_BUILD
+  ),
+  "C++ and PiPL effect versions diverged"
+);
 
 // AE does not reliably hot-refresh float slider valid bounds per effect instance.
 // Keep the hard valid range static and wide, then use slider_min/max plus plugin
@@ -50,25 +79,10 @@ constexpr PF_OutFlags2 kMomentumBaseOutFlags2 =
 constexpr double kStaticSliderValidMin = -1000000.0;
 constexpr double kStaticSliderValidMax = 1000000.0;
 constexpr PF_Precision kControllerSliderPrecision = PF_Precision_HUNDREDTHS;
+constexpr int kStaticSelectControllerChoiceCount = 32;
 
-std::uintptr_t GetEffectRefKey(PF_InData* in_data) {
-  return (in_data && in_data->effect_ref)
-    ? reinterpret_cast<std::uintptr_t>(in_data->effect_ref)
-    : 0;
-}
+using runtime_internal::ResolveEffectRuntimeKey;
 
-std::mutex gEffectInstanceRegistryMutex;
-std::unordered_map<std::uintptr_t, std::uint64_t> gEffectInstanceRegistry;
-std::mutex gEffectSyncedRevisionMutex;
-std::unordered_map<std::uintptr_t, A_long> gEffectSyncedRevisions;
-std::mutex gInstanceSyncedRevisionMutex;
-std::unordered_map<std::uint64_t, A_long> gInstanceSyncedRevisions;
-std::mutex gEffectSyncedControllerHashMutex;
-std::unordered_map<std::uintptr_t, std::string> gEffectSyncedControllerHashes;
-std::mutex gInstanceSyncedControllerHashMutex;
-std::unordered_map<std::uint64_t, std::string> gInstanceSyncedControllerHashes;
-std::mutex gPointOverlayStateMutex;
-std::unordered_map<std::uint64_t, int> gPointOverlayActiveSlots;
 AEGP_PluginID gAegpPluginId = 0;
 
 bool IsControllerParamIndex(PF_ParamIndex paramIndex);
@@ -80,8 +94,6 @@ void RegisterSyncedControllerHash(
   PF_ParamDef* params[],
   const std::string& controllerHash
 );
-void UnregisterSyncedControllerHash(PF_InData* in_data);
-std::uint64_t ResolveKnownInstanceId(PF_InData* in_data, A_long paramInstanceId = 0);
 A_long ReadSequenceSyncedRevision(PF_InData* in_data, PF_Handle handle);
 bool WriteSequenceSyncedRevision(PF_InData* in_data, PF_Handle handle, A_long revision);
 PF_Err SyncControllerParamValuesFromBundle(
@@ -92,50 +104,20 @@ PF_Err SyncControllerParamValuesFromBundle(
   const char* reason
 );
 
-std::uint64_t LookupRegisteredInstanceId(PF_InData* in_data) {
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey) {
-    return 0;
-  }
+std::uint64_t RegisterControllerInteractionChange(A_long instanceId);
+std::uint64_t ReadControllerInteractionGeneration(A_long instanceId);
 
-  const std::lock_guard<std::mutex> lock(gEffectInstanceRegistryMutex);
-  const auto it = gEffectInstanceRegistry.find(effectKey);
-  return it != gEffectInstanceRegistry.end() ? it->second : 0;
+std::uint64_t LookupRegisteredInstanceId(PF_InData* in_data) {
+  return GetEffectSessionInstanceId(ResolveEffectRuntimeKey(in_data));
 }
 
 void RegisterStableInstanceId(PF_InData* in_data, std::uint64_t instanceId) {
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey || instanceId == 0) {
-    return;
-  }
-
-  const std::lock_guard<std::mutex> lock(gEffectInstanceRegistryMutex);
-  gEffectInstanceRegistry[effectKey] = instanceId;
-}
-
-void UnregisterStableInstanceId(PF_InData* in_data) {
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey) {
-    return;
-  }
-
-  const std::lock_guard<std::mutex> lock(gEffectInstanceRegistryMutex);
-  gEffectInstanceRegistry.erase(effectKey);
+  const auto runtimeKey = ResolveEffectRuntimeKey(in_data);
+  SetEffectSessionInstanceId(runtimeKey, instanceId);
 }
 
 A_long LookupSyncedRevision(PF_InData* in_data, PF_ParamDef* params[]) {
-  A_long paramInstanceId = 0;
-  if (params && params[PARAM_INSTANCE_ID]) {
-    paramInstanceId = params[PARAM_INSTANCE_ID]->u.sd.value;
-  }
-  const std::uint64_t instanceId = ResolveKnownInstanceId(in_data, paramInstanceId);
-  if (instanceId != 0) {
-    const std::lock_guard<std::mutex> lock(gInstanceSyncedRevisionMutex);
-    const auto it = gInstanceSyncedRevisions.find(instanceId);
-    if (it != gInstanceSyncedRevisions.end()) {
-      return it->second;
-    }
-  }
+  (void)params;
 
   if (in_data && in_data->sequence_data) {
     const A_long sequenceRevision =
@@ -145,79 +127,26 @@ A_long LookupSyncedRevision(PF_InData* in_data, PF_ParamDef* params[]) {
     }
   }
 
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey) {
-    return -1;
-  }
-
-  const std::lock_guard<std::mutex> lock(gEffectSyncedRevisionMutex);
-  const auto it = gEffectSyncedRevisions.find(effectKey);
-  return it != gEffectSyncedRevisions.end() ? it->second : -1;
+  const auto runtimeKey = ResolveEffectRuntimeKey(in_data);
+  return GetEffectSessionSyncedRevision(runtimeKey);
 }
 
 void RegisterSyncedRevision(PF_InData* in_data, PF_ParamDef* params[], A_long revision) {
-  A_long paramInstanceId = 0;
-  if (params && params[PARAM_INSTANCE_ID]) {
-    paramInstanceId = params[PARAM_INSTANCE_ID]->u.sd.value;
-  }
-  const std::uint64_t instanceId = ResolveKnownInstanceId(in_data, paramInstanceId);
-  if (instanceId != 0) {
-    const std::lock_guard<std::mutex> lock(gInstanceSyncedRevisionMutex);
-    gInstanceSyncedRevisions[instanceId] = revision;
-  }
+  (void)params;
 
   if (in_data && in_data->sequence_data) {
     WriteSequenceSyncedRevision(in_data, in_data->sequence_data, revision);
   }
 
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey) {
-    return;
-  }
-
-  const std::lock_guard<std::mutex> lock(gEffectSyncedRevisionMutex);
-  gEffectSyncedRevisions[effectKey] = revision;
-}
-
-void UnregisterSyncedRevision(PF_InData* in_data) {
-  const std::uint64_t instanceId = ResolveKnownInstanceId(in_data);
-  if (instanceId != 0) {
-    const std::lock_guard<std::mutex> lock(gInstanceSyncedRevisionMutex);
-    gInstanceSyncedRevisions.erase(instanceId);
-  }
-
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey) {
-    return;
-  }
-
-  const std::lock_guard<std::mutex> lock(gEffectSyncedRevisionMutex);
-  gEffectSyncedRevisions.erase(effectKey);
+  const auto runtimeKey = ResolveEffectRuntimeKey(in_data);
+  SetEffectSessionSyncedRevision(runtimeKey, revision);
 }
 
 std::string LookupSyncedControllerHash(PF_InData* in_data, PF_ParamDef* params[]) {
-  std::uint64_t instanceId = 0;
-  A_long paramInstanceId = 0;
-  if (params && params[PARAM_INSTANCE_ID]) {
-    paramInstanceId = params[PARAM_INSTANCE_ID]->u.sd.value;
-  }
-  instanceId = ResolveKnownInstanceId(in_data, paramInstanceId);
-  if (instanceId != 0) {
-    const std::lock_guard<std::mutex> lock(gInstanceSyncedControllerHashMutex);
-    const auto it = gInstanceSyncedControllerHashes.find(instanceId);
-    if (it != gInstanceSyncedControllerHashes.end()) {
-      return it->second;
-    }
-  }
+  (void)params;
 
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey) {
-    return std::string();
-  }
-
-  const std::lock_guard<std::mutex> lock(gEffectSyncedControllerHashMutex);
-  const auto it = gEffectSyncedControllerHashes.find(effectKey);
-  return it != gEffectSyncedControllerHashes.end() ? it->second : std::string();
+  const auto runtimeKey = ResolveEffectRuntimeKey(in_data);
+  return GetEffectSessionControllerHash(runtimeKey);
 }
 
 void RegisterSyncedControllerHash(
@@ -225,87 +154,37 @@ void RegisterSyncedControllerHash(
   PF_ParamDef* params[],
   const std::string& controllerHash
 ) {
-  A_long paramInstanceId = 0;
-  if (params && params[PARAM_INSTANCE_ID]) {
-    paramInstanceId = params[PARAM_INSTANCE_ID]->u.sd.value;
-  }
-  const std::uint64_t instanceId = ResolveKnownInstanceId(in_data, paramInstanceId);
-  if (instanceId != 0) {
-    const std::lock_guard<std::mutex> lock(gInstanceSyncedControllerHashMutex);
-    gInstanceSyncedControllerHashes[instanceId] = controllerHash;
-  }
+  (void)params;
 
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey) {
+  const auto runtimeKey = ResolveEffectRuntimeKey(in_data);
+  SetEffectSessionControllerHash(runtimeKey, controllerHash);
+}
+
+void DiscardEffectRuntimeState(
+  runtime_internal::EffectRuntimeKey runtimeKey,
+  const char* reason
+) {
+  if (!runtimeKey) {
     return;
   }
-
-  const std::lock_guard<std::mutex> lock(gEffectSyncedControllerHashMutex);
-  gEffectSyncedControllerHashes[effectKey] = controllerHash;
+  ClearCachedSketchByKey(runtimeKey, reason);
 }
 
-void UnregisterSyncedControllerHash(PF_InData* in_data) {
-  const std::uint64_t instanceId = ResolveKnownInstanceId(in_data);
-  if (instanceId != 0) {
-    const std::lock_guard<std::mutex> lock(gInstanceSyncedControllerHashMutex);
-    gInstanceSyncedControllerHashes.erase(instanceId);
-  }
-
-  const std::uintptr_t effectKey = GetEffectRefKey(in_data);
-  if (!effectKey) {
-    return;
-  }
-
-  const std::lock_guard<std::mutex> lock(gEffectSyncedControllerHashMutex);
-  gEffectSyncedControllerHashes.erase(effectKey);
-}
-
-int ClampPointOverlaySlot(int slot) {
-  if (slot < 0) {
-    return 0;
-  }
-  if (slot >= kControllerPointSlotCount) {
-    return kControllerPointSlotCount - 1;
-  }
-  return slot;
-}
-
-void EnsureActivePointOverlaySlot(std::uint64_t instanceId) {
-  if (instanceId == 0) {
-    return;
-  }
-  const std::lock_guard<std::mutex> lock(gPointOverlayStateMutex);
-  gPointOverlayActiveSlots.emplace(instanceId, 0);
-}
-
-int GetActivePointOverlaySlot(std::uint64_t instanceId) {
-  if (instanceId == 0) {
-    return 0;
-  }
-  const std::lock_guard<std::mutex> lock(gPointOverlayStateMutex);
-  const auto it = gPointOverlayActiveSlots.find(instanceId);
-  return it != gPointOverlayActiveSlots.end() ? ClampPointOverlaySlot(it->second) : 0;
-}
-
-void SetActivePointOverlaySlot(std::uint64_t instanceId, int slot) {
-  if (instanceId == 0) {
-    return;
-  }
-  const std::lock_guard<std::mutex> lock(gPointOverlayStateMutex);
-  gPointOverlayActiveSlots[instanceId] = ClampPointOverlaySlot(slot);
-}
-
-void ClearActivePointOverlaySlot(std::uint64_t instanceId) {
-  if (instanceId == 0) {
-    return;
-  }
-  const std::lock_guard<std::mutex> lock(gPointOverlayStateMutex);
-  gPointOverlayActiveSlots.erase(instanceId);
-}
-
-void ClearAllActivePointOverlaySlots() {
-  const std::lock_guard<std::mutex> lock(gPointOverlayStateMutex);
-  gPointOverlayActiveSlots.clear();
+std::uint64_t ResolveRenderLineageIdentity(PF_InData* in_data, A_long instanceId) {
+  std::uint64_t hash = 1469598103934665603ULL;
+  auto mix = [&](std::uint64_t value) {
+    for (int byteIndex = 0; byteIndex < 8; ++byteIndex) {
+      hash ^= static_cast<std::uint8_t>((value >> (byteIndex * 8)) & 0xffU);
+      hash *= 1099511628211ULL;
+    }
+  };
+  // AE's render-callback reference is not a stable Effect identity and may
+  // change every frame, especially with threaded Smart Render. The live
+  // Sequence token is process-local and is rebound on Setup/Resetup, which
+  // keeps evaluator lanes reusable and duplicated Effects independent.
+  mix(static_cast<std::uint64_t>(ResolveEffectRuntimeKey(in_data)));
+  mix(static_cast<std::uint64_t>(static_cast<A_u_long>(instanceId)));
+  return hash ? hash : 1ULL;
 }
 
 long TimeValueToSketchFrame(
@@ -327,7 +206,6 @@ long TimeValueToSketchFrame(
 
 long ResolveControllerHistoryStartFrame(
   PF_InData* in_data,
-  std::uint64_t instanceId,
   PF_ParamIndex paramIndex
 ) {
   if (!in_data || paramIndex <= 0) {
@@ -335,8 +213,7 @@ long ResolveControllerHistoryStartFrame(
   }
 
   const double frameRate = ResolveSketchSimulationFrameRate(
-    in_data,
-    static_cast<A_long>(instanceId)
+    in_data
   );
   if (!(frameRate > 0.0)) {
     return 0;
@@ -379,19 +256,35 @@ long ResolveControllerHistoryStartFrame(
 
 void MarkControllerParamHistoryDirty(
   PF_InData* in_data,
-  std::uint64_t instanceId,
   PF_ParamIndex paramIndex,
-  const char* reason
+  const char* reason,
+  A_long explicitInstanceId = 0
 ) {
-  if (instanceId == 0 || !IsControllerParamIndex(paramIndex)) {
+  if (!IsControllerParamIndex(paramIndex)) {
     return;
   }
   const long historyStartFrame =
-    ResolveControllerHistoryStartFrame(in_data, instanceId, paramIndex);
-  MarkControllerHistoryDirty(
-    static_cast<std::uintptr_t>(instanceId),
-    historyStartFrame,
+    ResolveControllerHistoryStartFrame(in_data, paramIndex);
+  const A_long instanceId = explicitInstanceId > 0
+    ? explicitInstanceId
+    : static_cast<A_long>(LookupRegisteredInstanceId(in_data));
+  const std::uint64_t interactionGeneration =
+    RegisterControllerInteractionChange(instanceId);
+  InvalidateEffectPersistentRenderCaches(
+    ResolveRenderLineageIdentity(in_data, instanceId),
     reason
+  );
+  // Rendering owns an immutable controller timeline captured by PreRender, so
+  // UI changes never mutate or invalidate an unrelated render runtime. This
+  // event is retained as a diagnostic and AE rerender request only.
+  runtime_internal::AppendEffectRuntimeDiagnostic(
+    in_data,
+    "controller-history-dirty",
+    instanceId,
+    paramIndex,
+    historyStartFrame,
+    (reason ? std::string(reason) : std::string()) +
+      " interactionGeneration=" + std::to_string(interactionGeneration)
   );
 }
 
@@ -410,6 +303,20 @@ PF_LRect IntersectLongRect(const PF_LRect& a, const PF_LRect& b) {
   return result;
 }
 
+double ResolveDownsampleScale(const PF_RationalScale& scale) {
+  if (scale.num <= 0 || scale.den <= 0) {
+    return 1.0;
+  }
+  return static_cast<double>(scale.num) / static_cast<double>(scale.den);
+}
+
+A_long ScaleRenderDimension(A_long logicalSize, double scale) {
+  return std::max<A_long>(
+    1,
+    static_cast<A_long>(std::floor(static_cast<double>(std::max<A_long>(1, logicalSize)) * scale))
+  );
+}
+
 struct RenderInvocationInfo;
 
 void ApplyMomentumOutFlags(PF_OutData* out_data) {
@@ -421,26 +328,186 @@ void ApplyMomentumOutFlags(PF_OutData* out_data) {
 }
 
 struct RenderInvocationInfo {
+  // The invocation owns immutable PreRender inputs. Mutable evaluator/canvas
+  // state lives in one shared persistent frame lane derived from the stable
+  // live Sequence session + transport id. CPU and GPU are only executors.
+  std::uintptr_t runtimeKey = 0;
+  std::uint64_t lineageIdentity = 0;
+  std::uintptr_t preparationCacheKey = 0;
+  std::uintptr_t renderCacheKey = 0;
   A_long revision = 0;
   A_long instanceId = 0;
-  ControllerPoolState controllers;
+  long controllerTimelineTargetFrame = -1;
+  std::string controllerTimelineHash;
+  std::uint64_t controllerRequestGeneration = 0;
+  std::uint64_t controllerInteractionGeneration = 0;
+  double documentPrepareMs = 0.0;
+  double controllerTimelineMs = 0.0;
+  double dependencyMixMs = 0.0;
+  double preRenderTotalMs = 0.0;
   A_long canvasLeft = 0;
   A_long canvasTop = 0;
   A_long canvasWidth = 0;
   A_long canvasHeight = 0;
+  double downsampleScaleX = 1.0;
+  double downsampleScaleY = 1.0;
+  A_long renderCanvasWidth = 0;
+  A_long renderCanvasHeight = 0;
   A_long tileLeft = 0;
   A_long tileTop = 0;
   A_long tileRight = 0;
   A_long tileBottom = 0;
 };
 
-struct PointHandleDrawInfo {
-  int slot = -1;
-  PF_Point framePoint = {0, 0};
-  PF_FixedPoint layerPoint = {0, 0};
-  bool visible = false;
-  bool activeSelection = false;
-  bool activePreview = false;
+struct ControllerRenderRequestState {
+  std::string controllerHash;
+  std::uint64_t generation = 0;
+};
+
+struct ControllerInteractionState {
+  std::uint64_t generation = 0;
+};
+
+std::mutex gControllerRenderRequestMutex;
+std::unordered_map<std::uint64_t, ControllerRenderRequestState> gControllerRenderRequests;
+std::atomic<std::uint64_t> gNextControllerRenderGeneration{1};
+std::mutex gControllerInteractionMutex;
+std::unordered_map<A_long, ControllerInteractionState> gControllerInteractionStates;
+std::atomic<std::uint64_t> gNextControllerInteractionGeneration{1};
+
+std::uint64_t RegisterControllerInteractionChange(A_long instanceId) {
+  if (instanceId <= 0) {
+    return 0;
+  }
+  const std::uint64_t generation =
+    gNextControllerInteractionGeneration.fetch_add(1, std::memory_order_relaxed);
+  std::lock_guard<std::mutex> lock(gControllerInteractionMutex);
+  gControllerInteractionStates[instanceId].generation = generation;
+  if (gControllerInteractionStates.size() > 2048) {
+    for (auto it = gControllerInteractionStates.begin();
+         it != gControllerInteractionStates.end() &&
+           gControllerInteractionStates.size() > 1024;) {
+      if (it->first == instanceId) {
+        ++it;
+      } else {
+        it = gControllerInteractionStates.erase(it);
+      }
+    }
+  }
+  return generation;
+}
+
+std::uint64_t ReadControllerInteractionGeneration(A_long instanceId) {
+  if (instanceId <= 0) {
+    return 0;
+  }
+  std::lock_guard<std::mutex> lock(gControllerInteractionMutex);
+  const auto it = gControllerInteractionStates.find(instanceId);
+  return it == gControllerInteractionStates.end() ? 0 : it->second.generation;
+}
+
+void DiscardControllerInteractionState(A_long instanceId) {
+  if (instanceId <= 0) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(gControllerInteractionMutex);
+  gControllerInteractionStates.erase(instanceId);
+}
+
+std::uint64_t BuildControllerRenderRequestKey(
+  std::uint64_t lineageIdentity,
+  long targetFrame
+) {
+  std::uint64_t hash = lineageIdentity ? lineageIdentity : 1469598103934665603ULL;
+  const std::uint64_t frameBits = static_cast<std::uint64_t>(targetFrame);
+  for (int byteIndex = 0; byteIndex < 8; ++byteIndex) {
+    hash ^= static_cast<std::uint8_t>((frameBits >> (byteIndex * 8)) & 0xffU);
+    hash *= 1099511628211ULL;
+  }
+  return hash ? hash : 1ULL;
+}
+
+std::uint64_t RegisterControllerRenderRequest(
+  std::uint64_t lineageIdentity,
+  long targetFrame,
+  const std::string& controllerHash
+) {
+  const std::uint64_t requestKey =
+    BuildControllerRenderRequestKey(lineageIdentity, targetFrame);
+  std::lock_guard<std::mutex> lock(gControllerRenderRequestMutex);
+  ControllerRenderRequestState& state = gControllerRenderRequests[requestKey];
+  if (state.generation != 0 && state.controllerHash == controllerHash) {
+    return state.generation;
+  }
+  state.controllerHash = controllerHash;
+  state.generation = gNextControllerRenderGeneration.fetch_add(1);
+  const std::uint64_t generation = state.generation;
+  if (gControllerRenderRequests.size() > 2048) {
+    for (auto it = gControllerRenderRequests.begin();
+         it != gControllerRenderRequests.end() && gControllerRenderRequests.size() > 1024;) {
+      if (it->first == requestKey) {
+        ++it;
+      } else {
+        it = gControllerRenderRequests.erase(it);
+      }
+    }
+  }
+  return generation;
+}
+
+bool IsCurrentControllerRenderRequest(const RenderInvocationInfo& invocation) {
+  if (invocation.controllerRequestGeneration == 0) {
+    return true;
+  }
+  const std::uint64_t requestKey = BuildControllerRenderRequestKey(
+    invocation.lineageIdentity,
+    invocation.controllerTimelineTargetFrame
+  );
+  std::lock_guard<std::mutex> lock(gControllerRenderRequestMutex);
+  const auto it = gControllerRenderRequests.find(requestKey);
+  return it == gControllerRenderRequests.end() ||
+    (it->second.generation == invocation.controllerRequestGeneration &&
+      it->second.controllerHash == invocation.controllerTimelineHash);
+}
+
+bool IsLatestControllerInteraction(const RenderInvocationInfo& invocation) {
+  if (invocation.instanceId <= 0) {
+    return true;
+  }
+  return ReadControllerInteractionGeneration(invocation.instanceId) ==
+    invocation.controllerInteractionGeneration;
+}
+
+double ElapsedMilliseconds(std::chrono::steady_clock::time_point start) {
+  return std::chrono::duration<double, std::milli>(
+    std::chrono::steady_clock::now() - start
+  ).count();
+}
+
+std::uintptr_t NextRenderInvocationRuntimeKey() {
+  // Sequence session tokens are odd. Keep render invocation keys even so the
+  // two namespaces cannot alias in the process-local runtime registry.
+  static std::atomic<std::uintptr_t> nextKey{2};
+  std::uintptr_t key = nextKey.fetch_add(2, std::memory_order_relaxed);
+  if (key == 0) {
+    key = nextKey.fetch_add(2, std::memory_order_relaxed);
+  }
+  return key;
+}
+
+class ScopedRenderRuntime final {
+ public:
+  ScopedRenderRuntime()
+    : key_(NextRenderInvocationRuntimeKey()) {}
+
+  ~ScopedRenderRuntime() {
+    DiscardEffectRuntimeState(key_, "legacy-render-dispose");
+  }
+
+  std::uintptr_t key() const { return key_; }
+
+ private:
+  std::uintptr_t key_ = 0;
 };
 
 bool TryMapSliderParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot);
@@ -448,15 +515,7 @@ bool TryMapAngleParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot);
 bool TryMapAngleValueParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot);
 bool TryMapAngleUiParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot);
 bool TryMapColorParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot);
-bool TryMapColorValueParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot);
-RuntimeControllerSlotKind ResolveControllerSlotKind(const RuntimeSketchBundle& bundle, int slot);
-bool SlotUsesAngleController(const RuntimeSketchBundle& bundle, int slot);
-int ResolveLogicalSlotForDenseControllerOrdinal(
-  const RuntimeSketchBundle& bundle,
-  RuntimeControllerSlotKind expectedKind,
-  int denseOrdinal
-);
-DRAWBOT_ColorRGBA MakePointHandleColor(float red, float green, float blue, float alpha);
+DRAWBOT_ColorRGBA MakeCustomUiColor(float red, float green, float blue, float alpha);
 
 RuntimeSketchBundle ReadEffectRuntimeSketchBundle(
   PF_InData* in_data,
@@ -470,22 +529,12 @@ RuntimeSketchBundle ReadEffectRuntimeSketchBundle(
   return runtime_internal::ReadRuntimeSketchBundleForEffect(in_data, instanceId, errorMessage);
 }
 
-RuntimeSketchBundle ReadCurrentRunRuntimeSketchBundle(std::string* errorMessage) {
-  return runtime_internal::ReadRuntimeSketchBundle(errorMessage);
-}
-
 PF_Err SyncSequenceRuntimeSnapshotFromLocalFiles(
   PF_InData* in_data,
   PF_OutData* out_data,
   PF_ParamDef* params[]
 );
 
-constexpr A_long kPointHandleHitSlop = 24;
-constexpr A_long kPointHandleMinVisibleArm = 8;
-constexpr A_long kPointHandleCenterOuterHalfSize = 5;
-constexpr A_long kPointHandleCenterInnerHalfSize = 2;
-constexpr A_long kPointHandleArmOuterHalfSize = 3;
-constexpr A_long kPointHandleArmInnerHalfSize = 1;
 constexpr A_short kAngleControlUiWidth = 112;
 constexpr A_short kAngleControlUiHeight = 60;
 constexpr float kAngleControlRingStrokeWidth = 1.75f;
@@ -820,13 +869,6 @@ AngleUiDragTarget ResolveAngleUiHitTarget(
   return AngleUiDragTarget::kNone;
 }
 
-std::string FormatAngleUiValueText(double degrees) {
-  const double safeDegrees = SanitizeAngleUiDegrees(degrees);
-  std::ostringstream stream;
-  stream << std::fixed << std::setprecision(1) << safeDegrees << "\xC2\xB0";
-  return stream.str();
-}
-
 std::vector<DRAWBOT_UTF16Char> MakeDrawbotUtf16String(const std::string& text) {
   std::vector<DRAWBOT_UTF16Char> utf16;
   utf16.reserve(text.size() + 1);
@@ -881,19 +923,23 @@ void ClearAngleUiDragState(PF_EventExtra* extra) {
   extra->u.do_click.continue_refcon[3] = 0;
 }
 
-void ContinueAngleUiDrag(
+void UpdateAngleUiDragState(
   PF_EventExtra* extra,
   int slot,
   AngleUiDragTarget dragTarget,
   double trackedValue,
   bool hasTrackedValue,
   double anchorDegrees,
-  bool hasAnchorDegrees
+  bool hasAnchorDegrees,
+  bool isDragCallback
 ) {
   if (!extra) {
     return;
   }
-  if (extra->u.do_click.last_time) {
+  // AE defines last_time only for PF_Event_DRAG. Reading it during the
+  // initiating PF_Event_DO_CLICK observes unspecified data and can cancel the
+  // drag before AE has a chance to send the first drag callback.
+  if (isDragCallback && extra->u.do_click.last_time) {
     ClearAngleUiDragState(extra);
     return;
   }
@@ -906,293 +952,10 @@ void ContinueAngleUiDrag(
     EncodeAngleUiDoubleValue(anchorDegrees, hasAnchorDegrees);
 }
 
-void FinalizeControllerState(ControllerPoolState* state);
-void PopulateControllerStateFromParamArray(
-  PF_InData* in_data,
-  PF_ParamDef* params[],
-  ControllerPoolState* state
-);
-double ClampAndSnapSliderValue(double value, const RuntimeSliderControllerSpec& config);
-RuntimeSliderControllerSpec ResolveSliderControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-);
-RuntimeAngleControllerSpec ResolveAngleControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-);
-RuntimeColorControllerSpec ResolveColorControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-);
-RuntimeCheckboxControllerSpec ResolveCheckboxControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-);
-int ClampSelectControllerIndex(int value, const RuntimeSelectControllerSpec& config);
-RuntimeSelectControllerSpec ResolveSelectControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-);
-ControllerPointValue ResolvePointControllerDefaultValue(
-  const RuntimeSketchBundle& bundle,
-  int slot
-);
-void PopulateControllerStateFromBundleDefaults(
-  const RuntimeSketchBundle& bundle,
-  ControllerPoolState* state
-);
-PF_Err CheckoutControllerState(PF_InData* in_data, ControllerPoolState* state);
 std::uint64_t ResolveStableInstanceId(PF_InData* in_data, A_long paramInstanceId = 0);
-std::uint64_t ResolveKnownInstanceId(PF_InData* in_data, A_long paramInstanceId);
-
-PF_Err ResolveControllerState(
-  PF_InData* in_data,
-  PF_OutData* out_data,
-  PF_ParamDef* params[],
-  ControllerPoolState* state
-) {
-  (void)out_data;
-  if (!state) {
-    return PF_Err_BAD_CALLBACK_PARAM;
-  }
-
-  if (params) {
-    PopulateControllerStateFromParamArray(in_data, params, state);
-  } else {
-    PF_Err err = CheckoutControllerState(in_data, state);
-    if (err != PF_Err_NONE) {
-      return err;
-    }
-  }
-  return PF_Err_NONE;
-}
-
-void SyncLiveControllerStateFromParams(
-  PF_InData* in_data,
-  PF_OutData* out_data,
-  PF_ParamDef* params[],
-  bool trustAngles = false,
-  bool trustColors = false,
-  bool trustSelects = false
-) {
-  if (!in_data || !params) {
-    return;
-  }
-
-  const A_long paramInstanceId =
-    params[PARAM_INSTANCE_ID] ? params[PARAM_INSTANCE_ID]->u.sd.value : 0;
-  const std::uint64_t instanceId = ResolveKnownInstanceId(in_data, paramInstanceId);
-  if (instanceId == 0) {
-    return;
-  }
-
-  std::string bundleError;
-  const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
-  ControllerPoolState mergedState;
-  if (!GetLiveControllerState(static_cast<std::uintptr_t>(instanceId), &mergedState)) {
-    PopulateControllerStateFromBundleDefaults(bundle, &mergedState);
-  }
-
-  ControllerPoolState paramState;
-  if (ResolveControllerState(in_data, out_data, params, &paramState) == PF_Err_NONE) {
-    mergedState.sliders = paramState.sliders;
-    mergedState.checkboxes = paramState.checkboxes;
-    mergedState.points = paramState.points;
-    if (trustAngles) {
-      mergedState.angles = paramState.angles;
-    }
-    if (trustColors) {
-      mergedState.colors = paramState.colors;
-    }
-    if (trustSelects) {
-      mergedState.selects = paramState.selects;
-    }
-    FinalizeControllerState(&mergedState);
-    UpdateLiveControllerState(static_cast<std::uintptr_t>(instanceId), mergedState);
-  }
-}
-
-void PopulateControllerStateFromBundleDefaults(
-  const RuntimeSketchBundle& bundle,
-  ControllerPoolState* state
-) {
-  if (!state) {
-    return;
-  }
-
-  *state = ControllerPoolState();
-
-  int sliderSlot = 0;
-  int angleSlot = 0;
-  int colorSlot = 0;
-  int checkboxSlot = 0;
-  int selectSlot = 0;
-  int pointSlot = 0;
-  for (int logicalSlot = 0; logicalSlot < kControllerSlotCount; ++logicalSlot) {
-    const RuntimeControllerSlotKind kind = ResolveControllerSlotKind(bundle, logicalSlot);
-    if (kind == RuntimeControllerSlotKind::kSlider) {
-      if (sliderSlot < kControllerSliderSlotCount) {
-        const RuntimeSliderControllerSpec config =
-          ResolveSliderControllerSpecWithDefaults(bundle, logicalSlot);
-        state->sliders[static_cast<std::size_t>(sliderSlot)].value =
-          ClampAndSnapSliderValue(config.defaultValue, config);
-      }
-      sliderSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kAngle) {
-      if (angleSlot < kControllerAngleSlotCount) {
-        const RuntimeAngleControllerSpec config =
-          ResolveAngleControllerSpecWithDefaults(bundle, logicalSlot);
-        state->angles[static_cast<std::size_t>(angleSlot)].degrees = config.defaultValue;
-      }
-      angleSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kColor) {
-      if (colorSlot < kControllerColorSlotCount) {
-        state->colors[static_cast<std::size_t>(colorSlot)] =
-          ResolveColorControllerSpecWithDefaults(bundle, logicalSlot).defaultValue;
-      }
-      colorSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kCheckbox) {
-      if (checkboxSlot < kControllerCheckboxSlotCount) {
-        const RuntimeCheckboxControllerSpec config =
-          ResolveCheckboxControllerSpecWithDefaults(bundle, logicalSlot);
-        state->checkboxes[static_cast<std::size_t>(checkboxSlot)].checked = config.defaultValue;
-      }
-      checkboxSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kSelect) {
-      if (selectSlot < kControllerSelectSlotCount) {
-        const RuntimeSelectControllerSpec config =
-          ResolveSelectControllerSpecWithDefaults(bundle, logicalSlot);
-        state->selects[static_cast<std::size_t>(selectSlot)].index =
-          ClampSelectControllerIndex(config.defaultValue, config);
-      }
-      selectSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kPoint) {
-      if (pointSlot < kControllerPointSlotCount) {
-        state->points[static_cast<std::size_t>(pointSlot)] =
-          ResolvePointControllerDefaultValue(bundle, logicalSlot);
-      }
-      pointSlot += 1;
-    }
-  }
-
-  FinalizeControllerState(state);
-}
-
-void SyncLiveControllerStateFromBundle(
-  PF_InData* in_data,
-  PF_ParamDef* params[],
-  const RuntimeSketchBundle& bundle
-) {
-  if (!in_data || !params) {
-    return;
-  }
-
-  const A_long paramInstanceId =
-    params[PARAM_INSTANCE_ID] ? params[PARAM_INSTANCE_ID]->u.sd.value : 0;
-  const std::uint64_t instanceId = ResolveKnownInstanceId(in_data, paramInstanceId);
-  if (instanceId == 0) {
-    return;
-  }
-
-  ControllerPoolState state;
-  PopulateControllerStateFromBundleDefaults(bundle, &state);
-  UpdateLiveControllerState(static_cast<std::uintptr_t>(instanceId), state);
-}
-
-double FixedToDouble(PF_Fixed value) {
-  return static_cast<double>(value) / 65536.0;
-}
 
 PF_Fixed DoubleToFixed(double value) {
   return static_cast<PF_Fixed>(value * 65536.0);
-}
-
-std::string BuildControllerStateHash(const ControllerPoolState& state) {
-  std::ostringstream stream;
-  stream << std::fixed << std::setprecision(4);
-  for (const ControllerSliderValue& slider : state.sliders) {
-    stream << "s:" << slider.value << ';';
-  }
-  for (const ControllerAngleValue& angle : state.angles) {
-    stream << "a:" << angle.degrees << ';';
-  }
-  for (const ControllerColorValue& color : state.colors) {
-    stream << "c:" << color.r << ',' << color.g << ',' << color.b << ',' << color.a << ';';
-  }
-  for (const ControllerCheckboxValue& checkbox : state.checkboxes) {
-    stream << "b:" << (checkbox.checked ? 1 : 0) << ';';
-  }
-  for (const ControllerSelectValue& select : state.selects) {
-    stream << "o:" << select.index << ';';
-  }
-  for (const ControllerPointValue& point : state.points) {
-    stream << "t:" << point.x << ',' << point.y << ';';
-  }
-  return stream.str();
-}
-
-std::string DefaultSliderControllerLabel(int slot) {
-  return "Slider " + std::to_string(slot + 1);
-}
-
-std::string DefaultAngleControllerLabel(int slot) {
-  return "Angle " + std::to_string(slot + 1);
-}
-
-std::string DefaultColorControllerLabel(int slot) {
-  return "Color " + std::to_string(slot + 1);
-}
-
-std::string DefaultCheckboxControllerLabel(int slot) {
-  return "Checkbox " + std::to_string(slot + 1);
-}
-
-std::string DefaultSelectControllerLabel(int slot) {
-  return "Select " + std::to_string(slot + 1);
-}
-
-std::string DefaultPointControllerLabel(int slot) {
-  return "Point " + std::to_string(slot + 1);
-}
-
-std::string DefaultControllerLabelForKind(RuntimeControllerSlotKind kind, int slot) {
-  switch (kind) {
-    case RuntimeControllerSlotKind::kSlider: return DefaultSliderControllerLabel(slot);
-    case RuntimeControllerSlotKind::kAngle: return DefaultAngleControllerLabel(slot);
-    case RuntimeControllerSlotKind::kColor: return DefaultColorControllerLabel(slot);
-    case RuntimeControllerSlotKind::kCheckbox: return DefaultCheckboxControllerLabel(slot);
-    case RuntimeControllerSlotKind::kSelect: return DefaultSelectControllerLabel(slot);
-    case RuntimeControllerSlotKind::kPoint: return DefaultPointControllerLabel(slot);
-    default: return "Controller " + std::to_string(slot + 1);
-  }
-}
-
-const char* ControllerSlotKindTraceName(RuntimeControllerSlotKind kind) {
-  switch (kind) {
-    case RuntimeControllerSlotKind::kSlider: return "slider";
-    case RuntimeControllerSlotKind::kAngle: return "angle";
-    case RuntimeControllerSlotKind::kColor: return "color";
-    case RuntimeControllerSlotKind::kCheckbox: return "checkbox";
-    case RuntimeControllerSlotKind::kSelect: return "select";
-    case RuntimeControllerSlotKind::kPoint: return "point";
-    default: return "none";
-  }
 }
 
 A_Err EnsureRegisteredWithAEGP(PF_InData* in_data) {
@@ -1213,398 +976,15 @@ A_Err EnsureRegisteredWithAEGP(PF_InData* in_data) {
   return utilitySuite->AEGP_RegisterWithAEGP(NULL, "Momentum", &gAegpPluginId);
 }
 
-const RuntimeControllerSlotSpec* FindControllerSlotSpec(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  if (slot < 0 || static_cast<std::size_t>(slot) >= bundle.controllerSlots.size()) {
-    return NULL;
-  }
-  return &bundle.controllerSlots[static_cast<std::size_t>(slot)];
-}
-
-RuntimeControllerSlotKind ResolveControllerSlotKind(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  const RuntimeControllerSlotSpec* slotSpec = FindControllerSlotSpec(bundle, slot);
-  return slotSpec ? slotSpec->kind : RuntimeControllerSlotKind::kNone;
-}
-
-std::string SanitizeControllerLabel(
-  std::string label,
-  const std::string& fallback
-) {
-  for (char& ch : label) {
-    if (ch == '\r' || ch == '\n' || ch == '\t') {
-      ch = ' ';
-    }
-  }
-  const std::size_t first = label.find_first_not_of(' ');
-  if (first == std::string::npos) {
-    return fallback;
-  }
-  const std::size_t last = label.find_last_not_of(' ');
-  label = label.substr(first, last - first + 1);
-  return label.empty() ? fallback : label;
-}
-
-std::string ResolveControllerSlotLabel(
-  const RuntimeSketchBundle& bundle,
-  int slot,
-  RuntimeControllerSlotKind expectedKind
-) {
-  const RuntimeControllerSlotSpec* slotSpec = FindControllerSlotSpec(bundle, slot);
-  const std::string fallback = DefaultControllerLabelForKind(expectedKind, slot);
-  if (!slotSpec || slotSpec->kind != expectedKind) {
-    return fallback;
-  }
-  return SanitizeControllerLabel(slotSpec->label, fallback);
-}
-
-std::string BuildBundleControllerSummary(
-  const RuntimeSketchBundle& bundle
-) {
+std::string BuildStaticSelectControllerPopupItems() {
   std::ostringstream stream;
-  stream << std::fixed << std::setprecision(3);
-  std::size_t sliderCount = 0;
-  std::size_t angleCount = 0;
-  std::size_t colorCount = 0;
-  std::size_t checkboxCount = 0;
-  std::size_t selectCount = 0;
-  std::size_t pointCount = 0;
-  for (const RuntimeControllerSlotSpec& slot : bundle.controllerSlots) {
-    if (slot.kind == RuntimeControllerSlotKind::kSlider) {
-      sliderCount += 1;
-    } else if (slot.kind == RuntimeControllerSlotKind::kAngle) {
-      angleCount += 1;
-    } else if (slot.kind == RuntimeControllerSlotKind::kColor) {
-      colorCount += 1;
-    } else if (slot.kind == RuntimeControllerSlotKind::kCheckbox) {
-      checkboxCount += 1;
-    } else if (slot.kind == RuntimeControllerSlotKind::kSelect) {
-      selectCount += 1;
-    } else if (slot.kind == RuntimeControllerSlotKind::kPoint) {
-      pointCount += 1;
-    }
-  }
-  stream
-    << "slot_count=" << bundle.controllerSlots.size()
-    << " slider_count=" << sliderCount
-    << " angle_count=" << angleCount
-    << " color_count=" << colorCount
-    << " checkbox_count=" << checkboxCount
-    << " select_count=" << selectCount
-    << " point_count=" << pointCount;
-
-  if (!bundle.controllerSlots.empty()) {
-    stream << " slots=";
-    for (std::size_t index = 0; index < bundle.controllerSlots.size(); ++index) {
-      if (index > 0) {
-        stream << '|';
-      }
-      const RuntimeControllerSlotSpec& slot = bundle.controllerSlots[index];
-      stream << index << ':' << ControllerSlotKindTraceName(slot.kind);
-      if (!slot.id.empty()) {
-        stream << '#' << slot.id;
-      }
-      stream << ':';
-      if (slot.kind == RuntimeControllerSlotKind::kSlider) {
-        stream
-          << ResolveControllerSlotLabel(bundle, static_cast<int>(index), RuntimeControllerSlotKind::kSlider)
-          << '@'
-          << slot.slider.defaultValue
-          << '['
-          << slot.slider.minValue
-          << ','
-          << slot.slider.maxValue
-          << ']';
-      } else if (slot.kind == RuntimeControllerSlotKind::kAngle) {
-        stream
-          << ResolveControllerSlotLabel(bundle, static_cast<int>(index), RuntimeControllerSlotKind::kAngle)
-          << '@'
-          << slot.angle.defaultValue;
-      } else if (slot.kind == RuntimeControllerSlotKind::kColor) {
-        stream
-          << ResolveControllerSlotLabel(bundle, static_cast<int>(index), RuntimeControllerSlotKind::kColor)
-          << '@'
-          << slot.color.defaultValue.r << ','
-          << slot.color.defaultValue.g << ','
-          << slot.color.defaultValue.b << ','
-          << slot.color.defaultValue.a;
-      } else if (slot.kind == RuntimeControllerSlotKind::kCheckbox) {
-        stream
-          << ResolveControllerSlotLabel(bundle, static_cast<int>(index), RuntimeControllerSlotKind::kCheckbox)
-          << '@'
-          << (slot.checkbox.defaultValue ? "true" : "false");
-      } else if (slot.kind == RuntimeControllerSlotKind::kSelect) {
-        stream
-          << ResolveControllerSlotLabel(bundle, static_cast<int>(index), RuntimeControllerSlotKind::kSelect)
-          << '@'
-          << slot.select.defaultValue
-          << '['
-          << slot.select.options.size()
-          << ']';
-      } else if (slot.kind == RuntimeControllerSlotKind::kPoint) {
-        stream
-          << ResolveControllerSlotLabel(bundle, static_cast<int>(index), RuntimeControllerSlotKind::kPoint)
-          << '@'
-          << slot.point.defaultValue.x
-          << ','
-          << slot.point.defaultValue.y;
-      }
-    }
-  }
-
-  return stream.str();
-}
-
-RuntimeSliderControllerSpec ResolveSliderControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  RuntimeSliderControllerSpec config;
-  const RuntimeControllerSlotSpec* slotSpec = FindControllerSlotSpec(bundle, slot);
-  if (!slotSpec || slotSpec->kind != RuntimeControllerSlotKind::kSlider) {
-    return config;
-  }
-  config = slotSpec->slider;
-  config.label = ResolveControllerSlotLabel(bundle, slot, RuntimeControllerSlotKind::kSlider);
-  if (!std::isfinite(config.minValue) || std::isnan(config.minValue)) {
-    config.minValue = 0.0;
-  }
-  if (!std::isfinite(config.maxValue) || std::isnan(config.maxValue)) {
-    config.maxValue = 100.0;
-  }
-  if (!std::isfinite(config.step) || std::isnan(config.step)) {
-    config.step = 0.0;
-  }
-  if (!config.hasDefaultValue || !std::isfinite(config.defaultValue) || std::isnan(config.defaultValue)) {
-    config.defaultValue = config.minValue;
-  }
-  return config;
-}
-
-RuntimeAngleControllerSpec ResolveAngleControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  RuntimeAngleControllerSpec config;
-  const RuntimeControllerSlotSpec* slotSpec = FindControllerSlotSpec(bundle, slot);
-  if (!slotSpec || slotSpec->kind != RuntimeControllerSlotKind::kAngle) {
-    return config;
-  }
-  config = slotSpec->angle;
-  config.label = ResolveControllerSlotLabel(bundle, slot, RuntimeControllerSlotKind::kAngle);
-  if (!config.hasDefaultValue || !std::isfinite(config.defaultValue) || std::isnan(config.defaultValue)) {
-    config.defaultValue = 0.0;
-  }
-  return config;
-}
-
-double ClampColorComponent(double value, double fallbackValue) {
-  const double safe = std::isfinite(value) && !std::isnan(value) ? value : fallbackValue;
-  return std::max(0.0, std::min(1.0, safe));
-}
-
-unsigned char ColorComponentToByte(double value, double fallbackValue) {
-  return static_cast<unsigned char>(std::lround(ClampColorComponent(value, fallbackValue) * 255.0));
-}
-
-RuntimeColorControllerSpec ResolveColorControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  RuntimeColorControllerSpec config;
-  const RuntimeControllerSlotSpec* slotSpec = FindControllerSlotSpec(bundle, slot);
-  if (!slotSpec || slotSpec->kind != RuntimeControllerSlotKind::kColor) {
-    return config;
-  }
-  config = slotSpec->color;
-  config.label = ResolveControllerSlotLabel(bundle, slot, RuntimeControllerSlotKind::kColor);
-  if (!config.hasDefaultValue) {
-    config.defaultValue = ControllerColorValue();
-  }
-  config.defaultValue.r = ClampColorComponent(config.defaultValue.r, 1.0);
-  config.defaultValue.g = ClampColorComponent(config.defaultValue.g, 1.0);
-  config.defaultValue.b = ClampColorComponent(config.defaultValue.b, 1.0);
-  config.defaultValue.a = ClampColorComponent(config.defaultValue.a, 1.0);
-  return config;
-}
-
-RuntimeCheckboxControllerSpec ResolveCheckboxControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  RuntimeCheckboxControllerSpec config;
-  const RuntimeControllerSlotSpec* slotSpec = FindControllerSlotSpec(bundle, slot);
-  if (!slotSpec || slotSpec->kind != RuntimeControllerSlotKind::kCheckbox) {
-    return config;
-  }
-  config = slotSpec->checkbox;
-  config.label = ResolveControllerSlotLabel(bundle, slot, RuntimeControllerSlotKind::kCheckbox);
-  if (!config.hasDefaultValue) {
-    config.defaultValue = false;
-  }
-  return config;
-}
-
-int ClampSelectControllerIndex(int value, const RuntimeSelectControllerSpec& config) {
-  const int optionCount = std::max<int>(1, static_cast<int>(config.options.size()));
-  if (value < 0) {
-    return 0;
-  }
-  if (value >= optionCount) {
-    return optionCount - 1;
-  }
-  return value;
-}
-
-RuntimeSelectControllerSpec ResolveSelectControllerSpecWithDefaults(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  RuntimeSelectControllerSpec config;
-  const RuntimeControllerSlotSpec* slotSpec = FindControllerSlotSpec(bundle, slot);
-  if (!slotSpec || slotSpec->kind != RuntimeControllerSlotKind::kSelect) {
-    return config;
-  }
-  config = slotSpec->select;
-  config.label = ResolveControllerSlotLabel(bundle, slot, RuntimeControllerSlotKind::kSelect);
-  for (std::size_t index = 0; index < config.options.size(); index += 1) {
-    config.options[index].label =
-      SanitizeControllerLabel(config.options[index].label, "Option " + std::to_string(index + 1));
-  }
-  if (config.options.empty()) {
-    RuntimeSelectControllerOptionSpec option;
-    option.label = "Option 1";
-    config.options.push_back(option);
-  }
-  if (!config.hasDefaultValue) {
-    config.defaultValue = 0;
-  }
-  config.defaultValue = ClampSelectControllerIndex(config.defaultValue, config);
-  return config;
-}
-
-std::string BuildSelectControllerPopupItems(const RuntimeSelectControllerSpec& config) {
-  std::ostringstream stream;
-  for (std::size_t index = 0; index < config.options.size(); index += 1) {
+  for (int index = 0; index < kStaticSelectControllerChoiceCount; ++index) {
     if (index > 0) {
       stream << '|';
     }
-    std::string label = config.options[index].label.empty()
-      ? "Option " + std::to_string(index + 1)
-      : config.options[index].label;
-    for (char& ch : label) {
-      if (ch == '|') {
-        ch = '/';
-      } else if (ch == '\r' || ch == '\n' || ch == '\t') {
-        ch = ' ';
-      }
-    }
-    stream << label;
+    stream << "Option " << (index + 1);
   }
   return stream.str();
-}
-
-double ClampAndSnapSliderValue(
-  double value,
-  const RuntimeSliderControllerSpec& config
-) {
-  double safeMin = std::isfinite(config.minValue) && !std::isnan(config.minValue)
-    ? config.minValue
-    : 0.0;
-  double safeMax = std::isfinite(config.maxValue) && !std::isnan(config.maxValue)
-    ? config.maxValue
-    : 100.0;
-  if (safeMax < safeMin) {
-    const double swap = safeMin;
-    safeMin = safeMax;
-    safeMax = swap;
-  }
-
-  double mapped = std::isfinite(value) && !std::isnan(value) ? value : safeMin;
-  if (mapped < safeMin) mapped = safeMin;
-  if (mapped > safeMax) mapped = safeMax;
-
-  const double step = std::isfinite(config.step) && !std::isnan(config.step) ? config.step : 0.0;
-  if (step > 0.0) {
-    mapped = std::floor((mapped - safeMin) / step) * step + safeMin;
-    if (mapped < safeMin) mapped = safeMin;
-    if (mapped > safeMax) mapped = safeMax;
-  }
-
-  return mapped;
-}
-
-ControllerPointValue ResolvePointControllerDefaultValue(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  const RuntimeControllerSlotSpec* slotSpec = FindControllerSlotSpec(bundle, slot);
-  if (!slotSpec ||
-      slotSpec->kind != RuntimeControllerSlotKind::kPoint ||
-      !slotSpec->point.hasDefaultValue) {
-    return ControllerPointValue();
-  }
-  return slotSpec->point.defaultValue;
-}
-
-bool SlotUsesSliderController(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  return ResolveControllerSlotKind(bundle, slot) == RuntimeControllerSlotKind::kSlider;
-}
-
-bool SlotUsesAngleController(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  return ResolveControllerSlotKind(bundle, slot) == RuntimeControllerSlotKind::kAngle;
-}
-
-int ResolveDenseControllerOrdinal(
-  const RuntimeSketchBundle& bundle,
-  RuntimeControllerSlotKind expectedKind,
-  int logicalSlot
-) {
-  if (logicalSlot < 0 || logicalSlot >= kControllerSlotCount) {
-    return -1;
-  }
-  int denseOrdinal = 0;
-  for (int slot = 0; slot < kControllerSlotCount; ++slot) {
-    if (ResolveControllerSlotKind(bundle, slot) != expectedKind) {
-      continue;
-    }
-    if (slot == logicalSlot) {
-      return denseOrdinal;
-    }
-    denseOrdinal += 1;
-  }
-  return -1;
-}
-
-int ResolveLogicalSlotForDenseControllerOrdinal(
-  const RuntimeSketchBundle& bundle,
-  RuntimeControllerSlotKind expectedKind,
-  int denseOrdinal
-) {
-  if (denseOrdinal < 0) {
-    return -1;
-  }
-  int currentOrdinal = 0;
-  for (int logicalSlot = 0; logicalSlot < kControllerSlotCount; ++logicalSlot) {
-    if (ResolveControllerSlotKind(bundle, logicalSlot) != expectedKind) {
-      continue;
-    }
-    if (currentOrdinal == denseOrdinal) {
-      return logicalSlot;
-    }
-    currentOrdinal += 1;
-  }
-  return -1;
 }
 
 int ResolveAngleParamSlotForLogicalSlot(
@@ -1641,47 +1021,12 @@ int ResolveLogicalSlotForControllerParamSlot(
   return ResolveControllerSlotKind(bundle, paramSlot) == kind ? paramSlot : -1;
 }
 
-bool SlotUsesColorController(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  return ResolveControllerSlotKind(bundle, slot) == RuntimeControllerSlotKind::kColor;
-}
-
-bool SlotUsesCheckboxController(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  return ResolveControllerSlotKind(bundle, slot) == RuntimeControllerSlotKind::kCheckbox;
-}
-
-bool SlotUsesSelectController(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  return ResolveControllerSlotKind(bundle, slot) == RuntimeControllerSlotKind::kSelect;
-}
-
-bool SlotUsesPointController(
-  const RuntimeSketchBundle& bundle,
-  int slot
-) {
-  return ResolveControllerSlotKind(bundle, slot) == RuntimeControllerSlotKind::kPoint;
-}
-
 void CopyParamName(PF_ParamDef* def, const std::string& name) {
   if (!def) {
     return;
   }
   std::strncpy(def->PF_DEF_NAME, name.c_str(), PF_MAX_EFFECT_PARAM_NAME_LEN);
   def->PF_DEF_NAME[PF_MAX_EFFECT_PARAM_NAME_LEN] = '\0';
-}
-
-void FinalizeControllerState(ControllerPoolState* state) {
-  if (!state) {
-    return;
-  }
-  state->stateHash = BuildControllerStateHash(*state);
 }
 
 void ResolveSafeSliderUiRange(
@@ -1737,7 +1082,20 @@ bool IsColorArbRefcon(void* refconPV) {
   return refconPV == &gColorArbRefconTag;
 }
 
+ControllerColorValue MakeUnsetColorValue() {
+  ControllerColorValue color;
+  color.a = -1.0;
+  return color;
+}
+
+bool IsUnsetColorValue(const ControllerColorValue& color) {
+  return std::isfinite(color.a) && !std::isnan(color.a) && color.a < 0.0;
+}
+
 ControllerColorValue SanitizeColorValue(const ControllerColorValue& color) {
+  if (IsUnsetColorValue(color)) {
+    return MakeUnsetColorValue();
+  }
   ControllerColorValue safe = color;
   if (!std::isfinite(safe.r) || std::isnan(safe.r)) safe.r = 1.0;
   if (!std::isfinite(safe.g) || std::isnan(safe.g)) safe.g = 1.0;
@@ -1771,7 +1129,7 @@ PF_Err AllocateColorArbHandle(
 }
 
 ControllerColorValue ReadColorArbHandle(PF_InData* in_data, PF_ArbitraryH arbH) {
-  ControllerColorValue color;
+  ControllerColorValue color = MakeUnsetColorValue();
   if (!in_data || !arbH) {
     return color;
   }
@@ -1807,7 +1165,12 @@ ControllerColorValue ResolveColorControllerValueFromParams(
   if (!colorParam) {
     return ControllerColorValue();
   }
-  return ReadColorArbHandle(in_data, colorParam->u.arb_d.value);
+  const ControllerColorValue storedColor =
+    ReadColorArbHandle(in_data, colorParam->u.arb_d.value);
+  if (IsUnsetColorValue(storedColor)) {
+    return ResolveColorControllerSpecWithDefaults(bundle, slot).defaultValue;
+  }
+  return storedColor;
 }
 
 void WriteAngleControllerValueToParams(
@@ -1879,164 +1242,14 @@ PF_Err PersistColorControllerValue(
   const ControllerColorValue& color,
   const char* reason
 ) {
-  if (!in_data || slot < 0 || slot >= kControllerSlotCount) {
+  if (!in_data || !params || slot < 0 || slot >= kControllerSlotCount) {
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
   const ControllerColorValue safeColor = SanitizeColorValue(color);
   WriteColorControllerValueToParams(in_data, params, slot, safeColor);
-
-  AEFX_SuiteScoper<AEGP_PFInterfaceSuite1> interfaceSuite(
-    in_data,
-    kAEGPPFInterfaceSuite,
-    kAEGPPFInterfaceSuiteVersion1,
-    NULL
-  );
-  AEFX_SuiteScoper<AEGP_StreamSuite6> streamSuite(
-    in_data,
-    kAEGPStreamSuite,
-    kAEGPStreamSuiteVersion6,
-    NULL
-  );
-  AEFX_SuiteScoper<AEGP_EffectSuite5> effectSuite(
-    in_data,
-    kAEGPEffectSuite,
-    kAEGPEffectSuiteVersion5,
-    NULL
-  );
-  AEFX_SuiteScoper<AEGP_KeyframeSuite5> keyframeSuite(
-    in_data,
-    kAEGPKeyframeSuite,
-    kAEGPKeyframeSuiteVersion5,
-    NULL
-  );
-  if (!interfaceSuite.get() || !streamSuite.get() || !effectSuite.get() || !keyframeSuite.get()) {
-    return PF_Err_NONE;
-  }
-
-  PF_Err err = PF_Err_NONE;
-  AEGP_EffectRefH effectH = NULL;
-  AEGP_StreamRefH streamH = NULL;
-  AEGP_StreamValue2 streamValue;
-  AEFX_CLR_STRUCT(streamValue);
-  bool haveStreamValue = false;
-  AEGP_StreamType streamType = AEGP_StreamType_NO_DATA;
-  A_long numKfs = 0;
-  A_Time compTime = {0, 1};
-  bool wroteInPlace = false;
-
-  const A_Err effectErr = interfaceSuite->AEGP_GetNewEffectForEffect(
-    gAegpPluginId,
-    in_data->effect_ref,
-    &effectH
-  );
-  if (effectErr != A_Err_NONE || !effectH) {
-    return static_cast<PF_Err>(effectErr);
-  }
-
-  std::string bundleError;
-  const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
-  const int colorParamSlot = ResolveControllerParamSlotForLogicalSlot(
-    bundle,
-    RuntimeControllerSlotKind::kColor,
-    slot
-  );
-  if (colorParamSlot < 0 || colorParamSlot >= kControllerSlotCount) {
-    return PF_Err_BAD_CALLBACK_PARAM;
-  }
-  const PF_ParamIndex paramIndex = ControllerColorValueParamIndex(colorParamSlot);
-  A_Err suiteErr = streamSuite->AEGP_GetNewEffectStreamByIndex(
-    gAegpPluginId,
-    effectH,
-    paramIndex,
-    &streamH
-  );
-  if (suiteErr != A_Err_NONE || !streamH) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-
-  suiteErr = streamSuite->AEGP_GetStreamType(streamH, &streamType);
-  if (suiteErr != A_Err_NONE) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-  if (streamType != AEGP_StreamType_ARB) {
-    goto cleanup;
-  }
-
-  suiteErr = keyframeSuite->AEGP_GetStreamNumKFs(streamH, &numKfs);
-  if (suiteErr != A_Err_NONE) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-  if (numKfs == AEGP_NumKF_NO_DATA || numKfs > 0) {
-    goto cleanup;
-  }
-
-  if (!runtime_internal::GetCompTime(in_data, &compTime)) {
-    compTime.value = in_data->current_time;
-    compTime.scale = in_data->time_scale > 0 ? in_data->time_scale : 1;
-  }
-  suiteErr = streamSuite->AEGP_GetNewStreamValue(
-    gAegpPluginId,
-    streamH,
-    AEGP_LTimeMode_CompTime,
-    &compTime,
-    TRUE,
-    &streamValue
-  );
-  if (suiteErr != A_Err_NONE) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-  haveStreamValue = true;
-  streamValue.streamH = streamH;
-
-  if (streamValue.val.arbH) {
-    ControllerColorValue* data =
-      reinterpret_cast<ControllerColorValue*>(PF_LOCK_HANDLE(streamValue.val.arbH));
-    if (data) {
-      *data = safeColor;
-      PF_UNLOCK_HANDLE(streamValue.val.arbH);
-      wroteInPlace = true;
-    }
-  }
-
-  if (!wroteInPlace) {
-    PF_ArbitraryH nextHandle = NULL;
-    err = AllocateColorArbHandle(in_data, safeColor, &nextHandle);
-    if (err != PF_Err_NONE || !nextHandle) {
-      goto cleanup;
-    }
-    streamValue.val.arbH = nextHandle;
-  }
-
-  suiteErr = streamSuite->AEGP_SetStreamValue(
-    gAegpPluginId,
-    streamH,
-    &streamValue
-  );
-  if (suiteErr != A_Err_NONE) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-
-
-cleanup:
-  if (haveStreamValue) {
-    A_Err disposeValueErr = streamSuite->AEGP_DisposeStreamValue(&streamValue);
-    (void)disposeValueErr;
-  }
-  if (streamH) {
-    A_Err disposeStreamErr = streamSuite->AEGP_DisposeStream(streamH);
-    (void)disposeStreamErr;
-  }
-  if (effectH) {
-    A_Err disposeEffectErr = effectSuite->AEGP_DisposeEffect(effectH);
-    (void)disposeEffectErr;
-  }
-  return err;
+  (void)reason;
+  return PF_Err_NONE;
 }
 
 PF_Err PersistAngleControllerValue(
@@ -2046,7 +1259,7 @@ PF_Err PersistAngleControllerValue(
   double degrees,
   const char* reason
 ) {
-  if (!in_data || slot < 0 || slot >= kControllerSlotCount) {
+  if (!in_data || !params || slot < 0 || slot >= kControllerSlotCount) {
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
@@ -2059,134 +1272,13 @@ PF_Err PersistAngleControllerValue(
     return PF_Err_BAD_CALLBACK_PARAM;
   }
   WriteAngleControllerValueToParams(params, angleParamSlot, safeDegrees);
-
-  AEFX_SuiteScoper<AEGP_PFInterfaceSuite1> interfaceSuite(
-    in_data,
-    kAEGPPFInterfaceSuite,
-    kAEGPPFInterfaceSuiteVersion1,
-    NULL
-  );
-  AEFX_SuiteScoper<AEGP_StreamSuite6> streamSuite(
-    in_data,
-    kAEGPStreamSuite,
-    kAEGPStreamSuiteVersion6,
-    NULL
-  );
-  AEFX_SuiteScoper<AEGP_EffectSuite5> effectSuite(
-    in_data,
-    kAEGPEffectSuite,
-    kAEGPEffectSuiteVersion5,
-    NULL
-  );
-  AEFX_SuiteScoper<AEGP_KeyframeSuite5> keyframeSuite(
-    in_data,
-    kAEGPKeyframeSuite,
-    kAEGPKeyframeSuiteVersion5,
-    NULL
-  );
-  if (!interfaceSuite.get() || !streamSuite.get() || !effectSuite.get() || !keyframeSuite.get()) {
-    return PF_Err_NONE;
-  }
-
-  PF_Err err = PF_Err_NONE;
-  AEGP_EffectRefH effectH = NULL;
-  AEGP_StreamRefH streamH = NULL;
-  AEGP_StreamValue2 streamValue;
-  AEFX_CLR_STRUCT(streamValue);
-  bool haveStreamValue = false;
-  AEGP_StreamType streamType = AEGP_StreamType_NO_DATA;
-  A_long numKfs = 0;
-  A_Time compTime = {0, 1};
-
-  const A_Err effectErr = interfaceSuite->AEGP_GetNewEffectForEffect(
-    gAegpPluginId,
-    in_data->effect_ref,
-    &effectH
-  );
-  if (effectErr != A_Err_NONE || !effectH) {
-    return static_cast<PF_Err>(effectErr);
-  }
-
-  const PF_ParamIndex paramIndex = ControllerAngleValueParamIndex(angleParamSlot);
-  A_Err suiteErr = streamSuite->AEGP_GetNewEffectStreamByIndex(
-    gAegpPluginId,
-    effectH,
-    paramIndex,
-    &streamH
-  );
-  if (suiteErr != A_Err_NONE || !streamH) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-
-  suiteErr = streamSuite->AEGP_GetStreamType(streamH, &streamType);
-  if (suiteErr != A_Err_NONE) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-  if (streamType != AEGP_StreamType_OneD) {
-    goto cleanup;
-  }
-
-  suiteErr = keyframeSuite->AEGP_GetStreamNumKFs(streamH, &numKfs);
-  if (suiteErr != A_Err_NONE) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-  if (numKfs == AEGP_NumKF_NO_DATA || numKfs > 0) {
-    goto cleanup;
-  }
-
-  if (!runtime_internal::GetCompTime(in_data, &compTime)) {
-    compTime.value = in_data->current_time;
-    compTime.scale = in_data->time_scale > 0 ? in_data->time_scale : 1;
-  }
-  suiteErr = streamSuite->AEGP_GetNewStreamValue(
-    gAegpPluginId,
-    streamH,
-    AEGP_LTimeMode_CompTime,
-    &compTime,
-    TRUE,
-    &streamValue
-  );
-  if (suiteErr != A_Err_NONE) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-  haveStreamValue = true;
-  streamValue.streamH = streamH;
-  streamValue.val.one_d = static_cast<AEGP_OneDVal>(safeDegrees);
-
-  suiteErr = streamSuite->AEGP_SetStreamValue(
-    gAegpPluginId,
-    streamH,
-    &streamValue
-  );
-  if (suiteErr != A_Err_NONE) {
-    err = static_cast<PF_Err>(suiteErr);
-    goto cleanup;
-  }
-
-
-cleanup:
-  if (haveStreamValue) {
-    A_Err disposeValueErr = streamSuite->AEGP_DisposeStreamValue(&streamValue);
-    (void)disposeValueErr;
-  }
-  if (streamH) {
-    A_Err disposeStreamErr = streamSuite->AEGP_DisposeStream(streamH);
-    (void)disposeStreamErr;
-  }
-  if (effectH) {
-    A_Err disposeEffectErr = effectSuite->AEGP_DisposeEffect(effectH);
-    (void)disposeEffectErr;
-  }
-  return err;
+  (void)reason;
+  return PF_Err_NONE;
 }
 
 void MarkControllerColorHistoryDirty(
   PF_InData* in_data,
-  std::uint64_t instanceId,
+  PF_ParamDef* params[],
   int slot,
   const char* reason
 ) {
@@ -2205,9 +1297,11 @@ void MarkControllerColorHistoryDirty(
   }
   MarkControllerParamHistoryDirty(
     in_data,
-    instanceId,
     ControllerColorValueParamIndex(colorParamSlot),
-    reason
+    reason,
+    params && params[PARAM_INSTANCE_ID]
+      ? params[PARAM_INSTANCE_ID]->u.sd.value
+      : 0
   );
 }
 
@@ -2219,21 +1313,25 @@ PF_Err AllocateDefaultColorArbHandleForSlot(
   if (!outHandle) {
     return PF_Err_BAD_CALLBACK_PARAM;
   }
-  int slot = -1;
-  std::string bundleError;
-  const RuntimeSketchBundle bundle = ReadCurrentRunRuntimeSketchBundle(&bundleError);
-  ControllerColorValue color;
-  if (TryMapColorValueParamIndexToSlot(paramId, &slot) && slot >= 0) {
-    const int logicalSlot = ResolveLogicalSlotForControllerParamSlot(
-      bundle,
-      RuntimeControllerSlotKind::kColor,
-      slot
-    );
-    if (logicalSlot >= 0) {
-      color = ResolveColorControllerSpecWithDefaults(bundle, logicalSlot).defaultValue;
-    }
-  }
+  ControllerColorValue color = MakeUnsetColorValue();
+  ResolveInvocationColorControllerDefault(in_data, paramId, &color);
   return AllocateColorArbHandle(in_data, color, outHandle);
+}
+
+ControllerColorValue ResolveColorArbValueForInterpolation(
+  PF_InData* in_data,
+  PF_ParamIndex paramId,
+  const ControllerColorValue& storedColor
+) {
+  if (!IsUnsetColorValue(storedColor)) {
+    return storedColor;
+  }
+
+  ControllerColorValue resolvedColor;
+  if (ResolveInvocationColorControllerDefault(in_data, paramId, &resolvedColor)) {
+    return resolvedColor;
+  }
+  return storedColor;
 }
 
 PF_Err HandleColorArbitraryCallbacks(
@@ -2270,8 +1368,11 @@ PF_Err HandleColorArbitraryCallbacks(
       if (!IsColorArbRefcon(extra->u.copy_func_params.refconPV)) {
         return PF_Err_NONE;
       }
-      const ControllerColorValue color =
-        ReadColorArbHandle(in_data, extra->u.copy_func_params.src_arbH);
+      const ControllerColorValue color = ResolveColorArbValueForInterpolation(
+        in_data,
+        extra->id,
+        ReadColorArbHandle(in_data, extra->u.copy_func_params.src_arbH)
+      );
       return AllocateColorArbHandle(in_data, color, extra->u.copy_func_params.dst_arbPH);
     }
 
@@ -2313,11 +1414,58 @@ PF_Err HandleColorArbitraryCallbacks(
     }
 
     case PF_Arbitrary_INTERP_FUNC: {
-      const ControllerColorValue left =
+      const ControllerColorValue storedLeft =
         ReadColorArbHandle(in_data, extra->u.interp_func_params.left_arbH);
-      const ControllerColorValue right =
+      const ControllerColorValue storedRight =
         ReadColorArbHandle(in_data, extra->u.interp_func_params.right_arbH);
+      const ControllerColorValue left = ResolveColorArbValueForInterpolation(
+        in_data,
+        extra->id,
+        storedLeft
+      );
+      const ControllerColorValue right = ResolveColorArbValueForInterpolation(
+        in_data,
+        extra->id,
+        storedRight
+      );
       const double t = std::max(0.0, std::min(1.0, static_cast<double>(extra->u.interp_func_params.tF)));
+      const bool neededDefault =
+        IsUnsetColorValue(storedLeft) || IsUnsetColorValue(storedRight);
+      const bool resolvedDefault =
+        !IsUnsetColorValue(left) && !IsUnsetColorValue(right);
+      if (neededDefault) {
+        static std::atomic<int> successLogBudget{12};
+        static std::atomic<int> failureLogBudget{12};
+        std::atomic<int>& budget = resolvedDefault ? successLogBudget : failureLogBudget;
+        if (budget.fetch_sub(1, std::memory_order_relaxed) > 0) {
+          runtime_internal::AppendEffectRuntimeDiagnostic(
+            in_data,
+            resolvedDefault
+              ? "color-interp-default-resolved"
+              : "color-interp-context-missing",
+            0,
+            extra->id,
+            -1,
+            "t=" + std::to_string(t)
+          );
+        }
+      }
+      if (!resolvedDefault) {
+        // Never manufacture white when the owning document is unavailable.
+        // Preserve the unresolved endpoint so the effect/UI resolver can still
+        // recover its instance default instead of caching a wrong color.
+        ControllerColorValue unresolved = MakeUnsetColorValue();
+        if (!IsUnsetColorValue(left) && t <= 0.0) {
+          unresolved = left;
+        } else if (!IsUnsetColorValue(right) && t >= 1.0) {
+          unresolved = right;
+        }
+        return AllocateColorArbHandle(
+          in_data,
+          unresolved,
+          extra->u.interp_func_params.interpPH
+        );
+      }
       ControllerColorValue mixed;
       mixed.r = left.r + ((right.r - left.r) * t);
       mixed.g = left.g + ((right.g - left.g) * t);
@@ -2331,10 +1479,16 @@ PF_Err HandleColorArbitraryCallbacks(
     }
 
     case PF_Arbitrary_COMPARE_FUNC: {
-      const ControllerColorValue left =
-        ReadColorArbHandle(in_data, extra->u.compare_func_params.a_arbH);
-      const ControllerColorValue right =
-        ReadColorArbHandle(in_data, extra->u.compare_func_params.b_arbH);
+      const ControllerColorValue left = ResolveColorArbValueForInterpolation(
+        in_data,
+        extra->id,
+        ReadColorArbHandle(in_data, extra->u.compare_func_params.a_arbH)
+      );
+      const ControllerColorValue right = ResolveColorArbValueForInterpolation(
+        in_data,
+        extra->id,
+        ReadColorArbHandle(in_data, extra->u.compare_func_params.b_arbH)
+      );
       const bool equal =
         std::fabs(left.r - right.r) <= 1e-9 &&
         std::fabs(left.g - right.g) <= 1e-9 &&
@@ -2594,11 +1748,6 @@ PF_Err SyncControllerParamUI(
     PF_ParamDef* pointSource = params[ControllerPointParamIndex(slot)];
     if (pointSource) {
       PF_ParamDef pointDef = *pointSource;
-      if (pointVisible || kDebugExposeAllControllerParams) {
-        pointDef.ui_flags &= ~PF_PUI_INVISIBLE;
-      } else {
-        pointDef.ui_flags |= PF_PUI_INVISIBLE;
-      }
       CopyParamName(
         &pointDef,
         pointVisible
@@ -2622,24 +1771,19 @@ PF_Err SyncControllerParamUI(
         sliderVisible
           ? ResolveSliderControllerSpecWithDefaults(bundle, sliderLogicalSlot)
           : RuntimeSliderControllerSpec();
-      if (sliderVisible || kDebugExposeAllControllerParams) {
-        sliderDef.ui_flags &= ~PF_PUI_INVISIBLE;
-        sliderDef.ui_width = 0;
-        sliderDef.ui_height = 0;
-      } else {
-        sliderDef.ui_flags |= PF_PUI_INVISIBLE;
-        sliderDef.ui_width = 0;
-        sliderDef.ui_height = 0;
-      }
+      sliderDef.ui_width = 0;
+      sliderDef.ui_height = 0;
       CopyParamName(
         &sliderDef,
         config.label.empty() ? DefaultSliderControllerLabel(slot) : config.label
       );
+      PF_FpShort ignoredValidMin = 0;
+      PF_FpShort ignoredValidMax = 0;
       ResolveSafeSliderUiRange(
         config.minValue,
         config.maxValue,
-        &sliderDef.u.fs_d.valid_min,
-        &sliderDef.u.fs_d.valid_max,
+        &ignoredValidMin,
+        &ignoredValidMax,
         &sliderDef.u.fs_d.slider_min,
         &sliderDef.u.fs_d.slider_max
       );
@@ -2668,12 +1812,8 @@ PF_Err SyncControllerParamUI(
         &angleValueDef.u.fs_d.slider_max
       );
       angleValueDef.u.fs_d.precision = 2;
-      angleValueDef.ui_flags = kAngleControlUiFlags;
       angleValueDef.ui_width = kAngleControlUiWidth;
       angleValueDef.ui_height = kAngleControlUiHeight;
-      if (!angleVisible && !kDebugExposeAllControllerParams) {
-        angleValueDef.ui_flags |= PF_PUI_INVISIBLE;
-      }
       {
         std::string label =
           config.label.empty() ? DefaultAngleControllerLabel(slot) : config.label;
@@ -2699,7 +1839,6 @@ PF_Err SyncControllerParamUI(
         angleVisible
           ? ResolveAngleControllerSpecWithDefaults(bundle, angleLogicalSlot)
           : RuntimeAngleControllerSpec();
-      angleUiDef.ui_flags = kDebugExposeAllControllerParams ? PF_PUI_NONE : (PF_PUI_INVISIBLE | PF_PUI_NO_ECW_UI);
       angleUiDef.ui_width = 0;
       angleUiDef.ui_height = 0;
       {
@@ -2727,7 +1866,6 @@ PF_Err SyncControllerParamUI(
         colorVisible
           ? ResolveColorControllerSpecWithDefaults(bundle, colorLogicalSlot)
           : RuntimeColorControllerSpec();
-      colorDef.ui_flags = kColorControlUiFlags;
       colorDef.ui_width = kColorControlUiWidth;
       colorDef.ui_height = kColorControlUiHeight;
       CopyParamName(
@@ -2751,11 +1889,6 @@ PF_Err SyncControllerParamUI(
         checkboxVisible
           ? ResolveCheckboxControllerSpecWithDefaults(bundle, checkboxLogicalSlot)
           : RuntimeCheckboxControllerSpec();
-      if (checkboxVisible || kDebugExposeAllControllerParams) {
-        checkboxDef.ui_flags &= ~PF_PUI_INVISIBLE;
-      } else {
-        checkboxDef.ui_flags |= PF_PUI_INVISIBLE;
-      }
       CopyParamName(
         &checkboxDef,
         config.label.empty() ? DefaultCheckboxControllerLabel(slot) : config.label
@@ -2777,14 +1910,6 @@ PF_Err SyncControllerParamUI(
         selectVisible
           ? ResolveSelectControllerSpecWithDefaults(bundle, selectLogicalSlot)
           : RuntimeSelectControllerSpec();
-      const std::string selectItems = BuildSelectControllerPopupItems(config);
-      if (selectVisible || kDebugExposeAllControllerParams) {
-        selectDef.ui_flags &= ~PF_PUI_INVISIBLE;
-      } else {
-        selectDef.ui_flags |= PF_PUI_INVISIBLE;
-      }
-      selectDef.u.pd.num_choices = static_cast<A_short>(std::max<std::size_t>(1, config.options.size()));
-      selectDef.u.pd.u.PF_DEF_NAMESPTR = selectItems.c_str();
       CopyParamName(
         &selectDef,
         config.label.empty() ? DefaultSelectControllerLabel(slot) : config.label
@@ -2805,223 +1930,15 @@ PF_Err SyncControllerParamUI(
     return visibilityErr;
   }
 
-  if (out_data) {
-    out_data->out_flags |= PF_OutFlag_REFRESH_UI;
-  }
-  return PF_Err_NONE;
-}
-
-void PopulateControllerStateFromParamArray(
-  PF_InData* in_data,
-  PF_ParamDef* params[],
-  ControllerPoolState* state
-) {
-  if (!params || !state) {
-    return;
-  }
-
-  *state = ControllerPoolState();
-
-  std::string bundleError;
-  const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, NULL, &bundleError);
-  (void)bundleError;
-
-  int sliderSlot = 0;
-  int angleSlot = 0;
-  int colorSlot = 0;
-  int checkboxSlot = 0;
-  int selectSlot = 0;
-  int pointSlot = 0;
-  for (int logicalSlot = 0; logicalSlot < kControllerSlotCount; ++logicalSlot) {
-    const RuntimeControllerSlotKind kind = ResolveControllerSlotKind(bundle, logicalSlot);
-    if (kind == RuntimeControllerSlotKind::kSlider) {
-      PF_ParamDef* param = params[ControllerSliderParamIndex(logicalSlot)];
-      if (param && sliderSlot < kControllerSliderSlotCount) {
-        const RuntimeSliderControllerSpec config =
-          ResolveSliderControllerSpecWithDefaults(bundle, logicalSlot);
-        state->sliders[static_cast<std::size_t>(sliderSlot)].value =
-          ClampAndSnapSliderValue(param->u.fs_d.value, config);
-      }
-      sliderSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kAngle) {
-      PF_ParamDef* param = params[ControllerAngleValueParamIndex(logicalSlot)];
-      if (param && angleSlot < kControllerAngleSlotCount) {
-        state->angles[static_cast<std::size_t>(angleSlot)].degrees =
-          static_cast<double>(param->u.fs_d.value);
-      }
-      angleSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kColor) {
-      if (colorSlot < kControllerColorSlotCount) {
-        PF_ParamDef* param = params[ControllerColorValueParamIndex(logicalSlot)];
-        if (param) {
-          state->colors[static_cast<std::size_t>(colorSlot)] =
-            ReadColorArbHandle(in_data, param->u.arb_d.value);
-        }
-      }
-      colorSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kCheckbox) {
-      PF_ParamDef* param = params[ControllerCheckboxParamIndex(logicalSlot)];
-      if (param && checkboxSlot < kControllerCheckboxSlotCount) {
-        state->checkboxes[static_cast<std::size_t>(checkboxSlot)].checked =
-          param->u.bd.value != FALSE;
-      }
-      checkboxSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kSelect) {
-      PF_ParamDef* param = params[ControllerSelectParamIndex(logicalSlot)];
-      if (param && selectSlot < kControllerSelectSlotCount) {
-        const RuntimeSelectControllerSpec config =
-          ResolveSelectControllerSpecWithDefaults(bundle, logicalSlot);
-        state->selects[static_cast<std::size_t>(selectSlot)].index =
-          ClampSelectControllerIndex(static_cast<int>(param->u.pd.value) - 1, config);
-      }
-      selectSlot += 1;
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kPoint) {
-      PF_ParamDef* param = params[ControllerPointParamIndex(logicalSlot)];
-      if (param && pointSlot < kControllerPointSlotCount) {
-        ControllerPointValue& point = state->points[static_cast<std::size_t>(pointSlot)];
-        point.x = FixedToDouble(param->u.td.x_value);
-        point.y = FixedToDouble(param->u.td.y_value);
-      }
-      pointSlot += 1;
-    }
-  }
-
-  FinalizeControllerState(state);
-}
-
-PF_Err CheckoutControllerState(PF_InData* in_data, ControllerPoolState* state) {
-  if (!in_data || !state) {
-    return PF_Err_BAD_CALLBACK_PARAM;
-  }
-
-  *state = ControllerPoolState();
-
-  std::string bundleError;
-  const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, NULL, &bundleError);
-  (void)bundleError;
-
-  PF_ParamDef param;
-
-  int sliderSlot = 0;
-  int angleSlot = 0;
-  int colorSlot = 0;
-  int checkboxSlot = 0;
-  int selectSlot = 0;
-  int pointSlot = 0;
-  for (int logicalSlot = 0; logicalSlot < kControllerSlotCount; ++logicalSlot) {
-    const RuntimeControllerSlotKind kind = ResolveControllerSlotKind(bundle, logicalSlot);
-    PF_ParamIndex paramIndex = ControllerPointParamIndex(logicalSlot);
-    if (kind == RuntimeControllerSlotKind::kSlider) {
-      paramIndex = ControllerSliderParamIndex(logicalSlot);
-    } else if (kind == RuntimeControllerSlotKind::kAngle) {
-      paramIndex = ControllerAngleValueParamIndex(logicalSlot);
-    } else if (kind == RuntimeControllerSlotKind::kCheckbox) {
-      paramIndex = ControllerCheckboxParamIndex(logicalSlot);
-    } else if (kind == RuntimeControllerSlotKind::kSelect) {
-      paramIndex = ControllerSelectParamIndex(logicalSlot);
-    }
-    if (kind == RuntimeControllerSlotKind::kNone) {
-      continue;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kColor) {
-      PF_ParamDef colorParam;
-      AEFX_CLR_STRUCT(colorParam);
-      PF_Err err = PF_CHECKOUT_PARAM(
-        in_data,
-        ControllerColorValueParamIndex(logicalSlot),
-        in_data->current_time,
-        in_data->time_step,
-        in_data->time_scale,
-        &colorParam
-      );
-      if (err != PF_Err_NONE) {
-        return err;
-      }
-      if (colorSlot < kControllerColorSlotCount) {
-        state->colors[static_cast<std::size_t>(colorSlot)] =
-          ReadColorArbHandle(in_data, colorParam.u.arb_d.value);
-      }
-      PF_CHECKIN_PARAM(in_data, &colorParam);
-      colorSlot += 1;
-      continue;
-    }
-
-    AEFX_CLR_STRUCT(param);
-    PF_Err err = PF_CHECKOUT_PARAM(
-      in_data,
-      paramIndex,
-      in_data->current_time,
-      in_data->time_step,
-      in_data->time_scale,
-      &param
-    );
-    if (err != PF_Err_NONE) {
-      return err;
-    }
-
-    if (kind == RuntimeControllerSlotKind::kSlider) {
-      if (sliderSlot < kControllerSliderSlotCount) {
-        const RuntimeSliderControllerSpec config =
-          ResolveSliderControllerSpecWithDefaults(bundle, logicalSlot);
-        state->sliders[static_cast<std::size_t>(sliderSlot)].value =
-          ClampAndSnapSliderValue(param.u.fs_d.value, config);
-      }
-      sliderSlot += 1;
-    } else if (kind == RuntimeControllerSlotKind::kAngle) {
-      if (angleSlot < kControllerAngleSlotCount) {
-        state->angles[static_cast<std::size_t>(angleSlot)].degrees =
-          static_cast<double>(param.u.fs_d.value);
-      }
-      angleSlot += 1;
-    } else if (kind == RuntimeControllerSlotKind::kCheckbox) {
-      if (checkboxSlot < kControllerCheckboxSlotCount) {
-        state->checkboxes[static_cast<std::size_t>(checkboxSlot)].checked =
-          param.u.bd.value != FALSE;
-      }
-      checkboxSlot += 1;
-    } else if (kind == RuntimeControllerSlotKind::kSelect) {
-      if (selectSlot < kControllerSelectSlotCount) {
-        const RuntimeSelectControllerSpec config =
-          ResolveSelectControllerSpecWithDefaults(bundle, logicalSlot);
-        state->selects[static_cast<std::size_t>(selectSlot)].index =
-          ClampSelectControllerIndex(static_cast<int>(param.u.pd.value) - 1, config);
-      }
-      selectSlot += 1;
-    } else if (kind == RuntimeControllerSlotKind::kPoint) {
-      if (pointSlot < kControllerPointSlotCount) {
-        ControllerPointValue& point = state->points[static_cast<std::size_t>(pointSlot)];
-        point.x = FixedToDouble(param.u.td.x_value);
-        point.y = FixedToDouble(param.u.td.y_value);
-      }
-      pointSlot += 1;
-    }
-
-    PF_CHECKIN_PARAM(in_data, &param);
-  }
-
-  FinalizeControllerState(state);
+  (void)out_data;
   return PF_Err_NONE;
 }
 
 void DisposeRenderInvocationInfo(void* preRenderData) {
   if (preRenderData) {
-    delete reinterpret_cast<RenderInvocationInfo*>(preRenderData);
+    auto* info = reinterpret_cast<RenderInvocationInfo*>(preRenderData);
+    DiscardEffectRuntimeState(info->runtimeKey, "render-invocation-dispose");
+    delete info;
   }
 }
 
@@ -3031,35 +1948,11 @@ PF_Err RegisterCustomUI(PF_InData* in_data) {
   }
   PF_CustomUIInfo ci;
   AEFX_CLR_STRUCT(ci);
-  ci.events = PF_CustomEFlag_EFFECT | PF_CustomEFlag_LAYER | PF_CustomEFlag_COMP;
-  ci.comp_ui_width = 0;
-  ci.comp_ui_height = 0;
-  ci.comp_ui_alignment = PF_UIAlignment_NONE;
-  ci.layer_ui_width = 0;
-  ci.layer_ui_height = 0;
-  ci.layer_ui_alignment = PF_UIAlignment_NONE;
-  ci.preview_ui_width = 0;
-  ci.preview_ui_height = 0;
-  ci.preview_ui_alignment = PF_UIAlignment_NONE;
+  // Point controllers use AE's native PF_POINT UI in the Composition and
+  // Layer panels. Custom events are needed only for the angle and high-depth
+  // color controls hosted in Effect Controls.
+  ci.events = PF_CustomEFlag_EFFECT;
   return (*(in_data->inter.register_ui))(in_data->effect_ref, &ci);
-}
-
-void ContinuePointControllerDrag(PF_EventExtra* extra, int slot) {
-  if (!extra) {
-    return;
-  }
-
-  const bool lastTime = extra->u.do_click.last_time != FALSE;
-  extra->u.do_click.send_drag = lastTime ? FALSE : TRUE;
-  if (lastTime) {
-    extra->u.do_click.continue_refcon[0] = 0;
-    extra->u.do_click.continue_refcon[1] = 0;
-    extra->u.do_click.continue_refcon[2] = 0;
-    extra->u.do_click.continue_refcon[3] = 0;
-    return;
-  }
-
-  extra->u.do_click.continue_refcon[0] = slot + 1;
 }
 
 void RequestCustomUIRefresh(
@@ -3068,20 +1961,15 @@ void RequestCustomUIRefresh(
   PF_EventExtra* extra,
   bool forceRender
 ) {
+  (void)out_data;
+  (void)forceRender;
   if (!extra) {
     return;
   }
 
   extra->evt_out_flags |= PF_EO_HANDLED_EVENT;
 
-  if (out_data) {
-    out_data->out_flags |= PF_OutFlag_REFRESH_UI;
-    if (forceRender) {
-      out_data->out_flags |= PF_OutFlag_FORCE_RERENDER;
-    }
-  }
-
-  if (!in_data || !out_data || !extra->contextH) {
+  if (!in_data || !extra->contextH) {
     return;
   }
 
@@ -3095,80 +1983,6 @@ void RequestCustomUIRefresh(
     appSuite->PF_InvalidateRect(extra->contextH, NULL);
     extra->evt_out_flags |= PF_EO_UPDATE_NOW;
   }
-}
-
-std::uint64_t ResolvePointControllerInstanceId(PF_InData* in_data, PF_ParamDef* params[]) {
-  A_long paramInstanceId = 0;
-  if (params && params[PARAM_INSTANCE_ID]) {
-    paramInstanceId = params[PARAM_INSTANCE_ID]->u.sd.value;
-  }
-  return ResolveStableInstanceId(in_data, paramInstanceId);
-}
-
-void FramePointToLayerPoint(
-  PF_InData* in_data,
-  PF_EventExtra* extra,
-  const PF_Point& framePoint,
-  PF_FixedPoint* outLayerPoint
-) {
-  if (!in_data || !extra || !extra->contextH || !outLayerPoint) {
-    return;
-  }
-  outLayerPoint->x = INT2FIX(framePoint.h);
-  outLayerPoint->y = INT2FIX(framePoint.v);
-  extra->cbs.frame_to_source(extra->cbs.refcon, extra->contextH, outLayerPoint);
-  if ((*extra->contextH)->w_type == PF_Window_COMP) {
-    extra->cbs.comp_to_layer(
-      extra->cbs.refcon,
-      extra->contextH,
-      in_data->current_time,
-      in_data->time_scale,
-      outLayerPoint
-    );
-  }
-}
-
-void LayerPointToFramePoint(
-  PF_InData* in_data,
-  PF_EventExtra* extra,
-  const PF_FixedPoint& layerPoint,
-  PF_Point* outFramePoint
-) {
-  if (!in_data || !extra || !extra->contextH || !outFramePoint) {
-    return;
-  }
-  PF_FixedPoint framePoint = layerPoint;
-  if ((*extra->contextH)->w_type == PF_Window_COMP) {
-    extra->cbs.layer_to_comp(
-      extra->cbs.refcon,
-      extra->contextH,
-      in_data->current_time,
-      in_data->time_scale,
-      &framePoint
-    );
-  }
-  extra->cbs.source_to_frame(extra->cbs.refcon, extra->contextH, &framePoint);
-  outFramePoint->h = FIX2INT(framePoint.x);
-  outFramePoint->v = FIX2INT(framePoint.y);
-}
-
-bool TryMapPointParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot) {
-  if (paramIndex < ControllerPointParamIndex(0) ||
-      paramIndex > ControllerPointParamIndex(kControllerSlotCount - 1)) {
-    return false;
-  }
-  const int relativeIndex = static_cast<int>(paramIndex - ControllerPointParamIndex(0));
-  if ((relativeIndex % kControllerParamKindsPerSlot) != 0) {
-    return false;
-  }
-  const int slot = relativeIndex / kControllerParamKindsPerSlot;
-  if (slot < 0 || slot >= kControllerSlotCount) {
-    return false;
-  }
-  if (outSlot) {
-    *outSlot = slot;
-  }
-  return true;
 }
 
 bool TryMapSliderParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot) {
@@ -3254,456 +2068,18 @@ bool TryMapColorParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot) {
   return true;
 }
 
-bool TryMapColorValueParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot) {
-  return TryMapColorParamIndexToSlot(paramIndex, outSlot);
-}
-
-bool TryMapCheckboxParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot) {
-  if (paramIndex < ControllerCheckboxParamIndex(0) ||
-      paramIndex > ControllerCheckboxParamIndex(kControllerSlotCount - 1)) {
-    return false;
-  }
-  const int relativeIndex = static_cast<int>(paramIndex - ControllerCheckboxParamIndex(0));
-  if ((relativeIndex % kControllerParamKindsPerSlot) != 0) {
-    return false;
-  }
-  const int slot = relativeIndex / kControllerParamKindsPerSlot;
-  if (slot < 0 || slot >= kControllerSlotCount) {
-    return false;
-  }
-  if (outSlot) {
-    *outSlot = slot;
-  }
-  return true;
-}
-
-bool TryMapSelectParamIndexToSlot(PF_ParamIndex paramIndex, int* outSlot) {
-  if (paramIndex < ControllerSelectParamIndex(0) ||
-      paramIndex > ControllerSelectParamIndex(kControllerSlotCount - 1)) {
-    return false;
-  }
-  const int relativeIndex = static_cast<int>(paramIndex - ControllerSelectParamIndex(0));
-  if ((relativeIndex % kControllerParamKindsPerSlot) != 0) {
-    return false;
-  }
-  const int slot = relativeIndex / kControllerParamKindsPerSlot;
-  if (slot < 0 || slot >= kControllerSlotCount) {
-    return false;
-  }
-  if (outSlot) {
-    *outSlot = slot;
-  }
-  return true;
-}
-
 bool IsControllerParamIndex(PF_ParamIndex paramIndex) {
   return
     (paramIndex >= PARAM_CONTROLLER_SLOT_BASE && paramIndex < PARAM_COUNT);
 }
 
-bool PopulatePointHandleDrawInfos(
-  PF_InData* in_data,
-  PF_EventExtra* extra,
-  PF_ParamDef* params[],
-  std::array<PointHandleDrawInfo, kControllerPointSlotCount>* outInfos
-) {
-  if (!in_data || !extra || !params || !outInfos) {
-    return false;
-  }
-
-  const std::uint64_t instanceId = ResolvePointControllerInstanceId(in_data, params);
-  EnsureActivePointOverlaySlot(instanceId);
-  const int activeSlot = GetActivePointOverlaySlot(instanceId);
-  std::string bundleError;
-  const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
-  (void)bundleError;
-
-  bool any = false;
-  for (int slot = 0; slot < kControllerPointSlotCount; ++slot) {
-    PointHandleDrawInfo& info = (*outInfos)[static_cast<std::size_t>(slot)];
-    info.slot = slot;
-    const int logicalSlot = ResolveLogicalSlotForControllerParamSlot(
-      bundle,
-      RuntimeControllerSlotKind::kPoint,
-      slot
-    );
-
-    PF_ParamDef* param = params[ControllerPointParamIndex(slot)];
-    if (!param) {
-      continue;
-    }
-
-    info.activeSelection = (slot == activeSlot) && logicalSlot >= 0;
-    info.activePreview = false;
-    info.visible = info.activeSelection;
-    if (!info.visible) {
-      continue;
-    }
-
-    info.layerPoint.x = param->u.td.x_value;
-    info.layerPoint.y = param->u.td.y_value;
-    LayerPointToFramePoint(in_data, extra, info.layerPoint, &info.framePoint);
-    any = true;
-  }
-  return any;
-}
-
-int HitTestPointHandle(
-  const std::array<PointHandleDrawInfo, kControllerPointSlotCount>& infos,
-  const PF_Point& mousePoint
-) {
-  int bestSlot = -1;
-  A_long bestDistance = std::numeric_limits<A_long>::max();
-  for (const PointHandleDrawInfo& info : infos) {
-    if (info.slot < 0 || !info.visible) {
-      continue;
-    }
-    const A_long dx = static_cast<A_long>(info.framePoint.h) - mousePoint.h;
-    const A_long dy = static_cast<A_long>(info.framePoint.v) - mousePoint.v;
-    const A_long distance = std::abs(dx) + std::abs(dy);
-    if (distance <= kPointHandleHitSlop && distance < bestDistance) {
-      bestDistance = distance;
-      bestSlot = info.slot;
-    }
-  }
-  return bestSlot;
-}
-
-PF_Err PaintPointHandleBox(
-  const DRAWBOT_SurfaceSuite2* surfaceSuite,
-  DRAWBOT_SurfaceRef surfaceRef,
-  const DRAWBOT_ColorRGBA& color,
-  const PF_Point& framePoint,
-  A_long halfSize
-) {
-  if (!surfaceSuite || !surfaceRef) {
-    return PF_Err_BAD_CALLBACK_PARAM;
-  }
-  DRAWBOT_RectF32 rect = {
-    static_cast<float>(framePoint.h - halfSize),
-    static_cast<float>(framePoint.v - halfSize),
-    static_cast<float>(halfSize * 2 + 1),
-    static_cast<float>(halfSize * 2 + 1)
-  };
-  return surfaceSuite->PaintRect(surfaceRef, &color, &rect);
-}
-
-DRAWBOT_ColorRGBA MakePointHandleColor(float red, float green, float blue, float alpha) {
+DRAWBOT_ColorRGBA MakeCustomUiColor(float red, float green, float blue, float alpha) {
   DRAWBOT_ColorRGBA color{};
   color.red = red;
   color.green = green;
   color.blue = blue;
   color.alpha = alpha;
   return color;
-}
-
-PF_Err PaintPointHandleGlyph(
-  const DRAWBOT_SurfaceSuite2* surfaceSuite,
-  DRAWBOT_SurfaceRef surfaceRef,
-  const DRAWBOT_ColorRGBA& fillColor,
-  const PF_Point& framePoint,
-  A_long outerHalfSize,
-  A_long innerHalfSize
-) {
-  static const DRAWBOT_ColorRGBA kOutlineColor = MakePointHandleColor(0.0f, 0.0f, 0.0f, 0.95f);
-  PF_Err err = PaintPointHandleBox(
-    surfaceSuite,
-    surfaceRef,
-    kOutlineColor,
-    framePoint,
-    outerHalfSize
-  );
-  if (err != PF_Err_NONE) {
-    return err;
-  }
-  if (innerHalfSize > 0) {
-    err = PaintPointHandleBox(
-      surfaceSuite,
-      surfaceRef,
-      fillColor,
-      framePoint,
-      innerHalfSize
-    );
-    if (err != PF_Err_NONE) {
-      return err;
-    }
-  }
-  return PF_Err_NONE;
-}
-
-PF_Err DrawPointHandleMarker(
-  PF_InData* in_data,
-  PF_EventExtra* extra,
-  const PointHandleDrawInfo& info
-) {
-  if (!in_data || !extra) {
-    return PF_Err_BAD_CALLBACK_PARAM;
-  }
-
-  if (!extra->contextH) {
-    return PF_Err_NONE;
-  }
-
-  AEFX_SuiteScoper<PF_EffectCustomUISuite2> customUiSuite(
-    in_data,
-    kPFEffectCustomUISuite,
-    kPFEffectCustomUISuiteVersion2,
-    NULL
-  );
-  AEFX_SuiteScoper<DRAWBOT_DrawbotSuite1> drawbotSuite(
-    in_data,
-    kDRAWBOT_DrawSuite,
-    kDRAWBOT_DrawSuite_VersionCurrent,
-    NULL
-  );
-  AEFX_SuiteScoper<DRAWBOT_SurfaceSuite2> surfaceSuite(
-    in_data,
-    kDRAWBOT_SurfaceSuite,
-    kDRAWBOT_SurfaceSuite_VersionCurrent,
-    NULL
-  );
-  AEFX_SuiteScoper<PF_EffectCustomUIOverlayThemeSuite1> themeSuite(
-    in_data,
-    kPFEffectCustomUIOverlayThemeSuite,
-    kPFEffectCustomUIOverlayThemeSuiteVersion1,
-    NULL
-  );
-  if (!customUiSuite.get() || !drawbotSuite.get() || !surfaceSuite.get() || !themeSuite.get()) {
-    return PF_Err_NONE;
-  }
-
-  DRAWBOT_DrawRef drawRef = NULL;
-  PF_Err err = customUiSuite->PF_GetDrawingReference(extra->contextH, &drawRef);
-  if (err != PF_Err_NONE || !drawRef) {
-    return err;
-  }
-
-  DRAWBOT_SurfaceRef surfaceRef = NULL;
-  err = drawbotSuite->GetSurface(drawRef, &surfaceRef);
-  if (err != PF_Err_NONE || !surfaceRef) {
-    return err;
-  }
-
-  float vertexSize = 0.0f;
-  themeSuite->PF_GetPreferredVertexSize(&vertexSize);
-  const A_long arm = std::max<A_long>(
-    kPointHandleMinVisibleArm,
-    static_cast<A_long>(vertexSize + 2.0f)
-  );
-  const DRAWBOT_ColorRGBA activeColor = MakePointHandleColor(1.0f, 0.35f, 0.10f, 1.0f);
-  const DRAWBOT_ColorRGBA previewColor = MakePointHandleColor(0.05f, 0.82f, 1.0f, 1.0f);
-  const DRAWBOT_ColorRGBA centerColor = info.activePreview ? previewColor : activeColor;
-
-  std::array<PF_Point, 5> markerPoints{};
-  std::size_t markerCount = 0;
-  markerPoints[markerCount++] = info.framePoint;
-  if (info.activeSelection || info.activePreview) {
-    markerPoints[markerCount++] = {info.framePoint.h - arm, info.framePoint.v};
-    markerPoints[markerCount++] = {info.framePoint.h + arm, info.framePoint.v};
-    markerPoints[markerCount++] = {info.framePoint.h, info.framePoint.v - arm};
-    markerPoints[markerCount++] = {info.framePoint.h, info.framePoint.v + arm};
-  }
-
-  for (std::size_t index = 0; index < markerCount; ++index) {
-    const bool centerMarker = (index == 0);
-    err = PaintPointHandleGlyph(
-      surfaceSuite.get(),
-      surfaceRef,
-      centerMarker ? centerColor : activeColor,
-      markerPoints[index],
-      centerMarker ? kPointHandleCenterOuterHalfSize : kPointHandleArmOuterHalfSize,
-      centerMarker ? kPointHandleCenterInnerHalfSize : kPointHandleArmInnerHalfSize
-    );
-    if (err != PF_Err_NONE) {
-      return err;
-    }
-  }
-  return PF_Err_NONE;
-}
-
-PF_Err DrawPointControllerHandles(
-  PF_InData* in_data,
-  PF_OutData* out_data,
-  PF_ParamDef* params[],
-  PF_EventExtra* extra
-) {
-  (void)out_data;
-  std::array<PointHandleDrawInfo, kControllerPointSlotCount> infos{};
-  if (!PopulatePointHandleDrawInfos(in_data, extra, params, &infos)) {
-    return PF_Err_NONE;
-  }
-
-  const std::uint64_t instanceId = ResolvePointControllerInstanceId(in_data, params);
-  const int activeSlot = GetActivePointOverlaySlot(instanceId);
-  int visibleCount = 0;
-  const PointHandleDrawInfo* firstVisibleInfo = NULL;
-  for (const PointHandleDrawInfo& info : infos) {
-    if (info.visible) {
-      ++visibleCount;
-      if (!firstVisibleInfo) {
-        firstVisibleInfo = &info;
-      }
-    }
-  }
-
-  PF_Err err = PF_Err_NONE;
-  for (const PointHandleDrawInfo& info : infos) {
-    if (info.slot < 0 || !info.visible) {
-      continue;
-    }
-    err = DrawPointHandleMarker(in_data, extra, info);
-    if (err != PF_Err_NONE) {
-      return err;
-    }
-  }
-
-  extra->evt_out_flags |= PF_EO_HANDLED_EVENT;
-  return PF_Err_NONE;
-}
-
-PF_Err BeginPointControllerDrag(
-  PF_InData* in_data,
-  PF_OutData* out_data,
-  PF_ParamDef* params[],
-  PF_EventExtra* extra
-) {
-  (void)out_data;
-  std::array<PointHandleDrawInfo, kControllerPointSlotCount> infos{};
-  if (!PopulatePointHandleDrawInfos(in_data, extra, params, &infos)) {
-    return PF_Err_NONE;
-  }
-
-  PF_Point mousePoint = *reinterpret_cast<PF_Point*>(&extra->u.do_click.screen_point);
-  const int slot = HitTestPointHandle(infos, mousePoint);
-  if (slot < 0) {
-    return PF_Err_NONE;
-  }
-
-  const std::uint64_t instanceId = ResolvePointControllerInstanceId(in_data, params);
-  SetActivePointOverlaySlot(instanceId, slot);
-
-  extra->u.do_click.send_drag = TRUE;
-  extra->u.do_click.continue_refcon[0] = slot + 1;
-  RequestCustomUIRefresh(in_data, out_data, extra, true);
-  return PF_Err_NONE;
-}
-
-PF_Err UpdateDraggedPointController(
-  PF_InData* in_data,
-  PF_OutData* out_data,
-  PF_ParamDef* params[],
-  PF_EventExtra* extra
-) {
-  if (!in_data || !out_data || !params || !extra) {
-    return PF_Err_BAD_CALLBACK_PARAM;
-  }
-
-  const int slot = static_cast<int>(extra->u.do_click.continue_refcon[0]) - 1;
-  if (slot < 0 || slot >= kControllerPointSlotCount) {
-    return PF_Err_NONE;
-  }
-
-  PF_ParamDef* param = params[ControllerPointParamIndex(slot)];
-  if (!param) {
-    return PF_Err_NONE;
-  }
-
-  PF_Point mousePoint = *reinterpret_cast<PF_Point*>(&extra->u.do_click.screen_point);
-  PF_FixedPoint layerPoint = {0, 0};
-  FramePointToLayerPoint(in_data, extra, mousePoint, &layerPoint);
-
-  const std::uint64_t instanceId = ResolvePointControllerInstanceId(in_data, params);
-  param->u.td.x_value = layerPoint.x;
-  param->u.td.y_value = layerPoint.y;
-  param->uu.change_flags |= PF_ChangeFlag_CHANGED_VALUE;
-  MarkControllerParamHistoryDirty(
-    in_data,
-    instanceId,
-    ControllerPointParamIndex(slot),
-    "point-overlay-drag"
-  );
-
-  ContinuePointControllerDrag(extra, slot);
-  RequestCustomUIRefresh(in_data, out_data, extra, true);
-  if (out_data) {
-    out_data->out_flags |= PF_OutFlag_FORCE_RERENDER;
-  }
-  return PF_Err_NONE;
-}
-
-PF_Err AdjustPointControllerCursor(
-  PF_InData* in_data,
-  PF_OutData* out_data,
-  PF_ParamDef* params[],
-  PF_EventExtra* extra
-) {
-  (void)in_data;
-  (void)out_data;
-  std::array<PointHandleDrawInfo, kControllerPointSlotCount> infos{};
-  if (!PopulatePointHandleDrawInfos(in_data, extra, params, &infos)) {
-    return PF_Err_NONE;
-  }
-
-  PF_Point mousePoint = *reinterpret_cast<PF_Point*>(&extra->u.adjust_cursor.screen_point);
-  if (HitTestPointHandle(infos, mousePoint) >= 0) {
-    extra->u.adjust_cursor.set_cursor = PF_Cursor_DRAG_DOT;
-    extra->evt_out_flags |= PF_EO_HANDLED_EVENT;
-  }
-  return PF_Err_NONE;
-}
-
-PF_Err HandleCustomCompUIEvent(
-  PF_InData* in_data,
-  PF_OutData* out_data,
-  PF_ParamDef* params[],
-  PF_LayerDef* output,
-  PF_EventExtra* extra
-) {
-  (void)output;
-  if (!extra) {
-    return PF_Err_BAD_CALLBACK_PARAM;
-  }
-
-  const std::uint64_t instanceId = ResolvePointControllerInstanceId(in_data, params);
-  EnsureActivePointOverlaySlot(instanceId);
-  const PF_WindowType windowType =
-    (extra->contextH && *extra->contextH) ? (*extra->contextH)->w_type : PF_Window_NONE;
-
-  if (extra->e_type == PF_Event_DO_CLICK && extra->u.do_click.send_drag) {
-    extra->e_type = PF_Event_DRAG;
-  }
-
-  switch (extra->e_type) {
-    case PF_Event_NEW_CONTEXT:
-    case PF_Event_ACTIVATE:
-      extra->evt_out_flags |= PF_EO_HANDLED_EVENT;
-      if (out_data) {
-        out_data->out_flags |= PF_OutFlag_REFRESH_UI;
-      }
-      return PF_Err_NONE;
-    case PF_Event_DO_CLICK:
-      if (windowType != PF_Window_COMP && windowType != PF_Window_LAYER) {
-        return PF_Err_NONE;
-      }
-      return BeginPointControllerDrag(in_data, out_data, params, extra);
-    case PF_Event_DRAG:
-      if (windowType != PF_Window_COMP && windowType != PF_Window_LAYER) {
-        return PF_Err_NONE;
-      }
-      return UpdateDraggedPointController(in_data, out_data, params, extra);
-    case PF_Event_DRAW:
-      if (windowType != PF_Window_COMP && windowType != PF_Window_LAYER) {
-        return PF_Err_NONE;
-      }
-      return DrawPointControllerHandles(in_data, out_data, params, extra);
-    case PF_Event_ADJUST_CURSOR:
-      if (windowType != PF_Window_COMP && windowType != PF_Window_LAYER) {
-        return PF_Err_NONE;
-      }
-      return AdjustPointControllerCursor(in_data, out_data, params, extra);
-    default:
-      return PF_Err_NONE;
-  }
 }
 
 PF_Err DrawAngleControllerUi(
@@ -3804,10 +2180,10 @@ PF_Err DrawAngleControllerUi(
     layout.knobCenter.y + static_cast<float>(std::sin(radians) * indicatorRadius)
   };
 
-  const DRAWBOT_ColorRGBA ringColor = MakePointHandleColor(0.72f, 0.72f, 0.72f, 1.0f);
-  const DRAWBOT_ColorRGBA indicatorColor = MakePointHandleColor(0.90f, 0.90f, 0.90f, 1.0f);
-  const DRAWBOT_ColorRGBA valueColor = MakePointHandleColor(0.31f, 0.60f, 0.98f, 1.0f);
-  const DRAWBOT_ColorRGBA xColor = MakePointHandleColor(0.92f, 0.92f, 0.92f, 1.0f);
+  const DRAWBOT_ColorRGBA ringColor = MakeCustomUiColor(0.72f, 0.72f, 0.72f, 1.0f);
+  const DRAWBOT_ColorRGBA indicatorColor = MakeCustomUiColor(0.90f, 0.90f, 0.90f, 1.0f);
+  const DRAWBOT_ColorRGBA valueColor = MakeCustomUiColor(0.31f, 0.60f, 0.98f, 1.0f);
+  const DRAWBOT_ColorRGBA xColor = MakeCustomUiColor(0.92f, 0.92f, 0.92f, 1.0f);
 
   DRAWBOT_PenRef ringPen = NULL;
   DRAWBOT_PenRef indicatorPen = NULL;
@@ -3972,7 +2348,8 @@ PF_Err DrawColorControllerUi(
   if (!colorParam) {
     return PF_Err_NONE;
   }
-  const ControllerColorValue color = ReadColorArbHandle(in_data, colorParam->u.arb_d.value);
+  const ControllerColorValue color =
+    ResolveColorControllerValueFromParams(in_data, params, slot);
 
   AEFX_SuiteScoper<PF_EffectCustomUISuite2> customUiSuite(
     in_data,
@@ -4030,14 +2407,14 @@ PF_Err DrawColorControllerUi(
     std::max(0.0f, swatchRect.height - 2.0f)
   };
 
-  const DRAWBOT_ColorRGBA borderColor = MakePointHandleColor(0.36f, 0.36f, 0.36f, 1.0f);
-  const DRAWBOT_ColorRGBA fillColor = MakePointHandleColor(
+  const DRAWBOT_ColorRGBA borderColor = MakeCustomUiColor(0.36f, 0.36f, 0.36f, 1.0f);
+  const DRAWBOT_ColorRGBA fillColor = MakeCustomUiColor(
     static_cast<float>(ClampColorComponent(color.r, 1.0)),
     static_cast<float>(ClampColorComponent(color.g, 1.0)),
     static_cast<float>(ClampColorComponent(color.b, 1.0)),
     1.0f
   );
-  const DRAWBOT_ColorRGBA alphaHintColor = MakePointHandleColor(0.20f, 0.20f, 0.20f, 1.0f);
+  const DRAWBOT_ColorRGBA alphaHintColor = MakeCustomUiColor(0.20f, 0.20f, 0.20f, 1.0f);
 
   surfaceSuite->PaintRect(surfaceRef, &borderColor, &swatchRect);
   surfaceSuite->PaintRect(surfaceRef, &alphaHintColor, &innerRect);
@@ -4093,16 +2470,7 @@ PF_Err ClickColorControllerUi(
   if (persistErr != PF_Err_NONE) {
     return persistErr;
   }
-  const std::uint64_t instanceId = ResolvePointControllerInstanceId(in_data, params);
-  MarkControllerColorHistoryDirty(in_data, instanceId, slot, "color-ui-picked");
-  SyncLiveControllerStateFromParams(
-    in_data,
-    out_data,
-    params,
-    false,
-    true,
-    false
-  );
+  MarkControllerColorHistoryDirty(in_data, params, slot, "color-ui-picked");
   RequestCustomUIRefresh(in_data, out_data, extra, true);
   extra->evt_out_flags |= PF_EO_HANDLED_EVENT | PF_EO_UPDATE_NOW;
   return PF_Err_NONE;
@@ -4143,14 +2511,15 @@ PF_Err BeginAngleControllerDrag(
     PF_ParamDef* angleParam = params ? params[ControllerAngleValueParamIndex(angleParamSlot)] : NULL;
     const double angleDegrees =
       angleParam ? static_cast<double>(angleParam->u.fs_d.value) : 0.0;
-    ContinueAngleUiDrag(
+    UpdateAngleUiDragState(
       extra,
       slot,
       dragTarget,
       static_cast<double>(mousePoint.h),
       true,
       angleDegrees,
-      angleParam != NULL
+      angleParam != NULL,
+      false
     );
     RequestCustomUIRefresh(in_data, out_data, extra, true);
     extra->evt_out_flags |= PF_EO_HANDLED_EVENT | PF_EO_UPDATE_NOW;
@@ -4160,13 +2529,14 @@ PF_Err BeginAngleControllerDrag(
   double trackedValue = 0.0;
   const bool hasTrackedValue = TryComputeAngleUiPointerDegrees(layout, mousePoint, &trackedValue);
 
-  ContinueAngleUiDrag(
+  UpdateAngleUiDragState(
     extra,
     slot,
     dragTarget,
     trackedValue,
     hasTrackedValue,
     0.0,
+    false,
     false
   );
   RequestCustomUIRefresh(in_data, out_data, extra, false);
@@ -4245,13 +2615,14 @@ PF_Err UpdateAngleControllerDrag(
       }
     }
 
-    ContinueAngleUiDrag(
+    UpdateAngleUiDragState(
       extra,
       slot,
       dragTarget,
       anchorMouseX,
       true,
       anchorDegrees,
+      true,
       true
     );
 
@@ -4268,24 +2639,13 @@ PF_Err UpdateAngleControllerDrag(
       }
       MarkControllerParamHistoryDirty(
         in_data,
-        ResolvePointControllerInstanceId(in_data, params),
         ControllerAngleValueParamIndex(angleParamSlot),
-        dragTarget == AngleUiDragTarget::kTurnsText ? "angle-ui-turns-scrub" : "angle-ui-degrees-scrub"
-      );
-      SyncLiveControllerStateFromParams(
-        in_data,
-        out_data,
-        params,
-        true,
-        false,
-        false
+        dragTarget == AngleUiDragTarget::kTurnsText ? "angle-ui-turns-scrub" : "angle-ui-degrees-scrub",
+        params[PARAM_INSTANCE_ID] ? params[PARAM_INSTANCE_ID]->u.sd.value : 0
       );
     }
 
     RequestCustomUIRefresh(in_data, out_data, extra, true);
-    if (didChangeValue && out_data) {
-      out_data->out_flags |= PF_OutFlag_FORCE_RERENDER;
-    }
     extra->evt_out_flags |= PF_EO_HANDLED_EVENT;
     return PF_Err_NONE;
   }
@@ -4309,14 +2669,15 @@ PF_Err UpdateAngleControllerDrag(
       didChangeValue = true;
     }
   }
-  ContinueAngleUiDrag(
+  UpdateAngleUiDragState(
     extra,
     slot,
     dragTarget,
     pointerDegrees,
     hasPointerDegrees,
     0.0,
-    false
+    false,
+    true
   );
 
   if (didChangeValue) {
@@ -4332,24 +2693,13 @@ PF_Err UpdateAngleControllerDrag(
     }
     MarkControllerParamHistoryDirty(
       in_data,
-      ResolvePointControllerInstanceId(in_data, params),
       ControllerAngleValueParamIndex(angleParamSlot),
-      "angle-ui-drag"
-    );
-    SyncLiveControllerStateFromParams(
-      in_data,
-      out_data,
-      params,
-      true,
-      false,
-      false
+      "angle-ui-drag",
+      params[PARAM_INSTANCE_ID] ? params[PARAM_INSTANCE_ID]->u.sd.value : 0
     );
   }
 
   RequestCustomUIRefresh(in_data, out_data, extra, true);
-  if (out_data) {
-    out_data->out_flags |= PF_OutFlag_FORCE_RERENDER;
-  }
   return PF_Err_NONE;
 }
 
@@ -4447,13 +2797,59 @@ PF_Err HandleUserChangedParam(
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
+  if (extra->param_index == PARAM_INSTANCE_ID) {
+    const A_long instanceId =
+      params && params[PARAM_INSTANCE_ID] ? params[PARAM_INSTANCE_ID]->u.sd.value : 0;
+    ResolveStableInstanceId(in_data, instanceId);
+    PF_Err snapshotErr = SyncSequenceRuntimeSnapshotFromLocalFiles(in_data, out_data, params);
+    if (snapshotErr != PF_Err_NONE) {
+      return snapshotErr;
+    }
+
+    // Setting the transport id is the one guaranteed creation-time change,
+    // even when Revision happens to be zero. Initialize every controller kind
+    // here exactly once; native and custom controls must share this lifecycle.
+    const A_long revision =
+      params && params[PARAM_REVISION] ? params[PARAM_REVISION]->u.sd.value : -1;
+    std::string bundleError;
+    const RuntimeSketchBundle bundle =
+      ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
+    if (LookupSyncedRevision(in_data, params) < 0 &&
+        !bundle.controllerHash.empty()) {
+      PF_Err syncErr = SyncControllerParamValuesFromBundle(
+        in_data,
+        out_data,
+        params,
+        bundle,
+        "instance-created"
+      );
+      if (syncErr != PF_Err_NONE) {
+        return syncErr;
+      }
+      RegisterSyncedRevision(in_data, params, revision);
+      RegisterSyncedControllerHash(in_data, params, bundle.controllerHash);
+    }
+    return PF_Err_NONE;
+  }
+
   if (extra->param_index == PARAM_REVISION) {
+    PF_Err snapshotErr = SyncSequenceRuntimeSnapshotFromLocalFiles(in_data, out_data, params);
+    if (snapshotErr != PF_Err_NONE) {
+      return snapshotErr;
+    }
     const A_long revision = params && params[PARAM_REVISION] ? params[PARAM_REVISION]->u.sd.value : -1;
     std::string bundleError;
     const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
+    if (bundle.controllerHash.empty()) {
+      // The creation transport has not become visible yet. Do not stamp an
+      // empty schema as initialized; a later instance/revision callback can
+      // still apply the real defaults.
+      return PF_Err_NONE;
+    }
     const bool revisionChanged = LookupSyncedRevision(in_data, params) != revision;
+    const std::string syncedControllerHash = LookupSyncedControllerHash(in_data, params);
     const bool controllerHashChanged =
-      LookupSyncedControllerHash(in_data, params) != bundle.controllerHash;
+      !syncedControllerHash.empty() && syncedControllerHash != bundle.controllerHash;
     if (revisionChanged || controllerHashChanged) {
       PF_Err syncErr = SyncControllerParamValuesFromBundle(
         in_data,
@@ -4465,8 +2861,12 @@ PF_Err HandleUserChangedParam(
       if (syncErr != PF_Err_NONE) {
         return syncErr;
       }
-      SyncLiveControllerStateFromBundle(in_data, params, bundle);
       RegisterSyncedRevision(in_data, params, revision);
+      RegisterSyncedControllerHash(in_data, params, bundle.controllerHash);
+    } else if (syncedControllerHash.empty()) {
+      // A duplicated/reloaded effect has its own sequence runtime but already owns
+      // initialized AE parameters and an embedded sequence snapshot. Seed the
+      // process-local schema marker without resetting the copied controller values.
       RegisterSyncedControllerHash(in_data, params, bundle.controllerHash);
     }
     return PF_Err_NONE;
@@ -4476,58 +2876,27 @@ PF_Err HandleUserChangedParam(
     return PF_Err_NONE;
   }
 
-  const std::uint64_t instanceId = ResolvePointControllerInstanceId(in_data, params);
-  int pointSlot = -1;
   int sliderSlot = -1;
   int angleParamSlot = -1;
-  int angleLogicalSlot = -1;
   int colorSlot = -1;
-  int checkboxSlot = -1;
-  int selectSlot = -1;
-  if (TryMapPointParamIndexToSlot(extra->param_index, &pointSlot)) {
-    SetActivePointOverlaySlot(instanceId, pointSlot);
-  }
   (void)TryMapSliderParamIndexToSlot(extra->param_index, &sliderSlot);
   const bool angleValueChanged =
     TryMapAngleValueParamIndexToSlot(extra->param_index, &angleParamSlot);
   const bool angleUiChanged =
     TryMapAngleUiParamIndexToSlot(extra->param_index, &angleParamSlot);
-  if (angleValueChanged || angleUiChanged) {
-    std::string bundleError;
-    const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
-    angleLogicalSlot = ResolveLogicalSlotForControllerParamSlot(
-      bundle,
-      RuntimeControllerSlotKind::kAngle,
-      angleParamSlot
-    );
-  }
-  (void)TryMapSelectParamIndexToSlot(extra->param_index, &selectSlot);
-  const bool colorValueChanged = TryMapColorValueParamIndexToSlot(extra->param_index, &colorSlot);
-  (void)TryMapCheckboxParamIndexToSlot(extra->param_index, &checkboxSlot);
+  const bool colorValueChanged = TryMapColorParamIndexToSlot(extra->param_index, &colorSlot);
   MarkControllerParamHistoryDirty(
     in_data,
-    instanceId,
     (angleValueChanged || angleUiChanged)
       ? ControllerAngleValueParamIndex(angleParamSlot)
       : colorValueChanged
         ? ControllerColorValueParamIndex(colorSlot)
       : extra->param_index,
-    "controller-param-changed"
+    "controller-param-changed",
+    params && params[PARAM_INSTANCE_ID]
+      ? params[PARAM_INSTANCE_ID]->u.sd.value
+      : 0
   );
-  SyncLiveControllerStateFromParams(
-    in_data,
-    out_data,
-    params,
-    angleValueChanged || angleUiChanged,
-    colorValueChanged,
-    selectSlot >= 0
-  );
-  if (selectSlot >= 0) {
-    ClearCachedSketchByKey(
-      static_cast<std::uintptr_t>(instanceId),
-      "select-controller-changed"
-    );
-  }
   if (sliderSlot >= 0) {
     PF_ParamDef* sliderParam = params[ControllerSliderParamIndex(sliderSlot)];
     if (sliderParam) {
@@ -4550,10 +2919,11 @@ PF_Err HandleUserChangedParam(
       }
     }
   }
-  if (out_data) {
-    out_data->out_flags |= PF_OutFlag_REFRESH_UI;
-    out_data->out_flags |= PF_OutFlag_FORCE_RERENDER;
-  }
+  // Standard parameter edits already invalidate rendering. Any value adjusted
+  // above uses PF_ChangeFlag_CHANGED_VALUE, which also requests a rerender.
+  // REFRESH_UI is not a valid USER_CHANGED_PARAM return flag and forcing a
+  // rerender here causes unnecessary full cache invalidation on every drag tick.
+  (void)out_data;
   return PF_Err_NONE;
 }
 
@@ -4562,40 +2932,30 @@ PF_Err UpdateParamsUI(
   PF_OutData* out_data,
   PF_ParamDef* params[]
 ) {
-  std::string bundleError;
-  const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
   PF_Err snapshotErr = SyncSequenceRuntimeSnapshotFromLocalFiles(in_data, out_data, params);
   if (snapshotErr != PF_Err_NONE) {
     return snapshotErr;
   }
-  const A_long revision = (params && params[PARAM_REVISION]) ? params[PARAM_REVISION]->u.sd.value : -1;
-  const A_long syncedRevision = LookupSyncedRevision(in_data, params);
-  const std::string syncedControllerHash = LookupSyncedControllerHash(in_data, params);
-  const bool controllerHashChanged = syncedControllerHash != bundle.controllerHash;
-  bool refreshedLiveStateFromBundle = false;
-  if (revision >= 0 && (syncedRevision != revision || controllerHashChanged)) {
-    PF_Err syncErr = SyncControllerParamValuesFromBundle(
-      in_data,
-      out_data,
-      params,
-      bundle,
-      "update-params-ui"
-    );
-    if (syncErr != PF_Err_NONE) {
-      return syncErr;
-    }
-    RegisterSyncedRevision(in_data, params, revision);
-    RegisterSyncedControllerHash(in_data, params, bundle.controllerHash);
-    if (in_data && in_data->sequence_data) {
-      WriteSequenceSyncedRevision(in_data, in_data->sequence_data, revision);
-    }
-    SyncLiveControllerStateFromBundle(in_data, params, bundle);
-    refreshedLiveStateFromBundle = true;
+  std::string bundleError;
+  const RuntimeSketchBundle bundle = ReadEffectRuntimeSketchBundle(in_data, params, &bundleError);
+  // UPDATE_PARAMS_UI is metadata-only. AE owns controller values and keyframes;
+  // writing defaults here races the user's edit and makes controls snap back.
+  // Crucially, this selector must not stamp value-initialization markers. It
+  // often runs before the creation-time Instance/Revision callbacks; doing so
+  // would make those callbacks incorrectly skip the actual default values.
+
+  const auto runtimeKey = ResolveEffectRuntimeKey(in_data);
+  const std::string appliedUiHash = GetEffectSessionControllerUiHash(runtimeKey);
+  if (runtimeKey != 0 && !bundle.controllerHash.empty() &&
+      appliedUiHash == bundle.controllerHash) {
+    return PF_Err_NONE;
   }
-  if (!refreshedLiveStateFromBundle) {
-    SyncLiveControllerStateFromParams(in_data, out_data, params);
+
+  const PF_Err uiErr = SyncControllerParamUI(in_data, out_data, params);
+  if (uiErr == PF_Err_NONE && runtimeKey != 0 && !bundle.controllerHash.empty()) {
+    SetEffectSessionControllerUiHash(runtimeKey, bundle.controllerHash);
   }
-  return SyncControllerParamUI(in_data, out_data, params);
+  return uiErr;
 }
 
 PF_LayerDef MakeSceneSurface(const PF_LayerDef& outputWorld, const RenderInvocationInfo& invocation) {
@@ -4606,8 +2966,10 @@ PF_LayerDef MakeSceneSurface(const PF_LayerDef& outputWorld, const RenderInvocat
 }
 
 struct OutputCopyOriginInfo {
-  A_long sourceOriginX = 0;
-  A_long sourceOriginY = 0;
+  double sourceOriginX = 0.0;
+  double sourceOriginY = 0.0;
+  double sourceStepX = 1.0;
+  double sourceStepY = 1.0;
   bool outputLooksLikeTile = false;
   const char* mode = "zero";
 };
@@ -4619,35 +2981,80 @@ OutputCopyOriginInfo ResolveOutputCopyOrigin(
   OutputCopyOriginInfo result;
   const A_long canvasWidth = std::max<A_long>(1, invocation.canvasWidth);
   const A_long canvasHeight = std::max<A_long>(1, invocation.canvasHeight);
+  const A_long renderCanvasWidth = std::max<A_long>(1, invocation.renderCanvasWidth);
+  const A_long renderCanvasHeight = std::max<A_long>(1, invocation.renderCanvasHeight);
+  // Derive the copy step from the actual integer render canvas, rather than
+  // only inverting AE's rational scale. This keeps the far/right edges in the
+  // image when an odd logical dimension is rounded down by the host.
+  result.sourceStepX = static_cast<double>(canvasWidth) /
+    static_cast<double>(renderCanvasWidth);
+  result.sourceStepY = static_cast<double>(canvasHeight) /
+    static_cast<double>(renderCanvasHeight);
   const A_long requestedTileWidth = std::max<A_long>(0, invocation.tileRight - invocation.tileLeft);
   const A_long requestedTileHeight = std::max<A_long>(0, invocation.tileBottom - invocation.tileTop);
+  const A_long requestedPhysicalWidth = requestedTileWidth > 0
+    ? std::max<A_long>(
+        1,
+        static_cast<A_long>(std::ceil(
+          static_cast<double>(requestedTileWidth) / result.sourceStepX
+        ))
+      )
+    : 0;
+  const A_long requestedPhysicalHeight = requestedTileHeight > 0
+    ? std::max<A_long>(
+        1,
+        static_cast<A_long>(std::ceil(
+          static_cast<double>(requestedTileHeight) / result.sourceStepY
+        ))
+      )
+    : 0;
   result.outputLooksLikeTile =
-    requestedTileWidth > 0 &&
-    requestedTileHeight > 0 &&
-    outputWorld.width == requestedTileWidth &&
-    outputWorld.height == requestedTileHeight;
+    requestedPhysicalWidth > 0 &&
+    requestedPhysicalHeight > 0 &&
+    std::abs(outputWorld.width - requestedPhysicalWidth) <= 1 &&
+    std::abs(outputWorld.height - requestedPhysicalHeight) <= 1;
 
+  // Smart Render world origins and PreRender rectangles are expressed in AE
+  // layer coordinates, even when the backing buffer has been downsampled.
+  // Keep the origin logical and use sourceStep only for successive physical
+  // output pixels. Multiplying origin_x/y by sourceStep here a second time
+  // makes a moving ROI sample farther to the right/bottom and presents the
+  // rendered content in the opposite direction during controller drags.
   const A_long originSourceX = outputWorld.origin_x - invocation.canvasLeft;
   const A_long originSourceY = outputWorld.origin_y - invocation.canvasTop;
+  const double outputLogicalWidth =
+    static_cast<double>(std::max<A_long>(0, outputWorld.width)) * result.sourceStepX;
+  const double outputLogicalHeight =
+    static_cast<double>(std::max<A_long>(0, outputWorld.height)) * result.sourceStepY;
+  const double edgeToleranceX = std::max(1.0, result.sourceStepX);
+  const double edgeToleranceY = std::max(1.0, result.sourceStepY);
   const bool outputOriginFitsCanvas =
     originSourceX >= 0 &&
     originSourceY >= 0 &&
     outputWorld.width >= 0 &&
     outputWorld.height >= 0 &&
-    originSourceX + outputWorld.width <= canvasWidth &&
-    originSourceY + outputWorld.height <= canvasHeight;
+    static_cast<double>(originSourceX) + outputLogicalWidth <=
+      static_cast<double>(canvasWidth) + edgeToleranceX &&
+    static_cast<double>(originSourceY) + outputLogicalHeight <=
+      static_cast<double>(canvasHeight) + edgeToleranceY;
   if (outputOriginFitsCanvas) {
-    result.sourceOriginX = originSourceX;
-    result.sourceOriginY = originSourceY;
+    result.sourceOriginX = static_cast<double>(originSourceX);
+    result.sourceOriginY = static_cast<double>(originSourceY);
     result.mode = "output-origin";
     return result;
   }
 
   if (result.outputLooksLikeTile) {
-    result.sourceOriginX = std::max<A_long>(0, invocation.tileLeft - invocation.canvasLeft);
-    result.sourceOriginY = std::max<A_long>(0, invocation.tileTop - invocation.canvasTop);
+    result.sourceOriginX = static_cast<double>(
+      std::max<A_long>(0, invocation.tileLeft - invocation.canvasLeft)
+    );
+    result.sourceOriginY = static_cast<double>(
+      std::max<A_long>(0, invocation.tileTop - invocation.canvasTop)
+    );
     result.mode = "requested-tile";
   }
+  result.sourceOriginX = std::min<double>(result.sourceOriginX, canvasWidth);
+  result.sourceOriginY = std::min<double>(result.sourceOriginY, canvasHeight);
   return result;
 }
 
@@ -4658,13 +3065,54 @@ struct LegacySequenceCacheDataHeader {
   A_long syncedRevision = -1;
 };
 
+struct SnapshotSequenceCacheDataHeader {
+  A_u_long magic = 0;
+  A_u_long version = 0;
+  std::uint64_t instanceId = 0;
+  A_long syncedRevision = -1;
+  A_u_long bundleTextSize = 0;
+  A_u_long sourceTextSize = 0;
+};
+
+struct SharedRuntimeSequenceCacheDataHeader {
+  A_u_long magic = 0;
+  A_u_long version = 0;
+  std::uint64_t instanceId = 0;
+  A_long syncedRevision = -1;
+  A_u_long bundleTextSize = 0;
+  A_u_long sourceTextSize = 0;
+  std::uint64_t runtimeIdentity = 0;
+};
+
 bool IsCompatibleSequenceDataVersion(A_u_long version) {
-  return version == kSequenceCacheDataLegacyVersion || version == kSequenceCacheDataVersion;
+  return
+    version == kSequenceCacheDataLegacyVersion ||
+    version == kSequenceCacheDataSnapshotVersion ||
+    version == kSequenceCacheDataSharedRuntimeVersion ||
+    version == kSequenceCacheDataVersion;
 }
+
+std::uint64_t NextSequenceUiSessionToken() {
+  static std::atomic<std::uint64_t> nextIdentity{
+    static_cast<std::uint64_t>(
+      std::chrono::high_resolution_clock::now().time_since_epoch().count()
+    ) | 1ULL
+  };
+  std::uint64_t identity = nextIdentity.fetch_add(2, std::memory_order_relaxed);
+  if (identity == 0) {
+    identity = nextIdentity.fetch_add(2, std::memory_order_relaxed);
+  }
+  return identity;
+}
+
+enum class SequenceUiSessionMode {
+  kReuseExisting,
+  kCreateFresh
+};
 
 bool ReadCompatibleSequenceDataHeader(
   PF_InData* in_data,
-  PF_Handle handle,
+  PF_ConstHandle handle,
   SequenceCacheData* outHeader
 ) {
   if (!in_data || !handle || !outHeader) {
@@ -4690,12 +3138,20 @@ bool ReadCompatibleSequenceDataHeader(
   outHeader->instanceId = legacyHeader->instanceId;
   outHeader->syncedRevision = legacyHeader->syncedRevision;
 
+  if ((legacyHeader->version == kSequenceCacheDataSnapshotVersion ||
+       legacyHeader->version == kSequenceCacheDataSharedRuntimeVersion ||
+       legacyHeader->version == kSequenceCacheDataVersion) &&
+      handleSize >= sizeof(SnapshotSequenceCacheDataHeader)) {
+    const auto* snapshotHeader =
+      reinterpret_cast<const SnapshotSequenceCacheDataHeader*>(legacyHeader);
+    outHeader->bundleTextSize = snapshotHeader->bundleTextSize;
+    outHeader->sourceTextSize = snapshotHeader->sourceTextSize;
+  }
   if (legacyHeader->version == kSequenceCacheDataVersion &&
       handleSize >= sizeof(SequenceCacheData)) {
     const auto* sequenceData =
       reinterpret_cast<const SequenceCacheData*>(legacyHeader);
-    outHeader->bundleTextSize = sequenceData->bundleTextSize;
-    outHeader->sourceTextSize = sequenceData->sourceTextSize;
+    outHeader->uiSessionToken = sequenceData->uiSessionToken;
   }
   return true;
 }
@@ -4703,20 +3159,27 @@ bool ReadCompatibleSequenceDataHeader(
 PF_Err EnsureSequenceDataHandleInitialized(
   PF_InData* in_data,
   PF_OutData* out_data,
-  PF_Handle* outHandle
+  PF_Handle* outHandle,
+  SequenceUiSessionMode uiSessionMode
 ) {
   if (!in_data || !outHandle) {
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
+  const auto previousRuntimeKey = ResolveEffectRuntimeKey(in_data);
   PF_Handle handle = in_data->sequence_data;
+  const PF_ConstHandle sourceHandle = handle
+    ? reinterpret_cast<PF_ConstHandle>(handle)
+    : runtime_internal::ResolveEffectSequenceDataHandle(in_data);
   SequenceCacheData header;
   const bool hadCompatibleHeader =
-    ReadCompatibleSequenceDataHeader(in_data, handle, &header);
+    ReadCompatibleSequenceDataHeader(in_data, sourceHandle, &header);
 
-  if (handle &&
+  if (uiSessionMode == SequenceUiSessionMode::kReuseExisting &&
+      handle &&
       hadCompatibleHeader &&
       header.version == kSequenceCacheDataVersion &&
+      header.uiSessionToken != 0 &&
       PF_GET_HANDLE_SIZE(handle) >= sizeof(SequenceCacheData)) {
     if (out_data) {
       out_data->sequence_data = handle;
@@ -4725,14 +3188,37 @@ PF_Err EnsureSequenceDataHandleInitialized(
     return PF_Err_NONE;
   }
 
+  std::vector<char> preservedPayload;
+  if (sourceHandle && hadCompatibleHeader &&
+      (header.version == kSequenceCacheDataSnapshotVersion ||
+       header.version == kSequenceCacheDataSharedRuntimeVersion ||
+       header.version == kSequenceCacheDataVersion)) {
+    const std::size_t oldHeaderSize =
+      header.version == kSequenceCacheDataVersion
+        ? sizeof(SequenceCacheData)
+        : (header.version == kSequenceCacheDataSharedRuntimeVersion
+            ? sizeof(SharedRuntimeSequenceCacheDataHeader)
+            : sizeof(SnapshotSequenceCacheDataHeader));
+    const std::size_t payloadBytes =
+      static_cast<std::size_t>(header.bundleTextSize) +
+      static_cast<std::size_t>(header.sourceTextSize);
+    if (PF_GET_HANDLE_SIZE(sourceHandle) >= oldHeaderSize + payloadBytes && payloadBytes > 0) {
+      const char* oldPayload =
+        reinterpret_cast<const char*>(DH(sourceHandle)) + oldHeaderSize;
+      preservedPayload.assign(oldPayload, oldPayload + payloadBytes);
+    }
+  }
+
+  const std::size_t requiredSize = sizeof(SequenceCacheData) + preservedPayload.size();
+
   PF_Err err = PF_Err_NONE;
   if (!handle) {
-    handle = PF_NEW_HANDLE(sizeof(SequenceCacheData));
+    handle = PF_NEW_HANDLE(static_cast<A_u_long>(requiredSize));
     if (!handle) {
       return PF_Err_OUT_OF_MEMORY;
     }
   } else {
-    err = PF_RESIZE_HANDLE(sizeof(SequenceCacheData), &handle);
+    err = PF_RESIZE_HANDLE(static_cast<A_u_long>(requiredSize), &handle);
     if (err != PF_Err_NONE) {
       return err;
     }
@@ -4746,14 +3232,31 @@ PF_Err EnsureSequenceDataHandleInitialized(
   AEFX_CLR_STRUCT(*sequenceData);
   sequenceData->magic = kSequenceCacheDataMagic;
   sequenceData->version = kSequenceCacheDataVersion;
+  sequenceData->uiSessionToken = NextSequenceUiSessionToken();
   if (hadCompatibleHeader) {
     sequenceData->instanceId = header.instanceId;
     sequenceData->syncedRevision = header.syncedRevision;
+    sequenceData->bundleTextSize = header.bundleTextSize;
+    sequenceData->sourceTextSize = header.sourceTextSize;
+  }
+  if (!preservedPayload.empty()) {
+    std::memcpy(sequenceData + 1, preservedPayload.data(), preservedPayload.size());
   }
 
   in_data->sequence_data = handle;
   if (out_data) {
     out_data->sequence_data = handle;
+  }
+  const auto currentRuntimeKey = ResolveEffectRuntimeKey(in_data);
+  // A fresh session is requested by AE lifecycle selectors such as Resetup.
+  // The prior token can belong to the source effect when AE has duplicated the
+  // sequence handle in memory, so deleting it here would invalidate the source
+  // effect's UI state. Reuse-mode replacements own their prior session and may
+  // safely retire it.
+  if (uiSessionMode == SequenceUiSessionMode::kReuseExisting &&
+      previousRuntimeKey &&
+      previousRuntimeKey != currentRuntimeKey) {
+    DiscardEffectRuntimeState(previousRuntimeKey, "sequence-handle-replaced");
   }
   *outHandle = handle;
   return PF_Err_NONE;
@@ -4766,7 +3269,11 @@ bool SequenceRuntimeSnapshotMatches(
   const std::string& sourceText
 ) {
   SequenceCacheData header;
-  if (!ReadCompatibleSequenceDataHeader(in_data, handle, &header) ||
+  if (!ReadCompatibleSequenceDataHeader(
+        in_data,
+        reinterpret_cast<PF_ConstHandle>(handle),
+        &header
+      ) ||
       header.version != kSequenceCacheDataVersion) {
     return false;
   }
@@ -4799,6 +3306,40 @@ bool SequenceRuntimeSnapshotMatches(
   return bundleMatches && sourceMatches;
 }
 
+std::optional<std::string> ReadEmbeddedSequenceBundleText(PF_InData* in_data) {
+  if (!in_data || !in_data->sequence_data) {
+    return std::nullopt;
+  }
+
+  SequenceCacheData header;
+  if (!ReadCompatibleSequenceDataHeader(
+        in_data,
+        reinterpret_cast<PF_ConstHandle>(in_data->sequence_data),
+        &header
+      ) ||
+      header.version != kSequenceCacheDataVersion ||
+      header.bundleTextSize == 0 ||
+      header.sourceTextSize == 0) {
+    return std::nullopt;
+  }
+
+  const std::size_t payloadBytes =
+    static_cast<std::size_t>(header.bundleTextSize) +
+    static_cast<std::size_t>(header.sourceTextSize);
+  const std::size_t expectedSize = sizeof(SequenceCacheData) + payloadBytes;
+  if (PF_GET_HANDLE_SIZE(in_data->sequence_data) < expectedSize) {
+    return std::nullopt;
+  }
+
+  const auto* sequenceData =
+    reinterpret_cast<const SequenceCacheData*>(DH(in_data->sequence_data));
+  if (!sequenceData) {
+    return std::nullopt;
+  }
+  const char* payload = reinterpret_cast<const char*>(sequenceData + 1);
+  return std::string(payload, header.bundleTextSize);
+}
+
 PF_Err WriteSequenceRuntimeSnapshot(
   PF_InData* in_data,
   PF_OutData* out_data,
@@ -4810,7 +3351,12 @@ PF_Err WriteSequenceRuntimeSnapshot(
   }
 
   PF_Handle handle = NULL;
-  PF_Err err = EnsureSequenceDataHandleInitialized(in_data, out_data, &handle);
+  PF_Err err = EnsureSequenceDataHandleInitialized(
+    in_data,
+    out_data,
+    &handle,
+    SequenceUiSessionMode::kReuseExisting
+  );
   if (err != PF_Err_NONE) {
     return err;
   }
@@ -4819,6 +3365,7 @@ PF_Err WriteSequenceRuntimeSnapshot(
     return PF_Err_NONE;
   }
 
+  const auto previousRuntimeKey = ResolveEffectRuntimeKey(in_data);
   const std::size_t requiredSize =
     sizeof(SequenceCacheData) + bundleText.size() + sourceText.size();
   err = PF_RESIZE_HANDLE(static_cast<A_u_long>(requiredSize), &handle);
@@ -4832,6 +3379,7 @@ PF_Err WriteSequenceRuntimeSnapshot(
   }
 
   const std::uint64_t preservedInstanceId = sequenceData->instanceId;
+  const std::uint64_t preservedUiSessionToken = sequenceData->uiSessionToken;
   const A_long preservedSyncedRevision = sequenceData->syncedRevision;
   AEFX_CLR_STRUCT(*sequenceData);
   sequenceData->magic = kSequenceCacheDataMagic;
@@ -4840,6 +3388,7 @@ PF_Err WriteSequenceRuntimeSnapshot(
   sequenceData->syncedRevision = preservedSyncedRevision;
   sequenceData->bundleTextSize = static_cast<A_u_long>(bundleText.size());
   sequenceData->sourceTextSize = static_cast<A_u_long>(sourceText.size());
+  sequenceData->uiSessionToken = preservedUiSessionToken;
 
   char* payload = reinterpret_cast<char*>(sequenceData + 1);
   if (!bundleText.empty()) {
@@ -4853,33 +3402,48 @@ PF_Err WriteSequenceRuntimeSnapshot(
   if (out_data) {
     out_data->sequence_data = handle;
   }
+  const auto currentRuntimeKey = ResolveEffectRuntimeKey(in_data);
+  if (previousRuntimeKey && previousRuntimeKey != currentRuntimeKey) {
+    DiscardEffectRuntimeState(previousRuntimeKey, "sequence-snapshot-resized");
+  }
   return PF_Err_NONE;
 }
 
-PF_Err CopySequenceDataHandle(PF_InData* in_data, PF_OutData* out_data) {
+PF_Err CopyFlattenedDocumentSnapshot(PF_InData* in_data, PF_OutData* out_data) {
   if (!out_data) {
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
-  if (!in_data || !in_data->sequence_data) {
+  const PF_ConstHandle sourceHandle =
+    runtime_internal::ResolveEffectSequenceDataHandle(in_data);
+  if (!in_data || !sourceHandle) {
     out_data->sequence_data = NULL;
-    return PF_Err_NONE;
+    return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
 
-  const auto handleSize = PF_GET_HANDLE_SIZE(in_data->sequence_data);
+  const auto handleSize = PF_GET_HANDLE_SIZE(sourceHandle);
   PF_Handle copyHandle = PF_NEW_HANDLE(handleSize);
   if (!copyHandle) {
     return PF_Err_OUT_OF_MEMORY;
   }
 
   void* destination = DH(copyHandle);
-  const void* source = DH(in_data->sequence_data);
+  const void* source = DH(sourceHandle);
   if (!destination || !source) {
     PF_DISPOSE_HANDLE(copyHandle);
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
 
   std::memcpy(destination, source, handleSize);
+  auto* flattenedData = reinterpret_cast<SequenceCacheData*>(destination);
+  if (flattenedData &&
+      flattenedData->magic == kSequenceCacheDataMagic &&
+      flattenedData->version == kSequenceCacheDataVersion) {
+    // Flattened data is an immutable Document snapshot. It must never carry
+    // process-local UI identity into a duplicate, render worker, or reopened
+    // project. Render correctness is owned by RenderInvocationInfo.
+    flattenedData->uiSessionToken = 0;
+  }
   out_data->sequence_data = copyHandle;
   return PF_Err_NONE;
 }
@@ -4991,7 +3555,7 @@ PF_Err SyncControllerParamValuesFromBundle(
       in_data,
       params,
       logicalSlot,
-      ControllerColorValue()
+      MakeUnsetColorValue()
     );
 
     PF_ParamDef* checkboxParam = params[ControllerCheckboxParamIndex(logicalSlot)];
@@ -5091,10 +3655,23 @@ PF_Err SyncControllerParamValuesFromBundle(
   }
 
 
-  if (out_data) {
-    out_data->out_flags |= PF_OutFlag_REFRESH_UI;
-    out_data->out_flags |= PF_OutFlag_FORCE_RERENDER;
-  }
+  // Every migrated value is marked CHANGED_VALUE above, so AE owns the
+  // undo/keyframe/rerender transaction. Do not add global UI or cache flushes.
+  std::ostringstream detail;
+  detail
+    << "reason=" << (reason ? reason : "unknown")
+    << " revision=" << bundle.revision
+    << " controllerHash=" << bundle.controllerHash
+    << " slots=" << bundle.controllerSlots.size();
+  runtime_internal::AppendEffectRuntimeDiagnostic(
+    in_data,
+    "controller-defaults-applied",
+    static_cast<A_long>(LookupRegisteredInstanceId(in_data)),
+    static_cast<PF_ParamIndex>(-1),
+    0,
+    detail.str()
+  );
+  (void)out_data;
   return PF_Err_NONE;
 }
 
@@ -5134,26 +3711,6 @@ std::uint64_t ResolveStableInstanceId(PF_InData* in_data, A_long paramInstanceId
   return synthesizedInstanceId;
 }
 
-std::uint64_t ResolveKnownInstanceId(PF_InData* in_data, A_long paramInstanceId) {
-  if (in_data && in_data->sequence_data) {
-    const std::uint64_t sequenceInstanceId =
-      ReadSequenceInstanceId(in_data, in_data->sequence_data);
-    if (sequenceInstanceId != 0) {
-      RegisterStableInstanceId(in_data, sequenceInstanceId);
-      return sequenceInstanceId;
-    }
-  }
-
-  if (paramInstanceId > 0) {
-    const std::uint64_t parameterInstanceId =
-      static_cast<std::uint64_t>(static_cast<A_u_long>(paramInstanceId));
-    RegisterStableInstanceId(in_data, parameterInstanceId);
-    return parameterInstanceId;
-  }
-
-  return LookupRegisteredInstanceId(in_data);
-}
-
 PF_Err SyncSequenceRuntimeSnapshotFromLocalFiles(
   PF_InData* in_data,
   PF_OutData* out_data,
@@ -5164,7 +3721,7 @@ PF_Err SyncSequenceRuntimeSnapshotFromLocalFiles(
   }
 
   const A_long paramInstanceId = params[PARAM_INSTANCE_ID]->u.sd.value;
-  const std::uint64_t instanceId = ResolveKnownInstanceId(in_data, paramInstanceId);
+  const std::uint64_t instanceId = ResolveStableInstanceId(in_data, paramInstanceId);
   if (instanceId == 0) {
     return PF_Err_NONE;
   }
@@ -5179,54 +3736,133 @@ PF_Err SyncSequenceRuntimeSnapshotFromLocalFiles(
     return PF_Err_NONE;
   }
 
+  const A_long expectedRevision =
+    params[PARAM_REVISION] ? params[PARAM_REVISION]->u.sd.value : -1;
+  if (expectedRevision < 0) {
+    return PF_Err_NONE;
+  }
+
+  // Once an effect owns a snapshot for its current revision, that embedded
+  // definition is authoritative. This protects duplicated and reopened effects
+  // from an unrelated AE session reusing and overwriting the same transport id.
+  const std::optional<std::string> embeddedBundleText =
+    ReadEmbeddedSequenceBundleText(in_data);
+  if (embeddedBundleText.has_value()) {
+    std::string embeddedError;
+    const RuntimeSketchBundle embeddedBundle =
+      runtime_internal::ReadRuntimeSketchBundleFromText(
+        *embeddedBundleText,
+        sourcePath,
+        &embeddedError
+      );
+    if (embeddedBundle.revision == expectedRevision) {
+      return PF_Err_NONE;
+    }
+  }
+
+  // The external instance directory is a creation/update transport only. Do
+  // not import a payload intended for another effect or another revision.
+  std::string localError;
+  const RuntimeSketchBundle localBundle =
+    runtime_internal::ReadRuntimeSketchBundleFromText(
+      *bundleText,
+      sourcePath,
+      &localError
+    );
+  if (localBundle.revision != expectedRevision) {
+    return PF_Err_NONE;
+  }
+
   return WriteSequenceRuntimeSnapshot(in_data, out_data, *bundleText, *sourceText);
 }
 
 PF_Err SequenceSetup(PF_InData* in_data, PF_OutData* out_data) {
   if (in_data) {
+    const auto previousUiSessionToken = ResolveEffectRuntimeKey(in_data);
     PF_Handle sequenceHandle = NULL;
-    PF_Err err = EnsureSequenceDataHandleInitialized(in_data, out_data, &sequenceHandle);
+    PF_Err err = EnsureSequenceDataHandleInitialized(
+      in_data,
+      out_data,
+      &sequenceHandle,
+      SequenceUiSessionMode::kCreateFresh
+    );
     if (err != PF_Err_NONE) {
       return err;
     }
+    const auto currentUiSessionToken = ResolveEffectRuntimeKey(in_data);
+    if (out_data) {
+      out_data->out_flags |= PF_OutFlag_REFRESH_UI;
+    }
     const std::uint64_t instanceId = ResolveStableInstanceId(in_data);
     RegisterStableInstanceId(in_data, instanceId);
+    std::ostringstream detail;
+    detail << "sequence-setup previousUiSession=" << previousUiSessionToken
+           << " currentUiSession=" << currentUiSessionToken;
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "ui-session-created",
+      static_cast<A_long>(instanceId),
+      static_cast<PF_ParamIndex>(-1),
+      0,
+      detail.str()
+    );
   }
   return PF_Err_NONE;
 }
 
 PF_Err SequenceResetup(PF_InData* in_data, PF_OutData* out_data) {
   if (in_data) {
+    const auto previousUiSessionToken = ResolveEffectRuntimeKey(in_data);
     PF_Handle sequenceHandle = NULL;
-    PF_Err err = EnsureSequenceDataHandleInitialized(in_data, out_data, &sequenceHandle);
+    PF_Err err = EnsureSequenceDataHandleInitialized(
+      in_data,
+      out_data,
+      &sequenceHandle,
+      SequenceUiSessionMode::kCreateFresh
+    );
     if (err != PF_Err_NONE) {
       return err;
     }
+    const auto currentUiSessionToken = ResolveEffectRuntimeKey(in_data);
+    if (out_data) {
+      out_data->out_flags |= PF_OutFlag_REFRESH_UI;
+    }
     const std::uint64_t instanceId = ResolveStableInstanceId(in_data);
     RegisterStableInstanceId(in_data, instanceId);
+    std::ostringstream detail;
+    detail << "sequence-resetup previousUiSession=" << previousUiSessionToken
+           << " currentUiSession=" << currentUiSessionToken;
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "ui-session-created",
+      static_cast<A_long>(instanceId),
+      static_cast<PF_ParamIndex>(-1),
+      0,
+      detail.str()
+    );
   }
   return PF_Err_NONE;
 }
 
 PF_Err SequenceFlatten(PF_InData* in_data, PF_OutData* out_data) {
-  return CopySequenceDataHandle(in_data, out_data);
+  return CopyFlattenedDocumentSnapshot(in_data, out_data);
 }
 
 PF_Err GetFlattenedSequenceData(PF_InData* in_data, PF_OutData* out_data) {
-  return CopySequenceDataHandle(in_data, out_data);
+  return CopyFlattenedDocumentSnapshot(in_data, out_data);
 }
 
 PF_Err SequenceSetdown(PF_InData* in_data, PF_OutData* out_data) {
-  std::uint64_t rememberedInstanceId = ResolveKnownInstanceId(in_data);
-
-  if (rememberedInstanceId != 0) {
-    ClearActivePointOverlaySlot(rememberedInstanceId);
-    ClearLiveControllerState(static_cast<std::uintptr_t>(rememberedInstanceId));
-    ClearCachedSketchByKey(static_cast<std::uintptr_t>(rememberedInstanceId), "sequence-setdown");
+  const auto runtimeKey = ResolveEffectRuntimeKey(in_data);
+  const A_long instanceId = static_cast<A_long>(GetEffectSessionInstanceId(runtimeKey));
+  if (runtimeKey && instanceId > 0) {
+    InvalidateEffectPersistentRenderCaches(
+      ResolveRenderLineageIdentity(in_data, instanceId),
+      "sequence-setdown"
+    );
   }
-  UnregisterStableInstanceId(in_data);
-  UnregisterSyncedRevision(in_data);
-  UnregisterSyncedControllerHash(in_data);
+  DiscardControllerInteractionState(instanceId);
+  DiscardEffectRuntimeState(runtimeKey, "sequence-setdown");
   if (in_data && in_data->sequence_data) {
     PF_DISPOSE_HANDLE(in_data->sequence_data);
     in_data->sequence_data = NULL;
@@ -5237,7 +3873,6 @@ PF_Err SequenceSetdown(PF_InData* in_data, PF_OutData* out_data) {
 
 PF_Err BuildRenderInvocationInfo(
   PF_InData* in_data,
-  PF_OutData* out_data,
   RenderInvocationInfo** outInfo
 ) {
   if (!outInfo) {
@@ -5249,12 +3884,17 @@ PF_Err BuildRenderInvocationInfo(
     return PF_Err_OUT_OF_MEMORY;
   }
 
+  info->runtimeKey = NextRenderInvocationRuntimeKey();
   info->revision = 0;
   info->instanceId = 0;
   info->canvasLeft = 0;
   info->canvasTop = 0;
   info->canvasWidth = in_data ? std::max<A_long>(1, in_data->width) : 1;
   info->canvasHeight = in_data ? std::max<A_long>(1, in_data->height) : 1;
+  info->downsampleScaleX = in_data ? ResolveDownsampleScale(in_data->downsample_x) : 1.0;
+  info->downsampleScaleY = in_data ? ResolveDownsampleScale(in_data->downsample_y) : 1.0;
+  info->renderCanvasWidth = ScaleRenderDimension(info->canvasWidth, info->downsampleScaleX);
+  info->renderCanvasHeight = ScaleRenderDimension(info->canvasHeight, info->downsampleScaleY);
   info->tileLeft = 0;
   info->tileTop = 0;
   info->tileRight = info->canvasLeft + info->canvasWidth;
@@ -5293,10 +3933,17 @@ PF_Err BuildRenderInvocationInfo(
   info->instanceId = static_cast<A_long>(ResolveStableInstanceId(in_data, param.u.sd.value));
   PF_CHECKIN_PARAM(in_data, &param);
 
-  err = ResolveControllerState(in_data, out_data, NULL, &info->controllers);
-  if (err != PF_Err_NONE) {
+  info->lineageIdentity = ResolveRenderLineageIdentity(in_data, info->instanceId);
+  info->preparationCacheKey = ResolveEffectPreparationCacheKey(info->lineageIdentity);
+  info->renderCacheKey = ResolveEffectRenderCacheKeyForScale(
+    info->lineageIdentity,
+    info->downsampleScaleX,
+    info->downsampleScaleY
+  );
+
+  if (!info->runtimeKey) {
     delete info;
-    return err;
+    return PF_Err_OUT_OF_MEMORY;
   }
 
   *outInfo = info;
@@ -5320,40 +3967,34 @@ PF_Err CopyCpuRasterToOutput(
   const A_long sourceWidth = std::max<A_long>(1, rasterWidth);
   const A_long sourceHeight = std::max<A_long>(1, rasterHeight);
   const OutputCopyOriginInfo copyOrigin = ResolveOutputCopyOrigin(*output, invocation);
-  const A_long sourceOriginX = copyOrigin.sourceOriginX;
-  const A_long sourceOriginY = copyOrigin.sourceOriginY;
+  const double sourceOriginX = copyOrigin.sourceOriginX;
+  const double sourceOriginY = copyOrigin.sourceOriginY;
+  const double sourceStepX = copyOrigin.sourceStepX;
+  const double sourceStepY = copyOrigin.sourceStepY;
   const std::size_t rasterSize = raster->size();
 
-  auto sampleSourcePixel = [&](A_long logicalX, A_long logicalY) -> PF_Pixel {
+  auto sampleSourcePixel = [&](double logicalX, double logicalY) -> PF_Pixel {
     if (logicalX < 0 || logicalY < 0 || logicalX >= canvasWidth || logicalY >= canvasHeight) {
       return PF_Pixel{0, 0, 0, 0};
     }
-    const A_long sampleX = sourceWidth == canvasWidth
-      ? logicalX
-      : std::min<A_long>(
-          sourceWidth - 1,
-          std::max<A_long>(
-            0,
-            static_cast<A_long>(std::floor(
-              (static_cast<double>(logicalX) + 0.5) *
-              static_cast<double>(sourceWidth) /
-              static_cast<double>(canvasWidth)
-            ))
-          )
-        );
-    const A_long sampleY = sourceHeight == canvasHeight
-      ? logicalY
-      : std::min<A_long>(
-          sourceHeight - 1,
-          std::max<A_long>(
-            0,
-            static_cast<A_long>(std::floor(
-              (static_cast<double>(logicalY) + 0.5) *
-              static_cast<double>(sourceHeight) /
-              static_cast<double>(canvasHeight)
-            ))
-          )
-        );
+    const A_long sampleX = std::min<A_long>(
+      sourceWidth - 1,
+      std::max<A_long>(
+        0,
+        static_cast<A_long>(std::floor(
+          logicalX * static_cast<double>(sourceWidth) / static_cast<double>(canvasWidth)
+        ))
+      )
+    );
+    const A_long sampleY = std::min<A_long>(
+      sourceHeight - 1,
+      std::max<A_long>(
+        0,
+        static_cast<A_long>(std::floor(
+          logicalY * static_cast<double>(sourceHeight) / static_cast<double>(canvasHeight)
+        ))
+      )
+    );
     const std::size_t sampleIndex = static_cast<std::size_t>(sampleY * sourceWidth + sampleX);
     if (sampleIndex >= rasterSize) {
       return PF_Pixel{0, 0, 0, 0};
@@ -5361,15 +4002,36 @@ PF_Err CopyCpuRasterToOutput(
     return (*raster)[sampleIndex];
   };
 
+  if (pixelFormat == PF_PixelFormat_ARGB32 &&
+      sourceWidth == canvasWidth && sourceHeight == canvasHeight &&
+      std::abs(sourceStepX - 1.0) < 1e-9 &&
+      std::abs(sourceStepY - 1.0) < 1e-9 &&
+      sourceOriginX >= 0.0 && sourceOriginY >= 0.0 &&
+      std::floor(sourceOriginX) == sourceOriginX &&
+      std::floor(sourceOriginY) == sourceOriginY &&
+      sourceOriginX + output->width <= sourceWidth &&
+      sourceOriginY + output->height <= sourceHeight) {
+    const A_long integerOriginX = static_cast<A_long>(sourceOriginX);
+    const A_long integerOriginY = static_cast<A_long>(sourceOriginY);
+    const std::size_t copyBytes = static_cast<std::size_t>(output->width) * sizeof(PF_Pixel);
+    for (A_long y = 0; y < output->height; ++y) {
+      const PF_Pixel* sourceRow = raster->data() +
+        static_cast<std::size_t>((integerOriginY + y) * sourceWidth + integerOriginX);
+      void* outputRow = reinterpret_cast<A_u_char*>(output->data) + y * output->rowbytes;
+      std::memcpy(outputRow, sourceRow, copyBytes);
+    }
+    return PF_Err_NONE;
+  }
+
   switch (pixelFormat) {
     case PF_PixelFormat_ARGB128:
       for (A_long y = 0; y < output->height; ++y) {
         auto* row = reinterpret_cast<PF_PixelFloat*>(
           reinterpret_cast<A_u_char*>(output->data) + y * output->rowbytes
         );
-        const A_long sourceY = sourceOriginY + y;
+        const double sourceY = sourceOriginY + (static_cast<double>(y) + 0.5) * sourceStepY;
         for (A_long x = 0; x < output->width; ++x) {
-          const A_long sourceX = sourceOriginX + x;
+          const double sourceX = sourceOriginX + (static_cast<double>(x) + 0.5) * sourceStepX;
           const PF_Pixel source = sampleSourcePixel(sourceX, sourceY);
           row[x].alpha = static_cast<PF_FpShort>(static_cast<double>(source.alpha) / 255.0);
           row[x].red = static_cast<PF_FpShort>(static_cast<double>(source.red) / 255.0);
@@ -5383,9 +4045,9 @@ PF_Err CopyCpuRasterToOutput(
         auto* row = reinterpret_cast<PF_Pixel16*>(
           reinterpret_cast<A_u_char*>(output->data) + y * output->rowbytes
         );
-        const A_long sourceY = sourceOriginY + y;
+        const double sourceY = sourceOriginY + (static_cast<double>(y) + 0.5) * sourceStepY;
         for (A_long x = 0; x < output->width; ++x) {
-          const A_long sourceX = sourceOriginX + x;
+          const double sourceX = sourceOriginX + (static_cast<double>(x) + 0.5) * sourceStepX;
           const PF_Pixel source = sampleSourcePixel(sourceX, sourceY);
           row[x] = ToPixel16(source);
         }
@@ -5397,9 +4059,9 @@ PF_Err CopyCpuRasterToOutput(
         auto* row = reinterpret_cast<PF_Pixel*>(
           reinterpret_cast<A_u_char*>(output->data) + y * output->rowbytes
         );
-        const A_long sourceY = sourceOriginY + y;
+        const double sourceY = sourceOriginY + (static_cast<double>(y) + 0.5) * sourceStepY;
         for (A_long x = 0; x < output->width; ++x) {
-          const A_long sourceX = sourceOriginX + x;
+          const double sourceX = sourceOriginX + (static_cast<double>(x) + 0.5) * sourceStepX;
           row[x] = sampleSourcePixel(sourceX, sourceY);
         }
       }
@@ -5414,34 +4076,62 @@ PF_Err RenderCurrentSketchToCpuWorld(
   PF_PixelFormat pixelFormat
 ) {
   std::string errorMessage;
-  const std::vector<PF_Pixel>* raster = NULL;
   PF_LayerDef sceneSurface = MakeSceneSurface(*output, invocation);
-  const auto scene = ExecuteSketchAtCurrentTime(
+  const auto shouldCancel = [&invocation]() {
+    return !IsCurrentControllerRenderRequest(invocation) ||
+      !IsLatestControllerInteraction(invocation);
+  };
+  BitmapFramePlan framePlan;
+  if (!BuildBitmapCpuFramePlanAtCurrentTime(
     in_data,
+    invocation.runtimeKey,
+    invocation.renderCacheKey,
     invocation.revision,
     invocation.instanceId,
     &sceneSurface,
-    &raster,
-    NULL,
-    true,
-    SketchExecutionMode::kCpuFallback,
+    shouldCancel,
+    &framePlan,
     &errorMessage
-  );
-
-  if (!scene.has_value()) {
-    return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  )) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      errorMessage == "render-cancelled" ? "cpu-render-cancelled" : "cpu-frame-plan-failed",
+      invocation.instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      invocation.controllerTimelineTargetFrame,
+      errorMessage
+    );
+    return errorMessage == "render-cancelled"
+      ? PF_Interrupt_CANCEL
+      : PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
 
-  if (!raster) {
-    return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  std::vector<PF_Pixel> raster;
+  if (!RenderBitmapFramePlanToCpuRaster(
+        framePlan,
+        &raster,
+        shouldCancel,
+        &errorMessage
+      )) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      errorMessage == "render-cancelled" ? "cpu-render-cancelled" : "cpu-render-failed",
+      invocation.instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      framePlan.targetFrame,
+      errorMessage
+    );
+    return errorMessage == "render-cancelled"
+      ? PF_Interrupt_CANCEL
+      : PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
   return CopyCpuRasterToOutput(
     output,
     pixelFormat,
-    raster,
+    &raster,
     invocation,
-    invocation.canvasWidth,
-    invocation.canvasHeight
+    framePlan.width,
+    framePlan.height
   );
 }
 
@@ -5450,21 +4140,195 @@ PF_Err PreRender(
   PF_OutData* out_data,
   PF_PreRenderExtra* extra
 ) {
+  const auto preRenderStarted = std::chrono::steady_clock::now();
+  {
+    std::ostringstream detail;
+    detail
+      << "extra=" << reinterpret_cast<std::uintptr_t>(extra)
+      << " input=" << reinterpret_cast<std::uintptr_t>(extra ? extra->input : NULL)
+      << " output=" << reinterpret_cast<std::uintptr_t>(extra ? extra->output : NULL)
+      << " time=" << (in_data ? in_data->current_time : 0)
+      << '/' << (in_data ? in_data->time_scale : 0);
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "prerender-enter",
+      -1,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      detail.str()
+    );
+  }
   if (!extra || !extra->input || !extra->output) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "prerender-failed",
+      -1,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      "invalid pre-render callback data"
+    );
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
   RenderInvocationInfo* info = NULL;
-  PF_Err err = BuildRenderInvocationInfo(in_data, out_data, &info);
+  PF_Err err = BuildRenderInvocationInfo(in_data, &info);
   if (err != PF_Err_NONE) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "prerender-failed",
+      -1,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      std::string("invocation err=") + std::to_string(static_cast<long>(err))
+    );
     return err;
   }
+  // Capture the user's latest controller generation before reading the
+  // immutable timeline. If another drag tick arrives while PreRender is
+  // preparing this invocation, Smart Render will recognize it as obsolete and
+  // drop it at entry instead of replaying an already stale controller value.
+  info->controllerInteractionGeneration =
+    ReadControllerInteractionGeneration(info->instanceId);
 
+  std::string documentError;
+  const auto documentStarted = std::chrono::steady_clock::now();
+  if (!PrepareEffectRuntimeDocument(
+        in_data,
+        info->runtimeKey,
+        info->preparationCacheKey,
+        info->revision,
+        info->instanceId,
+        &documentError
+      )) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "prerender-document-failed",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      documentError
+    );
+    DisposeRenderInvocationInfo(info);
+    return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  }
+  info->documentPrepareMs = ElapsedMilliseconds(documentStarted);
+
+  const auto controllerTimelineStarted = std::chrono::steady_clock::now();
+  if (!CaptureEffectControllerTimeline(
+        in_data,
+        info->runtimeKey,
+        info->preparationCacheKey,
+        &info->controllerTimelineTargetFrame,
+        &info->controllerTimelineHash,
+        &documentError
+      )) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "prerender-controller-timeline-failed",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      documentError
+    );
+    DisposeRenderInvocationInfo(info);
+    return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  }
+  info->controllerTimelineMs = ElapsedMilliseconds(controllerTimelineStarted);
+  info->controllerRequestGeneration = RegisterControllerRenderRequest(
+    info->lineageIdentity,
+    info->controllerTimelineTargetFrame,
+    info->controllerTimelineHash
+  );
+
+  const auto dependencyMixStarted = std::chrono::steady_clock::now();
+  if (extra->cb && extra->cb->GuidMixInPtr) {
+    std::string dependencyError;
+    const auto dependencyBytes = runtime_internal::ReadRuntimeSketchDependencyBytes(
+      in_data,
+      info->instanceId,
+      &dependencyError
+    );
+    if (!dependencyBytes.has_value()) {
+      runtime_internal::AppendEffectRuntimeDiagnostic(
+        in_data,
+        "prerender-guid-failed",
+        info->instanceId,
+        static_cast<PF_ParamIndex>(-1),
+        -1,
+        dependencyError
+      );
+      DisposeRenderInvocationInfo(info);
+      return PF_Err_INTERNAL_STRUCT_DAMAGED;
+    }
+
+    const std::array<std::uint64_t, 3> dependencyHeader = {
+      0x4d4f4d454e54554dULL,
+      static_cast<std::uint64_t>(static_cast<A_u_long>(info->instanceId)),
+      static_cast<std::uint64_t>(static_cast<A_u_long>(info->revision)),
+    };
+    PF_Err guidErr = extra->cb->GuidMixInPtr(
+      in_data->effect_ref,
+      static_cast<A_u_long>(sizeof(dependencyHeader)),
+      dependencyHeader.data()
+    );
+    if (guidErr == PF_Err_NONE && !dependencyBytes->empty()) {
+      guidErr = extra->cb->GuidMixInPtr(
+        in_data->effect_ref,
+        static_cast<A_u_long>(dependencyBytes->size()),
+        dependencyBytes->data()
+      );
+    }
+    if (guidErr == PF_Err_NONE && !info->controllerTimelineHash.empty()) {
+      guidErr = extra->cb->GuidMixInPtr(
+        in_data->effect_ref,
+        static_cast<A_u_long>(info->controllerTimelineHash.size()),
+        info->controllerTimelineHash.data()
+      );
+    }
+    if (guidErr != PF_Err_NONE) {
+      runtime_internal::AppendEffectRuntimeDiagnostic(
+        in_data,
+        "prerender-guid-failed",
+        info->instanceId,
+        static_cast<PF_ParamIndex>(-1),
+        -1,
+        std::string("GuidMixInPtr err=") +
+          std::to_string(static_cast<long>(guidErr))
+      );
+      DisposeRenderInvocationInfo(info);
+      return guidErr;
+    }
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "prerender-guid-mixed",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      std::string("documentBytes=") + std::to_string(dependencyBytes->size()) +
+        " controllerFrames=" + std::to_string(info->controllerTimelineTargetFrame + 1) +
+        " controllerHash=" + info->controllerTimelineHash
+    );
+  } else {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "prerender-guid-unavailable",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      "host did not provide GuidMixInPtr"
+    );
+  }
+  info->dependencyMixMs = ElapsedMilliseconds(dependencyMixStarted);
+
+  // Smart PreRender rectangles stay in full-resolution layer coordinates.
+  // AE applies downsample_x/y when allocating the output world's physical
+  // buffer; returning a reduced result rect here crops the layer and makes
+  // output-world origins incompatible with native Point coordinates.
   PF_LRect canvasRect{};
   canvasRect.left = info->canvasLeft;
   canvasRect.top = info->canvasTop;
-  canvasRect.right = info->canvasLeft + std::max<A_long>(1, info->canvasWidth);
-  canvasRect.bottom = info->canvasTop + std::max<A_long>(1, info->canvasHeight);
+  canvasRect.right = canvasRect.left + std::max<A_long>(1, info->canvasWidth);
+  canvasRect.bottom = canvasRect.top + std::max<A_long>(1, info->canvasHeight);
   const PF_LRect requestedRect = extra->input->output_request.rect;
   extra->output->result_rect = IntersectLongRect(canvasRect, requestedRect);
   extra->output->max_result_rect = canvasRect;
@@ -5482,6 +4346,52 @@ PF_Err PreRender(
     extra->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
   }
 
+  std::ostringstream completeDetail;
+  completeDetail
+    << "runtime=" << info->runtimeKey
+    << " revision=" << info->revision
+    << " controllerFrames=" << (info->controllerTimelineTargetFrame + 1)
+    << " controllerHash=" << info->controllerTimelineHash
+    << " requestGeneration=" << info->controllerRequestGeneration
+    << " interactionGeneration=" << info->controllerInteractionGeneration
+    << " canvas=" << info->canvasWidth << 'x' << info->canvasHeight
+    << " renderCanvas=" << info->renderCanvasWidth << 'x' << info->renderCanvasHeight
+    << " downsample=" << info->downsampleScaleX << 'x' << info->downsampleScaleY
+    << " tile=" << info->tileLeft << ',' << info->tileTop << '-'
+    << info->tileRight << ',' << info->tileBottom
+    << " gpuPossible=" << (BitmapGpuBackendAvailable() ? 1 : 0);
+  runtime_internal::AppendEffectRuntimeDiagnostic(
+    in_data,
+    "prerender-complete",
+    info->instanceId,
+    static_cast<PF_ParamIndex>(-1),
+    -1,
+    completeDetail.str()
+  );
+
+  info->preRenderTotalMs = ElapsedMilliseconds(preRenderStarted);
+  std::ostringstream timingDetail;
+  timingDetail
+    << std::fixed << std::setprecision(3)
+    << "stage=prerender"
+    << " totalMs=" << info->preRenderTotalMs
+    << " documentMs=" << info->documentPrepareMs
+    << " controllerMs=" << info->controllerTimelineMs
+    << " dependencyMs=" << info->dependencyMixMs
+    << " controllerFrames=" << (info->controllerTimelineTargetFrame + 1)
+    << " requestGeneration=" << info->controllerRequestGeneration
+    << " interactionGeneration=" << info->controllerInteractionGeneration
+    << " invocation=" << info->runtimeKey
+    << " preparationCache=" << info->preparationCacheKey;
+  runtime_internal::AppendEffectRuntimeDiagnostic(
+    in_data,
+    "render-timing",
+    info->instanceId,
+    static_cast<PF_ParamIndex>(-1),
+    info->controllerTimelineTargetFrame,
+    timingDetail.str()
+  );
+
   (void)out_data;
   return PF_Err_NONE;
 }
@@ -5492,19 +4402,82 @@ PF_Err SmartRender(
   PF_SmartRenderExtra* extra,
   bool useGpu
 ) {
+  const auto smartRenderStarted = std::chrono::steady_clock::now();
+  {
+    std::ostringstream detail;
+    detail
+      << "gpu=" << (useGpu ? 1 : 0)
+      << " extra=" << reinterpret_cast<std::uintptr_t>(extra)
+      << " input=" << reinterpret_cast<std::uintptr_t>(extra ? extra->input : NULL)
+      << " cb=" << reinterpret_cast<std::uintptr_t>(extra ? extra->cb : NULL)
+      << " preRenderData=" << reinterpret_cast<std::uintptr_t>(
+           extra && extra->input ? extra->input->pre_render_data : NULL
+         );
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "smart-render-enter",
+      -1,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      detail.str()
+    );
+  }
   if (!extra || !extra->input || !extra->cb) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "smart-render-failed",
+      -1,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      "invalid smart-render callback data"
+    );
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
   auto* info = reinterpret_cast<RenderInvocationInfo*>(extra->input->pre_render_data);
   if (!info) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "smart-render-failed",
+      -1,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      "missing pre-render invocation"
+    );
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  }
+
+  if (!IsCurrentControllerRenderRequest(*info) ||
+      !IsLatestControllerInteraction(*info)) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "controller-render-superseded",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      info->controllerTimelineTargetFrame,
+      "phase=smart-render-enter policy=latest-wins requestGeneration=" +
+        std::to_string(info->controllerRequestGeneration) +
+        " capturedInteractionGeneration=" +
+        std::to_string(info->controllerInteractionGeneration) +
+        " latestInteractionGeneration=" +
+        std::to_string(ReadControllerInteractionGeneration(info->instanceId))
+    );
+    return PF_Interrupt_CANCEL;
   }
 
   PF_EffectWorld* outputWorld = NULL;
   PF_Err err = extra->cb->checkout_output(in_data->effect_ref, &outputWorld);
   if (err != PF_Err_NONE || !outputWorld) {
     const PF_Err outputErr = err != PF_Err_NONE ? err : PF_Err_INTERNAL_STRUCT_DAMAGED;
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "smart-render-failed",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      std::string("checkout-output err=") +
+        std::to_string(static_cast<long>(outputErr))
+    );
     return outputErr;
   }
 
@@ -5519,41 +4492,209 @@ PF_Err SmartRender(
   PF_PixelFormat pixelFormat = PF_PixelFormat_INVALID;
   err = worldSuite->PF_GetPixelFormat(outputWorld, &pixelFormat);
   if (err != PF_Err_NONE) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "smart-render-failed",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      std::string("pixel-format err=") + std::to_string(static_cast<long>(err))
+    );
     return err;
   }
   if (!useGpu) {
+    const auto cpuStarted = std::chrono::steady_clock::now();
     err = RenderCurrentSketchToCpuWorld(in_data, outputWorld, *info, pixelFormat);
+    const double cpuMs = ElapsedMilliseconds(cpuStarted);
+    if (err == PF_Err_NONE &&
+        (!IsCurrentControllerRenderRequest(*info) || !IsLatestControllerInteraction(*info))) {
+      runtime_internal::AppendEffectRuntimeDiagnostic(
+        in_data,
+        "controller-render-superseded",
+        info->instanceId,
+        static_cast<PF_ParamIndex>(-1),
+        info->controllerTimelineTargetFrame,
+        "phase=cpu-complete generation=" +
+          std::to_string(info->controllerRequestGeneration)
+      );
+      return PF_Interrupt_CANCEL;
+    }
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      err == PF_Err_NONE ? "cpu-render-complete" : "smart-render-failed",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      std::string("pixelFormat=") + std::to_string(static_cast<long>(pixelFormat)) +
+        " output=" + std::to_string(static_cast<long>(outputWorld->width)) + "x" +
+        std::to_string(static_cast<long>(outputWorld->height)) +
+        " err=" + std::to_string(static_cast<long>(err))
+    );
+    std::ostringstream timingDetail;
+    timingDetail << std::fixed << std::setprecision(3)
+      << "stage=smart-render backend=cpu"
+      << " totalMs=" << ElapsedMilliseconds(smartRenderStarted)
+      << " planAndExecuteMs=" << cpuMs
+      << " renderCache=" << info->renderCacheKey;
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "render-timing",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      info->controllerTimelineTargetFrame,
+      timingDetail.str()
+    );
     return err;
   }
 
   PF_LayerDef sceneSurface = MakeSceneSurface(*outputWorld, *info);
   std::string errorMessage;
   BitmapFramePlan framePlan;
+  const auto planStarted = std::chrono::steady_clock::now();
   const bool planOk = BuildBitmapFramePlanAtCurrentTime(
     in_data,
+    info->runtimeKey,
+    info->renderCacheKey,
     info->revision,
     info->instanceId,
     &sceneSurface,
     &framePlan,
     &errorMessage
   );
+  const double planMs = ElapsedMilliseconds(planStarted);
   if (!planOk) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "bitmap-frame-plan-failed",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      errorMessage
+    );
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
 
+  ScaleBitmapFramePlanToPhysicalCanvas(
+    &framePlan,
+    info->renderCanvasWidth,
+    info->renderCanvasHeight
+  );
+  if (!IsCurrentControllerRenderRequest(*info)) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "controller-render-superseded",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      framePlan.targetFrame,
+      "phase=plan-ready generation=" +
+        std::to_string(info->controllerRequestGeneration)
+    );
+    return PF_Interrupt_CANCEL;
+  }
+
+  std::size_t sceneCommands = 0;
+  std::size_t fillTriangles = 0;
+  std::size_t strokeTriangles = 0;
+  std::size_t pathFills = 0;
+  std::size_t imageDraws = 0;
+  std::size_t drawBatches = 0;
+  for (const BitmapFramePlanOp& op : framePlan.operations) {
+    sceneCommands += op.drawPlan.scene.commands.size();
+    fillTriangles += op.drawPlan.fillTriangles.size();
+    strokeTriangles += op.drawPlan.strokeTriangles.size();
+    pathFills += op.drawPlan.pathFills.size();
+    imageDraws += op.drawPlan.imageDraws.size();
+    drawBatches += op.drawPlan.drawBatches.size();
+  }
   const OutputCopyOriginInfo copyOrigin = ResolveOutputCopyOrigin(*outputWorld, *info);
-  const A_long sourceOriginX = copyOrigin.sourceOriginX;
-  const A_long sourceOriginY = copyOrigin.sourceOriginY;
+  std::ostringstream planDetail;
+  planDetail
+    << "runtime=" << info->runtimeKey
+    << " pixelFormat=" << static_cast<long>(pixelFormat)
+    << " output=" << outputWorld->width << 'x' << outputWorld->height
+    << " rowbytes=" << outputWorld->rowbytes
+    << " plan=" << framePlan.width << 'x' << framePlan.height
+    << " downsample=" << info->downsampleScaleX << 'x' << info->downsampleScaleY
+    << " copyMode=" << copyOrigin.mode
+    << " copyOrigin=" << copyOrigin.sourceOriginX << ',' << copyOrigin.sourceOriginY
+    << " copyStep=" << copyOrigin.sourceStepX << ',' << copyOrigin.sourceStepY
+    << " ops=" << framePlan.operations.size()
+    << " commands=" << sceneCommands
+    << " fillTriangles=" << fillTriangles
+    << " strokeTriangles=" << strokeTriangles
+    << " pathFills=" << pathFills
+    << " images=" << imageDraws
+    << " batches=" << drawBatches;
+  runtime_internal::AppendEffectRuntimeDiagnostic(
+    in_data,
+    "bitmap-frame-plan-ready",
+    info->instanceId,
+    static_cast<PF_ParamIndex>(-1),
+    framePlan.targetFrame,
+    planDetail.str()
+  );
+
+  const auto gpuStarted = std::chrono::steady_clock::now();
   err = RenderBitmapFramePlan(
     in_data,
     out_data,
     const_cast<void*>(extra->input->gpu_data),
     outputWorld,
     pixelFormat,
-    sourceOriginX,
-    sourceOriginY,
+    copyOrigin.sourceOriginX,
+    copyOrigin.sourceOriginY,
+    copyOrigin.sourceStepX,
+    copyOrigin.sourceStepY,
     framePlan,
     &errorMessage
+  );
+  const double gpuMs = ElapsedMilliseconds(gpuStarted);
+  if (err == PF_Err_NONE && !IsCurrentControllerRenderRequest(*info)) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "controller-render-superseded",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      framePlan.targetFrame,
+      "phase=gpu-complete generation=" +
+        std::to_string(info->controllerRequestGeneration)
+    );
+    return PF_Interrupt_CANCEL;
+  }
+  if (err != PF_Err_NONE) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "gpu-render-failed",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      framePlan.targetFrame,
+      errorMessage
+    );
+  } else {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "gpu-render-complete",
+      info->instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      framePlan.targetFrame,
+      planDetail.str()
+    );
+  }
+  std::ostringstream timingDetail;
+  timingDetail << std::fixed << std::setprecision(3)
+    << "stage=smart-render backend=gpu"
+    << " totalMs=" << ElapsedMilliseconds(smartRenderStarted)
+    << " planMs=" << planMs
+    << " metalAndCopyMs=" << gpuMs
+    << " operations=" << framePlan.operations.size()
+    << " renderCache=" << info->renderCacheKey;
+  runtime_internal::AppendEffectRuntimeDiagnostic(
+    in_data,
+    "render-timing",
+    info->instanceId,
+    static_cast<PF_ParamIndex>(-1),
+    framePlan.targetFrame,
+    timingDetail.str()
   );
   return err;
 }
@@ -5568,22 +4709,6 @@ PF_Err GPUDeviceSetup(
   }
 
   std::string errorMessage;
-  PF_GPUDeviceInfo deviceInfo{};
-  PF_Err deviceInfoErr = PF_Err_NONE;
-  if (in_data && out_data) {
-    AEFX_SuiteScoper<PF_GPUDeviceSuite1> gpuSuite =
-      AEFX_SuiteScoper<PF_GPUDeviceSuite1>(
-        in_data,
-        kPFGPUDeviceSuite,
-        kPFGPUDeviceSuiteVersion1,
-        out_data
-      );
-    deviceInfoErr = gpuSuite->GetDeviceInfo(
-      in_data->effect_ref,
-      extra->input->device_index,
-      &deviceInfo
-    );
-  }
   PF_Err err = CreateBitmapGpuDeviceContext(
     in_data,
     out_data,
@@ -5623,10 +4748,12 @@ PF_Err QueryDynamicFlags(
   (void)params;
   (void)extra;
   if (out_data) {
-    out_data->out_flags |= (
-      PF_OutFlag_NON_PARAM_VARY |
-      PF_OutFlag_PIX_INDEPENDENT
-    );
+    // Bitmap sketches depend on time and retained JS state even when no AE
+    // parameter changes. Adobe defines NON_PARAM_VARY for exactly this case:
+    // output varies from information outside the parameter streams.
+    out_data->out_flags |= PF_OutFlag_NON_PARAM_VARY;
+    out_data->out_flags |= PF_OutFlag_WIDE_TIME_INPUT;
+    out_data->out_flags |= PF_OutFlag_PIX_INDEPENDENT;
   }
   return PF_Err_NONE;
 }
@@ -5634,29 +4761,7 @@ PF_Err QueryDynamicFlags(
 PF_Err GlobalSetdown(PF_InData* in_data, PF_OutData* out_data) {
   (void)in_data;
   (void)out_data;
-  {
-    const std::lock_guard<std::mutex> lock(gEffectInstanceRegistryMutex);
-    gEffectInstanceRegistry.clear();
-  }
-  {
-    const std::lock_guard<std::mutex> lock(gEffectSyncedRevisionMutex);
-    gEffectSyncedRevisions.clear();
-  }
-  {
-    const std::lock_guard<std::mutex> lock(gInstanceSyncedRevisionMutex);
-    gInstanceSyncedRevisions.clear();
-  }
-  {
-    const std::lock_guard<std::mutex> lock(gEffectSyncedControllerHashMutex);
-    gEffectSyncedControllerHashes.clear();
-  }
-  {
-    const std::lock_guard<std::mutex> lock(gInstanceSyncedControllerHashMutex);
-    gInstanceSyncedControllerHashes.clear();
-  }
-  ClearAllLiveControllerStates();
-  ClearAllActivePointOverlaySlots();
-  ClearAllCachedSketches("global-setdown");
+  ClearAllCachedSketches();
   DisposeAllBitmapGpuGlobalState("global-setdown");
   return PF_Err_NONE;
 }
@@ -5690,8 +4795,6 @@ PF_Err GlobalSetup(PF_InData* in_data, PF_OutData* out_data) {
 PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
   PF_Err err = PF_Err_NONE;
   PF_ParamDef def;
-  std::string bundleError;
-  const RuntimeSketchBundle bundle = ReadCurrentRunRuntimeSketchBundle(&bundleError);
   AEFX_CLR_STRUCT(def);
   def.ui_flags = PF_PUI_INVISIBLE;
 
@@ -5718,43 +4821,13 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
   );
 
   for (int slot = 0; slot < kControllerSlotCount; ++slot) {
-    const RuntimeControllerSlotKind kind = ResolveControllerSlotKind(bundle, slot);
-    const bool pointActive = kind == RuntimeControllerSlotKind::kPoint;
-    const bool sliderActive = kind == RuntimeControllerSlotKind::kSlider;
-    const bool colorActive = kind == RuntimeControllerSlotKind::kColor;
-    const bool checkboxActive = kind == RuntimeControllerSlotKind::kCheckbox;
-    const bool selectActive = kind == RuntimeControllerSlotKind::kSelect;
-    const bool angleActive = kind == RuntimeControllerSlotKind::kAngle;
-
-    const ControllerPointValue defaultPoint =
-      pointActive ? ResolvePointControllerDefaultValue(bundle, slot) : ControllerPointValue();
-    const RuntimeSliderControllerSpec sliderConfig =
-      sliderActive ? ResolveSliderControllerSpecWithDefaults(bundle, slot) : RuntimeSliderControllerSpec();
-    const RuntimeColorControllerSpec colorConfig =
-      colorActive ? ResolveColorControllerSpecWithDefaults(bundle, slot) : RuntimeColorControllerSpec();
-    const RuntimeCheckboxControllerSpec checkboxConfig =
-      checkboxActive ? ResolveCheckboxControllerSpecWithDefaults(bundle, slot) : RuntimeCheckboxControllerSpec();
-    const RuntimeSelectControllerSpec selectConfig =
-      selectActive ? ResolveSelectControllerSpecWithDefaults(bundle, slot) : RuntimeSelectControllerSpec();
-    const RuntimeAngleControllerSpec angleConfig =
-      angleActive ? ResolveAngleControllerSpecWithDefaults(bundle, slot) : RuntimeAngleControllerSpec();
-
-    const std::string pointLabel =
-      pointActive
-        ? ResolveControllerSlotLabel(bundle, slot, RuntimeControllerSlotKind::kPoint)
-        : DefaultPointControllerLabel(slot);
-    const std::string sliderLabel =
-      sliderConfig.label.empty() ? DefaultSliderControllerLabel(slot) : sliderConfig.label;
-    const std::string colorLabel =
-      colorConfig.label.empty() ? DefaultColorControllerLabel(slot) : colorConfig.label;
-    const std::string checkboxLabel =
-      checkboxConfig.label.empty() ? DefaultCheckboxControllerLabel(slot) : checkboxConfig.label;
-    const std::string selectLabel =
-      selectConfig.label.empty() ? DefaultSelectControllerLabel(slot) : selectConfig.label;
-    std::string angleLabel =
-      angleConfig.label.empty() ? DefaultAngleControllerLabel(slot) : angleConfig.label;
-    std::string angleUiLabel =
-      angleConfig.label.empty() ? DefaultAngleControllerLabel(slot) : angleConfig.label;
+    const std::string pointLabel = DefaultPointControllerLabel(slot);
+    const std::string sliderLabel = DefaultSliderControllerLabel(slot);
+    const std::string colorLabel = DefaultColorControllerLabel(slot);
+    const std::string checkboxLabel = DefaultCheckboxControllerLabel(slot);
+    const std::string selectLabel = DefaultSelectControllerLabel(slot);
+    std::string angleLabel = DefaultAngleControllerLabel(slot);
+    std::string angleUiLabel = DefaultAngleControllerLabel(slot);
     if (kDebugExposeAllControllerParams) {
       angleLabel += " [angle-value " + std::to_string(slot) + "]";
       angleUiLabel += " [angle-ui " + std::to_string(slot) + "]";
@@ -5762,47 +4835,30 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
 
     AEFX_CLR_STRUCT(def);
     def.flags = PF_ParamFlag_SUPERVISE;
-    def.ui_flags = (pointActive || kDebugExposeAllControllerParams) ? PF_PUI_NONE : PF_PUI_INVISIBLE;
+    def.ui_flags = PF_PUI_NONE;
     PF_ADD_POINT(
       pointLabel.c_str(),
-      static_cast<A_long>(std::lround(defaultPoint.x)),
-      static_cast<A_long>(std::lround(defaultPoint.y)),
+      0,
+      0,
       FALSE,
       ControllerPointParamIndex(slot)
     );
 
-    PF_FpShort sliderValidMin = 0;
-    PF_FpShort sliderValidMax = 100;
     PF_FpShort sliderMin = 0;
     PF_FpShort sliderMax = 100;
     AEFX_CLR_STRUCT(def);
     def.flags = PF_ParamFlag_SUPERVISE;
-    def.ui_flags = (sliderActive || kDebugExposeAllControllerParams) ? PF_PUI_NONE : PF_PUI_INVISIBLE;
+    def.ui_flags = PF_PUI_NONE;
     def.ui_width = 0;
     def.ui_height = 0;
-    ResolveSafeSliderUiRange(
-      sliderConfig.minValue,
-      sliderConfig.maxValue,
-      &sliderValidMin,
-      &sliderValidMax,
-      &sliderMin,
-      &sliderMax
-    );
-    const double safeSliderDefault = std::max<double>(
-      static_cast<double>(sliderValidMin),
-      std::min<double>(
-        static_cast<double>(sliderValidMax),
-        ClampAndSnapSliderValue(sliderConfig.defaultValue, sliderConfig)
-      )
-    );
     PF_ADD_FLOAT_SLIDER(
       sliderLabel.c_str(),
-      sliderValidMin,
-      sliderValidMax,
+      static_cast<PF_FpShort>(kStaticSliderValidMin),
+      static_cast<PF_FpShort>(kStaticSliderValidMax),
       sliderMin,
       sliderMax,
       AEFX_DEFAULT_CURVE_TOLERANCE,
-      static_cast<PF_FpShort>(safeSliderDefault),
+      0,
       kControllerSliderPrecision,
       0,
       false,
@@ -5814,7 +4870,7 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
     {
       PF_ArbitraryH defaultColorHandle = NULL;
       PF_Err defaultErr =
-        AllocateColorArbHandle(in_data, colorConfig.defaultValue, &defaultColorHandle);
+        AllocateColorArbHandle(in_data, MakeUnsetColorValue(), &defaultColorHandle);
       if (defaultErr != PF_Err_NONE) {
         return defaultErr;
       }
@@ -5832,23 +4888,23 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
 
     AEFX_CLR_STRUCT(def);
     def.flags = PF_ParamFlag_SUPERVISE;
-    def.ui_flags = (checkboxActive || kDebugExposeAllControllerParams) ? PF_PUI_NONE : PF_PUI_INVISIBLE;
+    def.ui_flags = PF_PUI_NONE;
     PF_ADD_CHECKBOX(
       checkboxLabel.c_str(),
       "",
-      checkboxConfig.defaultValue ? TRUE : FALSE,
+      FALSE,
       0,
       ControllerCheckboxParamIndex(slot)
     );
 
-    const std::string selectItems = BuildSelectControllerPopupItems(selectConfig);
+    const std::string selectItems = BuildStaticSelectControllerPopupItems();
     AEFX_CLR_STRUCT(def);
     def.flags = PF_ParamFlag_SUPERVISE;
-    def.ui_flags = (selectActive || kDebugExposeAllControllerParams) ? PF_PUI_NONE : PF_PUI_INVISIBLE;
+    def.ui_flags = PF_PUI_NONE;
     PF_ADD_POPUP(
       selectLabel.c_str(),
-      static_cast<A_short>(std::max<std::size_t>(1, selectConfig.options.size())),
-      static_cast<A_short>(ClampSelectControllerIndex(selectConfig.defaultValue, selectConfig) + 1),
+      static_cast<A_short>(kStaticSelectControllerChoiceCount),
+      1,
       selectItems.c_str(),
       ControllerSelectParamIndex(slot)
     );
@@ -5864,9 +4920,6 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
     def.ui_flags = kAngleControlUiFlags;
     def.ui_width = kAngleControlUiWidth;
     def.ui_height = kAngleControlUiHeight;
-    if (!angleActive && !kDebugExposeAllControllerParams) {
-      def.ui_flags |= PF_PUI_INVISIBLE;
-    }
     PF_ADD_FLOAT_SLIDER(
       angleLabel.c_str(),
       angleValidMin,
@@ -5874,7 +4927,7 @@ PF_Err ParamsSetup(PF_InData* in_data, PF_OutData* out_data) {
       angleSliderMin,
       angleSliderMax,
       AEFX_DEFAULT_CURVE_TOLERANCE,
-      static_cast<PF_FpShort>(angleActive ? angleConfig.defaultValue : 0.0),
+      0,
       2,
       0,
       false,
@@ -5910,31 +4963,159 @@ PF_Err Render(PF_InData* in_data, PF_ParamDef* params[], PF_LayerDef* output) {
   const A_long instanceId = static_cast<A_long>(
     ResolveStableInstanceId(in_data, params[PARAM_INSTANCE_ID]->u.sd.value)
   );
-
-  std::string errorMessage;
-  const std::vector<PF_Pixel>* raster = NULL;
-  const auto scene =
-    ExecuteSketchAtCurrentTime(
+  const ScopedRenderRuntime renderRuntime;
+  const auto runtimeKey = renderRuntime.key();
+  const std::uint64_t lineageIdentity = ResolveRenderLineageIdentity(in_data, instanceId);
+  const auto preparationCacheKey = ResolveEffectPreparationCacheKey(lineageIdentity);
+  const auto renderCacheKey = ResolveEffectRenderCacheKey(lineageIdentity);
+  std::ostringstream entryDetail;
+  entryDetail
+    << "runtime=" << runtimeKey
+    << " revision=" << revision
+    << " output=" << (output ? output->width : 0) << 'x'
+    << (output ? output->height : 0)
+    << " rowbytes=" << (output ? output->rowbytes : 0)
+    << " time=" << (in_data ? in_data->current_time : 0)
+    << '/' << (in_data ? in_data->time_scale : 0);
+  runtime_internal::AppendEffectRuntimeDiagnostic(
+    in_data,
+    "legacy-render-enter",
+    instanceId,
+    static_cast<PF_ParamIndex>(-1),
+    -1,
+    entryDetail.str()
+  );
+  if (!runtimeKey) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
       in_data,
-      revision,
+      "legacy-render-failed",
       instanceId,
-      output,
-      &raster,
-      NULL,
-      true,
-      SketchExecutionMode::kCpuFallback,
-      &errorMessage
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      "could not allocate isolated render runtime"
     );
-  if (!scene.has_value() || !raster) {
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
 
+  std::string errorMessage;
+  if (!PrepareEffectRuntimeDocument(
+        in_data,
+        runtimeKey,
+        preparationCacheKey,
+        revision,
+        instanceId,
+        &errorMessage
+      )) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "legacy-render-failed",
+      instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      std::string("document: ") + errorMessage
+    );
+    return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  }
+  long controllerTimelineTargetFrame = -1;
+  std::string controllerTimelineHash;
+  if (!CaptureEffectControllerTimeline(
+        in_data,
+        runtimeKey,
+        preparationCacheKey,
+        &controllerTimelineTargetFrame,
+        &controllerTimelineHash,
+        &errorMessage
+      )) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "legacy-render-failed",
+      instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      std::string("controller-timeline: ") + errorMessage
+    );
+    return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  }
+  BitmapFramePlan framePlan;
+  if (!BuildBitmapCpuFramePlanAtCurrentTime(
+        in_data,
+        runtimeKey,
+        renderCacheKey,
+        revision,
+        instanceId,
+        output,
+        std::function<bool()>(),
+        &framePlan,
+        &errorMessage
+      )) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "legacy-render-failed",
+      instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      std::string("plan: ") + errorMessage
+    );
+    return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  }
+  std::vector<PF_Pixel> raster;
+  if (!RenderBitmapFramePlanToCpuRaster(
+        framePlan,
+        &raster,
+        std::function<bool()>(),
+        &errorMessage
+      )) {
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "legacy-render-failed",
+      instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      framePlan.targetFrame,
+      std::string("execute: ") + errorMessage
+    );
+    return PF_Err_INTERNAL_STRUCT_DAMAGED;
+  }
+
+  std::size_t visiblePixels = 0;
+  std::size_t coloredPixels = 0;
+  for (const PF_Pixel& pixel : raster) {
+    if (pixel.alpha != 0) {
+      ++visiblePixels;
+    }
+    if (pixel.red != 0 || pixel.green != 0 || pixel.blue != 0) {
+      ++coloredPixels;
+    }
+  }
+  std::ostringstream completeDetail;
+  completeDetail
+    << entryDetail.str()
+    << " planOps=" << framePlan.operations.size()
+    << " rasterPixels=" << raster.size()
+    << " visiblePixels=" << visiblePixels
+    << " coloredPixels=" << coloredPixels;
+
   if (PF_WORLD_IS_DEEP(output)) {
-    CopySurface8To16(output, *raster);
+    CopySurface8To16(output, raster);
+    runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "legacy-render-complete",
+      instanceId,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      completeDetail.str() + " depth=16"
+    );
     return PF_Err_NONE;
   }
 
-  CopySurface8To8(output, *raster);
+  CopySurface8To8(output, raster);
+  runtime_internal::AppendEffectRuntimeDiagnostic(
+    in_data,
+    "legacy-render-complete",
+    instanceId,
+    static_cast<PF_ParamIndex>(-1),
+    -1,
+    completeDetail.str() + " depth=8"
+  );
   return PF_Err_NONE;
 }
 
@@ -5980,6 +5161,101 @@ EffectMain(
     AEFX_CLR_STRUCT(*out_data);
   }
 
+  const char* commandName = "other";
+  switch (cmd) {
+    case PF_Cmd_GLOBAL_SETUP: commandName = "global-setup"; break;
+    case PF_Cmd_GLOBAL_SETDOWN: commandName = "global-setdown"; break;
+    case PF_Cmd_PARAMS_SETUP: commandName = "params-setup"; break;
+    case PF_Cmd_SEQUENCE_SETUP: commandName = "sequence-setup"; break;
+    case PF_Cmd_SEQUENCE_RESETUP: commandName = "sequence-resetup"; break;
+    case PF_Cmd_SEQUENCE_FLATTEN: commandName = "sequence-flatten"; break;
+    case PF_Cmd_SEQUENCE_SETDOWN: commandName = "sequence-setdown"; break;
+    case PF_Cmd_RENDER: commandName = "render"; break;
+    case PF_Cmd_EVENT: commandName = "event"; break;
+    case PF_Cmd_USER_CHANGED_PARAM: commandName = "user-changed-param"; break;
+    case PF_Cmd_UPDATE_PARAMS_UI: commandName = "update-params-ui"; break;
+    case PF_Cmd_QUERY_DYNAMIC_FLAGS: commandName = "query-dynamic-flags"; break;
+    case PF_Cmd_SMART_PRE_RENDER: commandName = "smart-prerender"; break;
+    case PF_Cmd_SMART_RENDER: commandName = "smart-render-cpu"; break;
+    case PF_Cmd_SMART_RENDER_GPU: commandName = "smart-render-gpu"; break;
+    case PF_Cmd_GPU_DEVICE_SETUP: commandName = "gpu-device-setup"; break;
+    case PF_Cmd_GPU_DEVICE_SETDOWN: commandName = "gpu-device-setdown"; break;
+    case PF_Cmd_GET_FLATTENED_SEQUENCE_DATA:
+      commandName = "get-flattened-sequence-data";
+      break;
+    default: break;
+  }
+  // AppendEffectRuntimeDiagnostic resolves Effect Sequence Data. AE does not
+  // provide a valid sequence context during GLOBAL_SETUP/PARAMS_SETUP (and
+  // some device/UI selectors), so selector-boundary logging is restricted to
+  // the render selectors where the sequence suite is valid.
+  const bool traceCommand =
+    cmd == PF_Cmd_RENDER ||
+    cmd == PF_Cmd_SMART_PRE_RENDER ||
+    cmd == PF_Cmd_SMART_RENDER ||
+    cmd == PF_Cmd_SMART_RENDER_GPU;
+  PF_EventExtra* tracedEventExtra =
+    cmd == PF_Cmd_EVENT ? reinterpret_cast<PF_EventExtra*>(extra) : NULL;
+  const bool traceInteractionEvent =
+    tracedEventExtra &&
+    (tracedEventExtra->e_type == PF_Event_DO_CLICK ||
+     tracedEventExtra->e_type == PF_Event_DRAG);
+  const bool traceUiCommand =
+    traceInteractionEvent ||
+    cmd == PF_Cmd_USER_CHANGED_PARAM ||
+    cmd == PF_Cmd_UPDATE_PARAMS_UI;
+  if (traceUiCommand) {
+    std::ostringstream detail;
+    detail << "cmd=" << static_cast<long>(cmd) << " name=" << commandName;
+    if (cmd == PF_Cmd_EVENT) {
+      PF_EventExtra* eventExtra = tracedEventExtra;
+      const PF_WindowType windowType =
+        (eventExtra && eventExtra->contextH && *eventExtra->contextH)
+          ? (*eventExtra->contextH)->w_type
+          : PF_Window_NONE;
+      detail
+        << " eventType=" << (eventExtra ? static_cast<long>(eventExtra->e_type) : -1)
+        << " windowType=" << static_cast<long>(windowType)
+        << " area=" << (eventExtra ? static_cast<long>(eventExtra->effect_win.area) : -1)
+        << " index=" << (eventExtra ? static_cast<long>(eventExtra->effect_win.index) : -1)
+        << " inFlags=" << (eventExtra ? static_cast<unsigned long>(eventExtra->evt_in_flags) : 0)
+        << " sendDrag=" << (eventExtra ? static_cast<long>(eventExtra->u.do_click.send_drag) : -1)
+        << " lastTime=" << (eventExtra ? static_cast<long>(eventExtra->u.do_click.last_time) : -1)
+        << " refcon="
+        << (eventExtra ? eventExtra->u.do_click.continue_refcon[0] : 0) << ','
+        << (eventExtra ? eventExtra->u.do_click.continue_refcon[1] : 0) << ','
+        << (eventExtra ? eventExtra->u.do_click.continue_refcon[2] : 0) << ','
+        << (eventExtra ? eventExtra->u.do_click.continue_refcon[3] : 0);
+    } else if (cmd == PF_Cmd_USER_CHANGED_PARAM) {
+      const PF_UserChangedParamExtra* changedExtra =
+        reinterpret_cast<const PF_UserChangedParamExtra*>(extra);
+      detail << " paramIndex=" << (changedExtra ? static_cast<long>(changedExtra->param_index) : -1);
+    }
+    momentum::runtime_internal::AppendEffectUiDiagnostic(
+      in_data,
+      "ui-command-enter",
+      detail.str()
+    );
+  }
+  if (traceCommand) {
+    std::ostringstream detail;
+    detail
+      << "cmd=" << static_cast<long>(cmd)
+      << " name=" << commandName
+      << " time=" << (in_data ? in_data->current_time : 0)
+      << '/' << (in_data ? in_data->time_scale : 0)
+      << " output=" << reinterpret_cast<std::uintptr_t>(output)
+      << " extra=" << reinterpret_cast<std::uintptr_t>(extra);
+    momentum::runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "command-enter",
+      -1,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      detail.str()
+    );
+  }
+
   PF_Err err = PF_Err_NONE;
 
   switch (cmd) {
@@ -6020,30 +5296,13 @@ EffectMain(
       break;
 
     case PF_Cmd_EVENT:
-      {
-        PF_EventExtra* eventExtra = reinterpret_cast<PF_EventExtra*>(extra);
-        const PF_WindowType windowType =
-          (eventExtra && eventExtra->contextH && *eventExtra->contextH)
-            ? (*eventExtra->contextH)->w_type
-            : PF_Window_NONE;
-        if (windowType == PF_Window_COMP || windowType == PF_Window_LAYER) {
-          err = momentum::HandleCustomCompUIEvent(
-            in_data,
-            out_data,
-            params,
-            output,
-            eventExtra
-          );
-        } else {
-          err = momentum::HandleCustomEffectUIEvent(
-            in_data,
-            out_data,
-            params,
-            output,
-            eventExtra
-          );
-        }
-      }
+      err = momentum::HandleCustomEffectUIEvent(
+        in_data,
+        out_data,
+        params,
+        output,
+        reinterpret_cast<PF_EventExtra*>(extra)
+      );
       break;
 
     case PF_Cmd_USER_CHANGED_PARAM:
@@ -6115,6 +5374,58 @@ EffectMain(
 
     default:
       break;
+  }
+
+  if (traceCommand) {
+    std::ostringstream detail;
+    detail
+      << "cmd=" << static_cast<long>(cmd)
+      << " name=" << commandName
+      << " err=" << static_cast<long>(err)
+      << " outFlags=" << (out_data ? static_cast<unsigned long>(out_data->out_flags) : 0)
+      << " outFlags2=" << (out_data ? static_cast<unsigned long>(out_data->out_flags2) : 0);
+    momentum::runtime_internal::AppendEffectRuntimeDiagnostic(
+      in_data,
+      "command-exit",
+      -1,
+      static_cast<PF_ParamIndex>(-1),
+      -1,
+      detail.str()
+    );
+  }
+  if (traceUiCommand) {
+    std::ostringstream detail;
+    detail
+      << "cmd=" << static_cast<long>(cmd)
+      << " name=" << commandName
+      << " err=" << static_cast<long>(err)
+      << " outFlags=" << (out_data ? static_cast<unsigned long>(out_data->out_flags) : 0);
+    if (cmd == PF_Cmd_EVENT) {
+      PF_EventExtra* eventExtra = reinterpret_cast<PF_EventExtra*>(extra);
+      const PF_ParamIndex eventParamIndex =
+        eventExtra ? eventExtra->effect_win.index : static_cast<PF_ParamIndex>(-1);
+      const PF_ChangeFlags changeFlags =
+        params && eventParamIndex >= 0 && eventParamIndex < momentum::PARAM_COUNT &&
+        params[eventParamIndex]
+          ? params[eventParamIndex]->uu.change_flags
+          : PF_ChangeFlag_NONE;
+      detail
+        << " eventType=" << (eventExtra ? static_cast<long>(eventExtra->e_type) : -1)
+        << " outEventFlags=" << (eventExtra ? static_cast<unsigned long>(eventExtra->evt_out_flags) : 0)
+        << " sendDrag=" << (eventExtra ? static_cast<long>(eventExtra->u.do_click.send_drag) : -1)
+        << " lastTime=" << (eventExtra ? static_cast<long>(eventExtra->u.do_click.last_time) : -1)
+        << " refcon="
+        << (eventExtra ? eventExtra->u.do_click.continue_refcon[0] : 0) << ','
+        << (eventExtra ? eventExtra->u.do_click.continue_refcon[1] : 0) << ','
+        << (eventExtra ? eventExtra->u.do_click.continue_refcon[2] : 0) << ','
+        << (eventExtra ? eventExtra->u.do_click.continue_refcon[3] : 0)
+        << " changeFlags=" << static_cast<unsigned long>(changeFlags);
+    }
+    momentum::runtime_internal::AppendEffectUiDiagnostic(
+      in_data,
+      "ui-command-exit",
+      detail.str()
+    );
   }
 
   return err;

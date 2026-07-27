@@ -1083,11 +1083,12 @@ bool BuildGlyphAtlasImageAsset(
   asset.pixelDensity = 1.0;
   asset.version = HashGlyphAtlasAlpha(alpha, width, height);
   asset.loaded = true;
-  asset.pixels.resize(pixelCount);
+  std::vector<PF_Pixel> pixels(pixelCount);
   for (std::size_t index = 0; index < pixelCount; index += 1) {
     const unsigned char a = alpha[index];
-    asset.pixels[index] = PF_Pixel{a, 255, 255, 255};
+    pixels[index] = PF_Pixel{a, 255, 255, 255};
   }
+  ReplaceImagePixels(&asset, std::move(pixels));
   *outAsset = std::move(asset);
   return true;
 }

@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 
 #if defined(__APPLE__)
@@ -16,8 +18,35 @@ namespace momentum::runtime_internal {
 
 namespace {
 
+std::mutex gEffectRuntimeDiagnosticMutex;
+
+bool IsVerboseRenderDiagnosticEnabled() {
+  static const bool enabled = []() {
+    const char* value = std::getenv("MOMENTUM_VERBOSE_RENDER_LOG");
+    return value && (*value == '1' || *value == 'y' || *value == 'Y');
+  }();
+  return enabled;
+}
+
+bool ShouldWriteRenderDiagnostic(const char* eventName) {
+  if (IsVerboseRenderDiagnosticEnabled()) {
+    return true;
+  }
+  const std::string event = eventName ? eventName : "unknown";
+  return event.find("failed") != std::string::npos ||
+    event == "render-timing" ||
+    event == "runtime-cache-rebuild" ||
+    event == "controller-history-dirty" ||
+    event == "controller-history-replay" ||
+    event == "controller-render-superseded";
+}
+
 bool IsCompatibleSequenceDataVersion(A_u_long version) {
-  return version == kSequenceCacheDataLegacyVersion || version == kSequenceCacheDataVersion;
+  return
+    version == kSequenceCacheDataLegacyVersion ||
+    version == kSequenceCacheDataSnapshotVersion ||
+    version == kSequenceCacheDataSharedRuntimeVersion ||
+    version == kSequenceCacheDataVersion;
 }
 
 std::size_t FindJsonFieldValueStart(const std::string& json, const char* key) {
@@ -863,27 +892,177 @@ std::string GetRuntimeInstanceBundlePath(A_long instanceId) {
   return BuildRuntimeInstancePath(instanceId, "sketch_bundle.json");
 }
 
-std::uintptr_t GetEffectCacheKey(PF_InData* in_data) {
+PF_ConstHandle ResolveEffectSequenceDataHandle(PF_InData* in_data) {
+  if (!in_data) {
+    return NULL;
+  }
+
+  if (in_data->sequence_data) {
+    return reinterpret_cast<PF_ConstHandle>(in_data->sequence_data);
+  }
+
+  if (!in_data->effect_ref || !in_data->pica_basicP) {
+    return NULL;
+  }
+
+  // With multi-frame rendering enabled AE intentionally clears
+  // in_data->sequence_data for render selectors. This suite is the only
+  // supported way to access the Effect-owned, read-only sequence snapshot.
+  AEFX_SuiteScoper<PF_EffectSequenceDataSuite1, true> sequenceSuite(
+    in_data,
+    kPFEffectSequenceDataSuite,
+    kPFEffectSequenceDataSuiteVersion1,
+    NULL
+  );
+  if (!sequenceSuite.get()) {
+    return NULL;
+  }
+
+  PF_ConstHandle sequenceHandle = NULL;
+  const PF_Err err = sequenceSuite->PF_GetConstSequenceData(
+    in_data->effect_ref,
+    &sequenceHandle
+  );
+  return err == PF_Err_NONE ? sequenceHandle : NULL;
+}
+
+namespace {
+
+std::uint64_t ReadSequenceUiSessionToken(
+  PF_InData* in_data,
+  PF_ConstHandle sequenceHandle
+) {
+  if (!in_data || !sequenceHandle ||
+      PF_GET_HANDLE_SIZE(sequenceHandle) < sizeof(SequenceCacheData)) {
+    return 0;
+  }
+  const auto* sequenceData =
+    reinterpret_cast<const SequenceCacheData*>(DH(sequenceHandle));
+  if (!sequenceData ||
+      sequenceData->magic != kSequenceCacheDataMagic ||
+      sequenceData->version != kSequenceCacheDataVersion) {
+    return 0;
+  }
+  return sequenceData->uiSessionToken;
+}
+
+}  // namespace
+
+EffectRuntimeKey ResolveEffectRuntimeKey(PF_InData* in_data) {
   if (!in_data) {
     return 0;
   }
 
-  if (in_data->sequence_data) {
-    auto* seqData =
-      reinterpret_cast<SequenceCacheData*>(DH(in_data->sequence_data));
-    if (seqData) {
-      const bool valid =
-        seqData->magic == kSequenceCacheDataMagic &&
-        IsCompatibleSequenceDataVersion(seqData->version) &&
-        seqData->instanceId != 0;
-      const std::uintptr_t key = valid
-        ? static_cast<std::uintptr_t>(seqData->instanceId)
-        : reinterpret_cast<std::uintptr_t>(in_data->sequence_data);
-      return key;
-    }
+  const PF_ConstHandle sequenceHandle = ResolveEffectSequenceDataHandle(in_data);
+  // This process-local token identifies one live Sequence session. Rendering
+  // combines it with the transport id to isolate persistent evaluator lanes
+  // while keeping invocation inputs immutable. effect_ref is deliberately not
+  // part of that identity because AE may vary it between render callbacks.
+  return static_cast<EffectRuntimeKey>(
+    ReadSequenceUiSessionToken(in_data, sequenceHandle)
+  );
+}
+
+void AppendEffectRuntimeDiagnostic(
+  PF_InData* in_data,
+  const char* eventName,
+  A_long instanceId,
+  PF_ParamIndex paramIndex,
+  long frame,
+  const std::string& detail
+) {
+  if (!ShouldWriteRenderDiagnostic(eventName)) {
+    return;
+  }
+  const std::string runtimeDirectory = GetRuntimeDirectoryPath();
+  if (runtimeDirectory.empty()) {
+    return;
+  }
+  const std::string logPath = runtimeDirectory + "/effect_runtime.log";
+  const std::lock_guard<std::mutex> lock(gEffectRuntimeDiagnosticMutex);
+
+  std::error_code sizeError;
+  const std::uintmax_t currentSize = std::filesystem::file_size(logPath, sizeError);
+  const bool rotate = !sizeError && currentSize > (2U * 1024U * 1024U);
+  std::ofstream stream(
+    logPath.c_str(),
+    std::ios::out | (rotate ? std::ios::trunc : std::ios::app)
+  );
+  if (!stream.is_open()) {
+    return;
   }
 
-  return reinterpret_cast<std::uintptr_t>(in_data->effect_ref);
+  std::string safeDetail = detail;
+  std::replace(safeDetail.begin(), safeDetail.end(), '\n', ' ');
+  std::replace(safeDetail.begin(), safeDetail.end(), '\r', ' ');
+  const auto now = std::chrono::system_clock::now().time_since_epoch();
+  const auto milliseconds =
+    std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+  const PF_ConstHandle resolvedSequenceHandle = ResolveEffectSequenceDataHandle(in_data);
+  const std::uint64_t uiSessionToken =
+    ReadSequenceUiSessionToken(in_data, resolvedSequenceHandle);
+  stream
+    << "timeMs=" << milliseconds
+    << " event=" << (eventName ? eventName : "unknown")
+    << " runtimeKey=" << ResolveEffectRuntimeKey(in_data)
+    << " sequenceHandle=" << reinterpret_cast<std::uintptr_t>(
+         in_data ? in_data->sequence_data : NULL
+       )
+    << " resolvedSequenceHandle=" << reinterpret_cast<std::uintptr_t>(
+         resolvedSequenceHandle
+       )
+    << " uiSessionToken=" << uiSessionToken
+    << " effectRef=" << reinterpret_cast<std::uintptr_t>(
+         in_data ? in_data->effect_ref : NULL
+       )
+    << " instanceId=" << instanceId
+    << " paramIndex=" << static_cast<long>(paramIndex)
+    << " frame=" << frame;
+  if (!safeDetail.empty()) {
+    stream << " detail=" << safeDetail;
+  }
+  stream << '\n';
+}
+
+void AppendEffectUiDiagnostic(
+  PF_InData* in_data,
+  const char* eventName,
+  const std::string& detail
+) {
+  const std::string runtimeDirectory = GetRuntimeDirectoryPath();
+  if (runtimeDirectory.empty()) {
+    return;
+  }
+  const std::string logPath = runtimeDirectory + "/effect_runtime.log";
+  const std::lock_guard<std::mutex> lock(gEffectRuntimeDiagnosticMutex);
+
+  std::error_code sizeError;
+  const std::uintmax_t currentSize = std::filesystem::file_size(logPath, sizeError);
+  const bool rotate = !sizeError && currentSize > (2U * 1024U * 1024U);
+  std::ofstream stream(
+    logPath.c_str(),
+    std::ios::out | (rotate ? std::ios::trunc : std::ios::app)
+  );
+  if (!stream.is_open()) {
+    return;
+  }
+
+  std::string safeDetail = detail;
+  std::replace(safeDetail.begin(), safeDetail.end(), '\n', ' ');
+  std::replace(safeDetail.begin(), safeDetail.end(), '\r', ' ');
+  const auto now = std::chrono::system_clock::now().time_since_epoch();
+  const auto milliseconds =
+    std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+  stream
+    << "timeMs=" << milliseconds
+    << " event=" << (eventName ? eventName : "ui-unknown")
+    << " effectRef=" << reinterpret_cast<std::uintptr_t>(
+         in_data ? in_data->effect_ref : NULL
+       );
+  if (!safeDetail.empty()) {
+    stream << " detail=" << safeDetail;
+  }
+  stream << '\n';
 }
 
 std::optional<std::string> ReadTextFile(const std::string& path) {
@@ -917,6 +1096,25 @@ struct LegacySequenceCacheDataHeader {
   A_long syncedRevision = -1;
 };
 
+struct SnapshotSequenceCacheDataHeader {
+  A_u_long magic = 0;
+  A_u_long version = 0;
+  std::uint64_t instanceId = 0;
+  A_long syncedRevision = -1;
+  A_u_long bundleTextSize = 0;
+  A_u_long sourceTextSize = 0;
+};
+
+struct SharedRuntimeSequenceCacheDataHeader {
+  A_u_long magic = 0;
+  A_u_long version = 0;
+  std::uint64_t instanceId = 0;
+  A_long syncedRevision = -1;
+  A_u_long bundleTextSize = 0;
+  A_u_long sourceTextSize = 0;
+  std::uint64_t obsoleteRuntimeIdentity = 0;
+};
+
 struct SequenceRuntimeSnapshot {
   std::string bundleText;
   std::string sourceText;
@@ -927,12 +1125,13 @@ std::uint64_t ResolveRuntimeBundleInstanceId(PF_InData* in_data, A_long instance
     return static_cast<std::uint64_t>(static_cast<A_u_long>(instanceId));
   }
 
-  if (!in_data || !in_data->sequence_data) {
+  const PF_ConstHandle sequenceHandle = ResolveEffectSequenceDataHandle(in_data);
+  if (!in_data || !sequenceHandle) {
     return 0;
   }
 
-  auto* sequenceData =
-    reinterpret_cast<SequenceCacheData*>(DH(in_data->sequence_data));
+  const auto* sequenceData =
+    reinterpret_cast<const LegacySequenceCacheDataHeader*>(DH(sequenceHandle));
   if (!sequenceData) {
     return 0;
   }
@@ -944,65 +1143,50 @@ std::uint64_t ResolveRuntimeBundleInstanceId(PF_InData* in_data, A_long instance
   return valid ? sequenceData->instanceId : 0;
 }
 
-std::optional<A_long> ReadEffectRevisionParam(PF_InData* in_data) {
-  if (!in_data) {
-    return std::nullopt;
-  }
-
-  PF_ParamDef param;
-  AEFX_CLR_STRUCT(param);
-  PF_Err err = PF_CHECKOUT_PARAM(
-    in_data,
-    PARAM_REVISION,
-    in_data->current_time,
-    in_data->time_step,
-    in_data->time_scale,
-    &param
-  );
-  if (err != PF_Err_NONE) {
-    return std::nullopt;
-  }
-
-  const A_long revision = param.u.sd.value;
-  PF_CHECKIN_PARAM(in_data, &param);
-  return revision;
-}
-
 std::optional<SequenceRuntimeSnapshot> ReadSequenceRuntimeSnapshot(PF_InData* in_data) {
-  if (!in_data || !in_data->sequence_data) {
+  const PF_ConstHandle sequenceHandle = ResolveEffectSequenceDataHandle(in_data);
+  if (!in_data || !sequenceHandle) {
     return std::nullopt;
   }
 
-  const auto handleSize = PF_GET_HANDLE_SIZE(in_data->sequence_data);
+  const auto handleSize = PF_GET_HANDLE_SIZE(sequenceHandle);
   if (handleSize < sizeof(LegacySequenceCacheDataHeader)) {
     return std::nullopt;
   }
 
   const auto* legacyHeader =
-    reinterpret_cast<const LegacySequenceCacheDataHeader*>(DH(in_data->sequence_data));
+    reinterpret_cast<const LegacySequenceCacheDataHeader*>(DH(sequenceHandle));
   if (!legacyHeader ||
       legacyHeader->magic != kSequenceCacheDataMagic ||
-      legacyHeader->version != kSequenceCacheDataVersion) {
+      (legacyHeader->version != kSequenceCacheDataSnapshotVersion &&
+       legacyHeader->version != kSequenceCacheDataSharedRuntimeVersion &&
+       legacyHeader->version != kSequenceCacheDataVersion)) {
     return std::nullopt;
   }
 
-  if (handleSize < sizeof(SequenceCacheData)) {
+  const std::size_t headerSize =
+    legacyHeader->version == kSequenceCacheDataVersion
+      ? sizeof(SequenceCacheData)
+      : (legacyHeader->version == kSequenceCacheDataSharedRuntimeVersion
+          ? sizeof(SharedRuntimeSequenceCacheDataHeader)
+          : sizeof(SnapshotSequenceCacheDataHeader));
+  if (handleSize < headerSize) {
     return std::nullopt;
   }
 
   const auto* sequenceData =
-    reinterpret_cast<const SequenceCacheData*>(legacyHeader);
+    reinterpret_cast<const SnapshotSequenceCacheDataHeader*>(legacyHeader);
   const std::size_t payloadBytes =
     static_cast<std::size_t>(sequenceData->bundleTextSize) +
     static_cast<std::size_t>(sequenceData->sourceTextSize);
-  const std::size_t expectedSize = sizeof(SequenceCacheData) + payloadBytes;
+  const std::size_t expectedSize = headerSize + payloadBytes;
   if (sequenceData->bundleTextSize == 0 ||
       sequenceData->sourceTextSize == 0 ||
       expectedSize > handleSize) {
     return std::nullopt;
   }
 
-  const char* payload = reinterpret_cast<const char*>(sequenceData + 1);
+  const char* payload = reinterpret_cast<const char*>(legacyHeader) + headerSize;
   SequenceRuntimeSnapshot snapshot;
   snapshot.bundleText.assign(payload, sequenceData->bundleTextSize);
   snapshot.sourceText.assign(
@@ -1044,16 +1228,6 @@ RuntimeSketchBundle ReadRuntimeSketchBundleFromText(
   if (const auto debugSessionId = ExtractJsonStringField(bundleText, "debugSessionId")) {
     bundle.debugSessionId = *debugSessionId;
   }
-  if (const auto profile = ExtractJsonStringField(bundleText, "profile")) {
-    bundle.profile = *profile;
-  } else if (const auto nestedProfile = ExtractNestedJsonStringField(bundleText, "analysis", "profile")) {
-    bundle.profile = *nestedProfile;
-  }
-  if (const auto backgroundMode = ExtractJsonStringField(bundleText, "backgroundMode")) {
-    bundle.backgroundMode = *backgroundMode;
-  } else if (const auto nestedBackgroundMode = ExtractNestedJsonStringField(bundleText, "analysis", "backgroundMode")) {
-    bundle.backgroundMode = *nestedBackgroundMode;
-  }
   if (const auto controllerHash = ExtractJsonStringField(bundleText, "hash")) {
     bundle.controllerHash = *controllerHash;
   } else if (const auto nestedControllerHash = ExtractNestedJsonStringField(bundleText, "controller", "hash")) {
@@ -1080,12 +1254,6 @@ RuntimeSketchBundle ReadRuntimeSketchBundleFromText(
     bundle.checkpointInterval = std::max<long>(1, std::min<long>(120, *checkpointInterval));
   }
 
-  if (const auto denseWindowBacktrack = ExtractNestedJsonLongField(bundleText, "cache", "denseWindowBacktrack")) {
-    bundle.denseWindowBacktrack = std::max<long>(1, std::min<long>(120, *denseWindowBacktrack));
-  }
-  if (const auto denseWindowForward = ExtractNestedJsonLongField(bundleText, "cache", "denseWindowForward")) {
-    bundle.denseWindowForward = std::max<long>(1, std::min<long>(240, *denseWindowForward));
-  }
   if (bundle.runtimeTarget.empty()) {
     bundle.runtimeTarget = "momentum-plugin-js-runtime";
   }
@@ -1163,42 +1331,44 @@ RuntimeSketchBundle ReadRuntimeSketchBundleForEffect(
   std::string* errorMessage
 ) {
   const std::uint64_t resolvedInstanceId = ResolveRuntimeBundleInstanceId(in_data, instanceId);
-  const A_long expectedRevision = ReadEffectRevisionParam(in_data).value_or(-1);
   RuntimeSketchBundle sequenceBundle;
-  RuntimeSketchBundle localBundle;
-  bool hasSequenceBundle = false;
-  bool hasLocalBundle = false;
   std::string sequenceError;
-  std::string localError;
+  const std::string diagnosticSourcePath = resolvedInstanceId != 0
+    ? GetRuntimeInstanceSketchPath(static_cast<A_long>(resolvedInstanceId))
+    : std::string();
+  if (TryReadRuntimeSketchBundleFromSequenceData(
+        in_data,
+        diagnosticSourcePath,
+        &sequenceBundle,
+        &sequenceError
+      )) {
+    if (errorMessage) {
+      *errorMessage = sequenceError;
+    }
+    return sequenceBundle;
+  }
+
+  // ExtendScript setValue() does not reliably emit PF_Cmd_USER_CHANGED_PARAM,
+  // so a newly-created effect may render before its transport payload has been
+  // copied into Sequence Data. The unique per-instance directory is therefore
+  // a read-only DocumentStore fallback. It is addressed only by this effect's
+  // AE Instance ID; shared pending/global files are never render sources.
   if (resolvedInstanceId != 0) {
     const std::string instanceBundlePath =
       GetRuntimeInstanceBundlePath(static_cast<A_long>(resolvedInstanceId));
     const std::string instanceSketchPath =
       GetRuntimeInstanceSketchPath(static_cast<A_long>(resolvedInstanceId));
-    hasSequenceBundle = TryReadRuntimeSketchBundleFromSequenceData(
-      in_data,
-      instanceSketchPath,
-      &sequenceBundle,
-      &sequenceError
-    );
-    if (FileExists(instanceBundlePath)) {
-      localBundle = ReadRuntimeSketchBundleFromPath(
-        instanceBundlePath,
+    const std::optional<std::string> bundleText = ReadTextFile(instanceBundlePath);
+    const std::optional<std::string> sourceText = ReadTextFile(instanceSketchPath);
+    if (bundleText.has_value() && sourceText.has_value()) {
+      std::string localError;
+      RuntimeSketchBundle localBundle = ReadRuntimeSketchBundleFromText(
+        *bundleText,
         instanceSketchPath,
         &localError
       );
-      hasLocalBundle = true;
-    }
-  }
-
-  if (expectedRevision >= 0) {
-    if (hasSequenceBundle && sequenceBundle.revision == expectedRevision) {
-      if (errorMessage) {
-        *errorMessage = sequenceError;
-      }
-      return sequenceBundle;
-    }
-    if (hasLocalBundle && localBundle.revision == expectedRevision) {
+      localBundle.sourceText = *sourceText;
+      localBundle.hasEmbeddedSource = true;
       if (errorMessage) {
         *errorMessage = localError;
       }
@@ -1206,21 +1376,56 @@ RuntimeSketchBundle ReadRuntimeSketchBundleForEffect(
     }
   }
 
-  if (hasSequenceBundle) {
-    if (errorMessage) {
-      *errorMessage = sequenceError;
-    }
-    return sequenceBundle;
+  if (errorMessage) {
+    *errorMessage =
+      "Momentum effect has no embedded sketch document" +
+      (resolvedInstanceId != 0
+        ? std::string(" (transport id ") + std::to_string(resolvedInstanceId) + ")"
+        : std::string()) +
+      ". Re-apply the Bitmap sketch to rebuild its DocumentStore entry.";
+  }
+  RuntimeSketchBundle missingBundle;
+  missingBundle.sourcePath = diagnosticSourcePath;
+  return missingBundle;
+}
+
+std::optional<std::string> ReadRuntimeSketchDependencyBytes(
+  PF_InData* in_data,
+  A_long instanceId,
+  std::string* errorMessage
+) {
+  if (const auto snapshot = ReadSequenceRuntimeSnapshot(in_data)) {
+    std::string bytes;
+    bytes.reserve(snapshot->bundleText.size() + snapshot->sourceText.size() + 1);
+    bytes.append(snapshot->bundleText);
+    bytes.push_back('\0');
+    bytes.append(snapshot->sourceText);
+    return bytes;
   }
 
-  if (hasLocalBundle) {
-    if (errorMessage) {
-      *errorMessage = localError;
+  const std::uint64_t resolvedInstanceId = ResolveRuntimeBundleInstanceId(in_data, instanceId);
+  if (resolvedInstanceId != 0) {
+    const auto bundleText = ReadTextFile(
+      GetRuntimeInstanceBundlePath(static_cast<A_long>(resolvedInstanceId))
+    );
+    const auto sourceText = ReadTextFile(
+      GetRuntimeInstanceSketchPath(static_cast<A_long>(resolvedInstanceId))
+    );
+    if (bundleText.has_value() && sourceText.has_value()) {
+      std::string bytes;
+      bytes.reserve(bundleText->size() + sourceText->size() + 1);
+      bytes.append(*bundleText);
+      bytes.push_back('\0');
+      bytes.append(*sourceText);
+      return bytes;
     }
-    return localBundle;
   }
 
-  return ReadRuntimeSketchBundle(errorMessage);
+  if (errorMessage) {
+    *errorMessage =
+      "Could not read the Effect-local bitmap document for cache GUID mixing.";
+  }
+  return std::nullopt;
 }
 
 std::optional<std::string> ReadRuntimeSketchSource(const RuntimeSketchBundle& bundle) {
@@ -1228,14 +1433,6 @@ std::optional<std::string> ReadRuntimeSketchSource(const RuntimeSketchBundle& bu
     return bundle.sourceText;
   }
   return ReadTextFile(bundle.sourcePath);
-}
-
-bool IsDirectTimeProfile(const RuntimeSketchBundle& bundle) {
-  return bundle.profile == "direct-time-js";
-}
-
-bool IsOpaqueBackgroundProfile(const RuntimeSketchBundle& bundle) {
-  return bundle.backgroundMode == "opaque-likely";
 }
 
 }  // namespace momentum::runtime_internal

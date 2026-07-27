@@ -1,4 +1,4 @@
-#include "bitmap_gpu_plan.h"
+#include "bitmap_draw_plan.h"
 
 #include "../render/render_internal.h"
 #include "../render/render_text.h"
@@ -468,55 +468,6 @@ bool TriangulateSimplePolygon(
 
 constexpr double kPi = 3.14159265358979323846;
 
-std::pair<double, double> AddScaledPoint(
-  const std::pair<double, double>& point,
-  const std::pair<double, double>& direction,
-  double scale
-) {
-  return std::make_pair(
-    point.first + direction.first * scale,
-    point.second + direction.second * scale
-  );
-}
-
-std::pair<double, double> SubtractPoint(
-  const std::pair<double, double>& a,
-  const std::pair<double, double>& b
-) {
-  return std::make_pair(a.first - b.first, a.second - b.second);
-}
-
-std::pair<double, double> NormalizePoint(const std::pair<double, double>& value) {
-  const double length = std::sqrt(value.first * value.first + value.second * value.second);
-  if (length <= 1e-9) {
-    return std::make_pair(0.0, 0.0);
-  }
-  return std::make_pair(value.first / length, value.second / length);
-}
-
-bool IntersectLines(
-  const std::pair<double, double>& p0,
-  const std::pair<double, double>& d0,
-  const std::pair<double, double>& p1,
-  const std::pair<double, double>& d1,
-  std::pair<double, double>* outPoint
-) {
-  if (!outPoint) {
-    return false;
-  }
-  const double denominator = d0.first * d1.second - d0.second * d1.first;
-  if (std::fabs(denominator) <= 1e-9) {
-    return false;
-  }
-  const std::pair<double, double> delta = SubtractPoint(p1, p0);
-  const double t = (delta.first * d1.second - delta.second * d1.first) / denominator;
-  *outPoint = std::make_pair(
-    p0.first + d0.first * t,
-    p0.second + d0.second * t
-  );
-  return true;
-}
-
 void NormalizePolygonVertices(std::vector<std::pair<double, double>>* vertices);
 void EnsurePolygonOrientation(
   std::vector<std::pair<double, double>>* vertices,
@@ -534,21 +485,8 @@ void AppendFillTriangle(
   const std::pair<double, double>& b,
   const std::pair<double, double>& c,
   const PF_Pixel& color,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 );
-
-double NormalizeAngleDeltaLocal(double delta, bool positive) {
-  if (positive) {
-    while (delta <= 0.0) {
-      delta += kPi * 2.0;
-    }
-  } else {
-    while (delta >= 0.0) {
-      delta -= kPi * 2.0;
-    }
-  }
-  return delta;
-}
 
 void AppendArcFan(
   const std::pair<double, double>& center,
@@ -556,7 +494,7 @@ void AppendArcFan(
   double startAngle,
   double deltaAngle,
   const PF_Pixel& color,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || radius <= 1e-9) {
     return;
@@ -581,156 +519,12 @@ void AppendArcFan(
   }
 }
 
-void AppendStrokeJoinTriangles(
-  const std::pair<double, double>& previous,
-  const std::pair<double, double>& current,
-  const std::pair<double, double>& next,
-  double halfWidth,
-  int strokeJoin,
-  const PF_Pixel& color,
-  GpuRenderPlan* plan
-) {
-  if (!plan || halfWidth <= 1e-9) {
-    return;
-  }
-
-  int joinMode = strokeJoin;
-  if (joinMode != STROKE_JOIN_MITER && joinMode != STROKE_JOIN_BEVEL && joinMode != STROKE_JOIN_ROUND) {
-    joinMode = STROKE_JOIN_MITER;
-  }
-
-  const std::pair<double, double> uPrev = NormalizePoint(SubtractPoint(current, previous));
-  const std::pair<double, double> uNext = NormalizePoint(SubtractPoint(next, current));
-  if ((std::fabs(uPrev.first) <= 1e-9 && std::fabs(uPrev.second) <= 1e-9) ||
-      (std::fabs(uNext.first) <= 1e-9 && std::fabs(uNext.second) <= 1e-9)) {
-    return;
-  }
-
-  const double cross = uPrev.first * uNext.second - uPrev.second * uNext.first;
-  if (std::fabs(cross) <= 1e-9) {
-    return;
-  }
-
-  const double side = cross > 0.0 ? -1.0 : 1.0;
-  const std::pair<double, double> nPrev = std::make_pair(-uPrev.second * side, uPrev.first * side);
-  const std::pair<double, double> nNext = std::make_pair(-uNext.second * side, uNext.first * side);
-  const std::pair<double, double> outerPrev = AddScaledPoint(current, nPrev, halfWidth);
-  const std::pair<double, double> outerNext = AddScaledPoint(current, nNext, halfWidth);
-  const std::pair<double, double> innerPrev = AddScaledPoint(current, nPrev, -halfWidth);
-  const std::pair<double, double> innerNext = AddScaledPoint(current, nNext, -halfWidth);
-
-  AppendFillTriangle(current, innerPrev, innerNext, color, plan);
-
-  if (joinMode == STROKE_JOIN_ROUND) {
-    const double startAngle = std::atan2(nPrev.second, nPrev.first);
-    const double endAngle = std::atan2(nNext.second, nNext.first);
-    double delta = endAngle - startAngle;
-    while (delta <= -kPi) {
-      delta += kPi * 2.0;
-    }
-    while (delta > kPi) {
-      delta -= kPi * 2.0;
-    }
-    AppendArcFan(current, halfWidth, startAngle, delta, color, plan);
-    return;
-  }
-
-  AppendFillTriangle(current, outerPrev, outerNext, color, plan);
-
-  if (joinMode == STROKE_JOIN_MITER) {
-    std::pair<double, double> intersection;
-    if (IntersectLines(outerPrev, uPrev, outerNext, uNext, &intersection)) {
-      const std::pair<double, double> miterDelta = SubtractPoint(intersection, current);
-      const double miterLength = std::sqrt(
-        miterDelta.first * miterDelta.first + miterDelta.second * miterDelta.second
-      );
-      const double miterLimit = halfWidth * 10.0;
-      if (miterLength <= miterLimit) {
-        AppendFillTriangle(outerPrev, intersection, outerNext, color, plan);
-      }
-    }
-  }
-}
-
-void AppendStrokeBodyTriangles(
-  const std::pair<double, double>& start,
-  const std::pair<double, double>& end,
-  double halfWidth,
-  double startExtension,
-  double endExtension,
-  const PF_Pixel& color,
-  GpuRenderPlan* plan
-) {
-  if (!plan || halfWidth <= 1e-9) {
-    return;
-  }
-  const std::pair<double, double> delta = SubtractPoint(end, start);
-  const std::pair<double, double> unitDirection = NormalizePoint(delta);
-  if (std::fabs(unitDirection.first) <= 1e-9 && std::fabs(unitDirection.second) <= 1e-9) {
-    return;
-  }
-  const std::pair<double, double> normal = std::make_pair(-unitDirection.second, unitDirection.first);
-  const std::pair<double, double> extendedStart = AddScaledPoint(start, unitDirection, -startExtension);
-  const std::pair<double, double> extendedEnd = AddScaledPoint(end, unitDirection, endExtension);
-  const std::pair<double, double> a = AddScaledPoint(extendedStart, normal, halfWidth);
-  const std::pair<double, double> b = AddScaledPoint(extendedStart, normal, -halfWidth);
-  const std::pair<double, double> c = AddScaledPoint(extendedEnd, normal, halfWidth);
-  const std::pair<double, double> d = AddScaledPoint(extendedEnd, normal, -halfWidth);
-  AppendFillTriangle(a, b, c, color, plan);
-  AppendFillTriangle(c, b, d, color, plan);
-}
-
-void AppendStrokeCapTriangles(
-  const std::pair<double, double>& point,
-  const std::pair<double, double>& direction,
-  double halfWidth,
-  int strokeCap,
-  bool isStartCap,
-  const PF_Pixel& color,
-  GpuRenderPlan* plan
-) {
-  if (!plan || halfWidth <= 1e-9) {
-    return;
-  }
-
-  int capMode = strokeCap;
-  if (capMode != STROKE_CAP_SQUARE && capMode != STROKE_CAP_ROUND && capMode != STROKE_CAP_PROJECT) {
-    capMode = STROKE_CAP_ROUND;
-  }
-  if (capMode == STROKE_CAP_SQUARE) {
-    return;
-  }
-
-  const std::pair<double, double> unitDirection = NormalizePoint(direction);
-  if (std::fabs(unitDirection.first) <= 1e-9 && std::fabs(unitDirection.second) <= 1e-9) {
-    return;
-  }
-  const std::pair<double, double> normal = std::make_pair(-unitDirection.second, unitDirection.first);
-
-  if (capMode == STROKE_CAP_PROJECT) {
-    const double extension = isStartCap ? -halfWidth : halfWidth;
-    const std::pair<double, double> extended = AddScaledPoint(point, unitDirection, extension);
-    const std::pair<double, double> a = AddScaledPoint(extended, normal, halfWidth);
-    const std::pair<double, double> b = AddScaledPoint(extended, normal, -halfWidth);
-    const std::pair<double, double> c = AddScaledPoint(point, normal, halfWidth);
-    const std::pair<double, double> d = AddScaledPoint(point, normal, -halfWidth);
-    AppendFillTriangle(a, b, c, color, plan);
-    AppendFillTriangle(c, b, d, color, plan);
-    return;
-  }
-
-  const double startAngle = isStartCap
-    ? std::atan2(-normal.second, -normal.first)
-    : std::atan2(normal.second, normal.first);
-  AppendArcFan(point, halfWidth, startAngle, -kPi, color, plan);
-}
-
 void AppendFillTriangle(
   const std::pair<double, double>& a,
   const std::pair<double, double>& b,
   const std::pair<double, double>& c,
   const PF_Pixel& color,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan) {
     return;
@@ -738,7 +532,7 @@ void AppendFillTriangle(
   if (std::fabs(CrossProduct(a, b, c)) <= 1e-9) {
     return;
   }
-  GpuRenderPlan::FillTriangle triangle;
+  BitmapDrawPlan::FillTriangle triangle;
   triangle.x1 = static_cast<float>(a.first);
   triangle.y1 = static_cast<float>(a.second);
   triangle.x2 = static_cast<float>(b.first);
@@ -752,7 +546,7 @@ void AppendFillTriangle(
 void AppendBoundaryEdge(
   const std::pair<double, double>& a,
   const std::pair<double, double>& b,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan) {
     return;
@@ -760,7 +554,7 @@ void AppendBoundaryEdge(
   if (IsSamePoint(a, b)) {
     return;
   }
-  GpuRenderPlan::BoundaryEdge edge;
+  BitmapDrawPlan::BoundaryEdge edge;
   edge.x1 = static_cast<float>(a.first);
   edge.y1 = static_cast<float>(a.second);
   edge.x2 = static_cast<float>(b.first);
@@ -770,7 +564,7 @@ void AppendBoundaryEdge(
 
 void AppendBoundaryLoopEdges(
   const std::vector<std::pair<double, double>>& loop,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || loop.size() < 2) {
     return;
@@ -785,7 +579,7 @@ void AppendBoundaryArc(
   double radius,
   double startAngle,
   double deltaAngle,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || !(radius > 1e-9)) {
     return;
@@ -814,7 +608,7 @@ void AppendPointStrokeBoundary(
   const std::pair<double, double>& point,
   double halfWidth,
   int strokeCap,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || halfWidth <= 1e-9) {
     return;
@@ -837,34 +631,12 @@ void AppendPointStrokeBoundary(
   AppendBoundaryEdge(bottomLeft, topLeft, plan);
 }
 
-void AppendPolylineStrokeBoundary(
-  const std::vector<std::pair<double, double>>& vertices,
-  bool closed,
-  double halfWidth,
-  int strokeCap,
-  int strokeJoin,
-  GpuRenderPlan* plan
-) {
-  if (!plan || vertices.size() < 2 || halfWidth <= 1e-9) {
-    return;
-  }
-  if (closed) {
-    const ClosedStrokeRing ring = BuildClosedStrokeRing(vertices, halfWidth, strokeJoin);
-    AppendBoundaryLoopEdges(ring.outer, plan);
-    AppendBoundaryLoopEdges(ring.inner, plan);
-    return;
-  }
-  const std::vector<std::pair<double, double>> outline =
-    BuildOpenStrokeOutline(vertices, halfWidth, strokeCap, strokeJoin);
-  AppendBoundaryLoopEdges(outline, plan);
-}
-
 void AppendPointStrokeGeometry(
   const std::pair<double, double>& point,
   double halfWidth,
   int strokeCap,
   const PF_Pixel& color,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || halfWidth <= 1e-9) {
     return;
@@ -893,7 +665,7 @@ void AppendPolylineStrokeGeometry(
   int strokeCap,
   int strokeJoin,
   const PF_Pixel& color,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || vertices.empty() || halfWidth <= 1e-9) {
     return;
@@ -1275,7 +1047,7 @@ std::string BuildUnsupportedReason(
 ) {
   std::ostringstream stream;
   stream
-    << "GPU bitmap v2 does not support this command yet (class=" << commandClass
+    << "The Bitmap frame planner does not support this command yet (class=" << commandClass
     << ", type=" << command.type << "): " << detail;
   return stream.str();
 }
@@ -1346,13 +1118,13 @@ void AppendFillBatch(
   float eraseStrength,
   int clipImageId,
   const AnalyticClipState& analyticClip,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || end <= start) {
     return;
   }
-  GpuRenderPlan::DrawBatch batch;
-  batch.type = GpuRenderPlan::DRAW_BATCH_FILLS;
+  BitmapDrawPlan::DrawBatch batch;
+  batch.type = BitmapDrawPlan::DRAW_BATCH_FILLS;
   batch.start = start;
   batch.count = end - start;
   batch.explicitEdgeStart = explicitEdgeStart;
@@ -1379,13 +1151,13 @@ void AppendPathFillBatch(
   float eraseStrength,
   int clipImageId,
   const AnalyticClipState& analyticClip,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || end <= start) {
     return;
   }
-  GpuRenderPlan::DrawBatch batch;
-  batch.type = GpuRenderPlan::DRAW_BATCH_PATH_FILLS;
+  BitmapDrawPlan::DrawBatch batch;
+  batch.type = BitmapDrawPlan::DRAW_BATCH_PATH_FILLS;
   batch.start = start;
   batch.count = end - start;
   batch.blendMode = blendMode;
@@ -1412,13 +1184,13 @@ void AppendStrokeBatch(
   float eraseStrength,
   int clipImageId,
   const AnalyticClipState& analyticClip,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || end <= start) {
     return;
   }
-  GpuRenderPlan::DrawBatch batch;
-  batch.type = GpuRenderPlan::DRAW_BATCH_STROKES;
+  BitmapDrawPlan::DrawBatch batch;
+  batch.type = BitmapDrawPlan::DRAW_BATCH_STROKES;
   batch.start = start;
   batch.count = end - start;
   batch.explicitEdgeStart = edgeStart;
@@ -1440,7 +1212,7 @@ void AppendStrokeBatch(
 void MoveRecentStrokeGeometryToDedicatedBuffers(
   std::size_t triangleStart,
   std::size_t edgeStart,
-  GpuRenderPlan* plan,
+  BitmapDrawPlan* plan,
   std::size_t* outStrokeTriangleStart,
   std::size_t* outStrokeEdgeStart
 ) {
@@ -1481,7 +1253,7 @@ void MoveRecentStrokeGeometryToDedicatedBuffers(
 }
 
 void AppendImageBatch(
-  GpuRenderPlan::DrawBatchType batchType,
+  BitmapDrawPlan::DrawBatchType batchType,
   std::size_t start,
   std::size_t end,
   int blendMode,
@@ -1489,12 +1261,12 @@ void AppendImageBatch(
   float eraseStrength,
   int clipImageId,
   const AnalyticClipState& analyticClip,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || end <= start) {
     return;
   }
-  GpuRenderPlan::DrawBatch batch;
+  BitmapDrawPlan::DrawBatch batch;
   batch.type = batchType;
   batch.start = start;
   batch.count = end - start;
@@ -1515,13 +1287,13 @@ void AppendImageBatch(
 void AppendFilterBatch(
   std::size_t start,
   std::size_t end,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || end <= start) {
     return;
   }
-  GpuRenderPlan::DrawBatch batch;
-  batch.type = GpuRenderPlan::DRAW_BATCH_FILTERS;
+  BitmapDrawPlan::DrawBatch batch;
+  batch.type = BitmapDrawPlan::DRAW_BATCH_FILTERS;
   batch.start = start;
   batch.count = end - start;
   batch.blendMode = BLEND_MODE_REPLACE;
@@ -1534,13 +1306,13 @@ void AppendFilterBatch(
 void AppendMaskBatch(
   std::size_t start,
   std::size_t end,
-  GpuRenderPlan* plan
+  BitmapDrawPlan* plan
 ) {
   if (!plan || end <= start) {
     return;
   }
-  GpuRenderPlan::DrawBatch batch;
-  batch.type = GpuRenderPlan::DRAW_BATCH_MASKS;
+  BitmapDrawPlan::DrawBatch batch;
+  batch.type = BitmapDrawPlan::DRAW_BATCH_MASKS;
   batch.start = start;
   batch.count = end - start;
   batch.blendMode = BLEND_MODE_REPLACE;
@@ -1650,8 +1422,8 @@ bool BuildClipSceneAssetFromCommands(
   clipAsset.pixelDensity = 1.0;
   clipAsset.version = static_cast<std::uint64_t>(clipAsset.id);
   clipAsset.loaded = true;
-  clipAsset.gpuSceneBacked = true;
-  clipAsset.gpuScene = std::make_shared<ScenePayload>(std::move(clipScene));
+  clipAsset.sceneBacked = true;
+  clipAsset.sceneSource = std::make_shared<ScenePayload>(std::move(clipScene));
   *outAsset = std::move(clipAsset);
   return true;
 }
@@ -1663,13 +1435,14 @@ bool MaterializeClipAlphaFromAsset(
   if (!outAlpha || asset.width <= 0 || asset.height <= 0) {
     return false;
   }
-  if (!asset.gpuSceneBacked || !asset.gpuScene) {
-    if (asset.pixels.empty()) {
+  if (!asset.sceneBacked || !asset.sceneSource) {
+    const std::vector<PF_Pixel>& pixels = ReadImagePixels(asset);
+    if (pixels.empty()) {
       return false;
     }
-    outAlpha->resize(asset.pixels.size());
-    for (std::size_t index = 0; index < asset.pixels.size(); ++index) {
-      (*outAlpha)[index] = asset.pixels[index].alpha;
+    outAlpha->resize(pixels.size());
+    for (std::size_t index = 0; index < pixels.size(); ++index) {
+      (*outAlpha)[index] = pixels[index].alpha;
     }
     return true;
   }
@@ -1678,7 +1451,7 @@ bool MaterializeClipAlphaFromAsset(
     static_cast<std::size_t>(asset.width * asset.height),
     PF_Pixel{0, 0, 0, 0}
   );
-  ApplySceneToRaster8(&raster, asset.width, asset.height, *asset.gpuScene);
+  ApplySceneToRaster8(&raster, asset.width, asset.height, *asset.sceneSource);
   outAlpha->resize(raster.size(), 0);
   for (std::size_t index = 0; index < raster.size(); ++index) {
     (*outAlpha)[index] = raster[index].alpha;
@@ -1689,7 +1462,7 @@ bool MaterializeClipAlphaFromAsset(
 bool BuildAnalyticClipStateFromCommands(
   PF_LayerDef* output,
   const std::vector<SceneCommand>& commands,
-  GpuRenderPlan* plan,
+  BitmapDrawPlan* plan,
   AnalyticClipState* outState
 ) {
   if (!output || !plan || !outState) {
@@ -1720,11 +1493,11 @@ bool BuildAnalyticClipStateFromCommands(
     if (contour.size() < 3) {
       return false;
     }
-    GpuRenderPlan::PathFillContour contourMeta;
+    BitmapDrawPlan::PathFillContour contourMeta;
     contourMeta.vertexStart = static_cast<std::uint32_t>(plan->pathFillVertices.size());
     contourMeta.vertexCount = static_cast<std::uint32_t>(contour.size());
     for (const auto& point : contour) {
-      GpuRenderPlan::PathFillVertex vertex;
+      BitmapDrawPlan::PathFillVertex vertex;
       vertex.x = static_cast<float>(point.first);
       vertex.y = static_cast<float>(point.second);
       plan->pathFillVertices.push_back(vertex);
@@ -1946,22 +1719,22 @@ std::shared_ptr<CachedTextAtlasEntry> StoreCachedTextAtlasEntry(
 
 }  // namespace
 
-bool BuildBitmapGpuPlan(
+bool BuildBitmapDrawPlan(
   PF_LayerDef* output,
   std::uint64_t cacheKey,
   long targetFrame,
   const ScenePayload& scene,
-  GpuRenderPlan* outPlan,
+  BitmapDrawPlan* outPlan,
   std::string* errorMessage
 ) {
   if (!output || !outPlan) {
     if (errorMessage) {
-      *errorMessage = "Bitmap GPU plan request is missing an output target.";
+      *errorMessage = "Bitmap draw plan request is missing an output target.";
     }
     return false;
   }
 
-  GpuRenderPlan plan;
+  BitmapDrawPlan plan;
   plan.scene = scene;
   plan.width = output->width;
   plan.height = output->height;
@@ -1992,11 +1765,12 @@ bool BuildBitmapGpuPlan(
     clipAsset.pixelDensity = 1.0;
     clipAsset.version = HashAlphaMask(currentClipMask, output->width, output->height);
     clipAsset.loaded = true;
-    clipAsset.pixels.resize(currentClipMask.size());
+    std::vector<PF_Pixel> clipPixels(currentClipMask.size());
     for (std::size_t index = 0; index < currentClipMask.size(); ++index) {
       const unsigned char alpha = currentClipMask[index];
-      clipAsset.pixels[index] = PF_Pixel{alpha, 255, 255, 255};
+      clipPixels[index] = PF_Pixel{alpha, 255, 255, 255};
     }
+    ReplaceImagePixels(&clipAsset, std::move(clipPixels));
     plan.scene.imageAssets[clipAsset.id] = std::move(clipAsset);
     currentClipImageId = clipAsset.id;
     return true;
@@ -2004,6 +1778,7 @@ bool BuildBitmapGpuPlan(
 
   auto resetPlanToClearColor = [&](const PF_Pixel& color) {
     plan.clearsSurface = true;
+    plan.resetsHistory = true;
     plan.clearColor = color;
     plan.fillTriangles.clear();
     plan.pathFillVertices.clear();
@@ -2046,7 +1821,7 @@ bool BuildBitmapGpuPlan(
         if (currentClipImageId == 0 && !currentClipMask.empty()) {
           if (!updateCurrentClipAsset()) {
             if (errorMessage) {
-              *errorMessage = "GPU bitmap v2 failed to restore clip mask state.";
+              *errorMessage = "The Bitmap frame planner failed to restore clip mask state.";
             }
             return false;
           }
@@ -2346,7 +2121,7 @@ bool BuildBitmapGpuPlan(
       ApplyTransform(command.transform, x3, y3, &x3, &y3);
       ApplyTransform(command.transform, x4, y4, &x4, &y4);
 
-      GpuRenderPlan::ImageDraw imageDraw;
+      BitmapDrawPlan::ImageDraw imageDraw;
       imageDraw.x1 = static_cast<float>(x1);
       imageDraw.y1 = static_cast<float>(y1);
       imageDraw.u1 = u0;
@@ -2373,7 +2148,7 @@ bool BuildBitmapGpuPlan(
         command.eraseFill ? command.eraseFillStrength : command.eraseStrokeStrength
       );
       AppendImageBatch(
-        GpuRenderPlan::DRAW_BATCH_IMAGES,
+        BitmapDrawPlan::DRAW_BATCH_IMAGES,
         imageStart,
         plan.imageDraws.size(),
         command.blendMode,
@@ -2399,7 +2174,7 @@ bool BuildBitmapGpuPlan(
         return false;
       }
 
-      GpuRenderPlan::FilterPass pass;
+      BitmapDrawPlan::FilterPass pass;
       pass.filterKind = static_cast<std::int32_t>(filterKind);
       pass.value = static_cast<float>(command.filterValue);
       const std::size_t filterStart = plan.filterPasses.size();
@@ -2438,7 +2213,7 @@ bool BuildBitmapGpuPlan(
       if (!maskAsset.loaded || maskAsset.width <= 0 || maskAsset.height <= 0) {
         continue;
       }
-      GpuRenderPlan::MaskPass pass;
+      BitmapDrawPlan::MaskPass pass;
       pass.maskImageId = maskAsset.id;
       pass.maskImageVersion = maskAsset.version;
       const std::size_t maskStart = plan.maskPasses.size();
@@ -2505,7 +2280,7 @@ bool BuildBitmapGpuPlan(
         bool erase,
         float eraseStrength
       ) -> bool {
-        if (!asset.loaded || asset.id == 0 || asset.width <= 0 || asset.height <= 0 || asset.pixels.empty() || quads.empty()) {
+        if (!asset.loaded || asset.id == 0 || asset.width <= 0 || asset.height <= 0 || !HasImagePixels(asset) || quads.empty()) {
           return true;
         }
 
@@ -2517,7 +2292,7 @@ bool BuildBitmapGpuPlan(
         const std::size_t imageStart = plan.imageDraws.size();
         for (std::size_t quadIndex = 0; quadIndex < quads.size(); quadIndex += 1) {
           const GlyphAtlasQuad& quad = quads[quadIndex];
-          GpuRenderPlan::ImageDraw imageDraw;
+          BitmapDrawPlan::ImageDraw imageDraw;
           imageDraw.x1 = static_cast<float>(quad.x1);
           imageDraw.y1 = static_cast<float>(quad.y1);
           imageDraw.u1 = static_cast<float>(quad.u1);
@@ -2540,7 +2315,7 @@ bool BuildBitmapGpuPlan(
           plan.imageDraws.push_back(imageDraw);
         }
         AppendImageBatch(
-          GpuRenderPlan::DRAW_BATCH_TEXT_IMAGES,
+          BitmapDrawPlan::DRAW_BATCH_TEXT_IMAGES,
           imageStart,
           plan.imageDraws.size(),
           command.blendMode,
@@ -2615,6 +2390,7 @@ bool BuildBitmapGpuPlan(
     }
 
     const std::size_t fillStart = plan.fillTriangles.size();
+    const std::size_t fillEdgeStart = plan.boundaryEdges.size();
     const std::size_t pathFillStart = plan.pathFills.size();
     if (command.hasFill) {
       std::vector<std::pair<double, double>> outer;
@@ -2623,6 +2399,40 @@ bool BuildBitmapGpuPlan(
 
       auto flushFillGroup = [&]() -> bool {
         if (!hasOuter) {
+          return true;
+        }
+
+        // The common p5 primitives (rect, ellipse, triangle, quad and simple
+        // beginShape polygons) are single-contour paths. Execute them through
+        // the mature analytic-triangle pipeline; reserve the non-zero winding
+        // path kernel for compound paths that actually contain holes. Besides
+        // being cheaper, this avoids making every ordinary shape depend on the
+        // more complex contour-buffer path.
+        if (holes.empty()) {
+          std::vector<std::pair<double, double>> simpleOuter = outer;
+          if (simpleOuter.size() >= 2 &&
+              IsSamePoint(simpleOuter.front(), simpleOuter.back())) {
+            simpleOuter.pop_back();
+          }
+          std::vector<std::array<std::pair<double, double>, 3>> triangles;
+          if (!TriangulateSimplePolygon(simpleOuter, &triangles)) {
+            return false;
+          }
+          for (std::size_t triangleIndex = 0;
+               triangleIndex < triangles.size();
+               ++triangleIndex) {
+            AppendFillTriangle(
+              triangles[triangleIndex][0],
+              triangles[triangleIndex][1],
+              triangles[triangleIndex][2],
+              command.fill,
+              &plan
+            );
+          }
+          AppendBoundaryLoopEdges(simpleOuter, &plan);
+          hasOuter = false;
+          outer.clear();
+          holes.clear();
           return true;
         }
 
@@ -2646,13 +2456,13 @@ bool BuildBitmapGpuPlan(
             return false;
           }
 
-          GpuRenderPlan::PathFillContour contourMeta;
+          BitmapDrawPlan::PathFillContour contourMeta;
           contourMeta.vertexStart =
             static_cast<std::uint32_t>(plan.pathFillVertices.size());
           contourMeta.vertexCount =
             static_cast<std::uint32_t>(contour.size());
           for (std::size_t vertexIndex = 0; vertexIndex < contour.size(); ++vertexIndex) {
-            GpuRenderPlan::PathFillVertex vertex;
+            BitmapDrawPlan::PathFillVertex vertex;
             vertex.x = static_cast<float>(contour[vertexIndex].first);
             vertex.y = static_cast<float>(contour[vertexIndex].second);
             plan.pathFillVertices.push_back(vertex);
@@ -2661,7 +2471,7 @@ bool BuildBitmapGpuPlan(
           return true;
         };
 
-        GpuRenderPlan::PathFill pathFill;
+        BitmapDrawPlan::PathFill pathFill;
         pathFill.contourStart =
           static_cast<std::uint32_t>(plan.pathFillContours.size());
         pathFill.contourCount = 0;
@@ -2759,6 +2569,21 @@ bool BuildBitmapGpuPlan(
         }
         return false;
       }
+
+      if (plan.fillTriangles.size() > fillStart) {
+        AppendFillBatch(
+          fillStart,
+          plan.fillTriangles.size(),
+          fillEdgeStart,
+          plan.boundaryEdges.size(),
+          command.blendMode,
+          command.eraseFill,
+          static_cast<float>(command.eraseFillStrength),
+          currentClipImageId,
+          currentAnalyticClip,
+          &plan
+        );
+      }
     }
 
     const std::size_t strokeFillStart = plan.fillTriangles.size();
@@ -2819,6 +2644,99 @@ bool BuildBitmapGpuPlan(
   return true;
 }
 
+void ScaleBitmapFramePlanToPhysicalCanvas(
+  BitmapFramePlan* plan,
+  A_long physicalWidth,
+  A_long physicalHeight
+) {
+  if (!plan || plan->width <= 0 || plan->height <= 0 ||
+      physicalWidth <= 0 || physicalHeight <= 0) {
+    return;
+  }
+
+  const A_long logicalWidth = plan->logicalWidth > 0 ? plan->logicalWidth : plan->width;
+  const A_long logicalHeight = plan->logicalHeight > 0 ? plan->logicalHeight : plan->height;
+  const float scaleX = static_cast<float>(physicalWidth) /
+    static_cast<float>(std::max<A_long>(1, logicalWidth));
+  const float scaleY = static_cast<float>(physicalHeight) /
+    static_cast<float>(std::max<A_long>(1, logicalHeight));
+  if (std::fabs(scaleX - 1.0f) < 1e-6f &&
+      std::fabs(scaleY - 1.0f) < 1e-6f) {
+    plan->width = physicalWidth;
+    plan->height = physicalHeight;
+    return;
+  }
+
+  const float effectScale = std::max(1e-6f, std::sqrt(scaleX * scaleY));
+  auto scaleTriangle = [&](BitmapDrawPlan::FillTriangle* triangle) {
+    triangle->x1 *= scaleX;
+    triangle->y1 *= scaleY;
+    triangle->x2 *= scaleX;
+    triangle->y2 *= scaleY;
+    triangle->x3 *= scaleX;
+    triangle->y3 *= scaleY;
+  };
+  auto scaleEdge = [&](BitmapDrawPlan::BoundaryEdge* edge) {
+    edge->x1 *= scaleX;
+    edge->y1 *= scaleY;
+    edge->x2 *= scaleX;
+    edge->y2 *= scaleY;
+  };
+
+  for (BitmapFramePlanOp& op : plan->operations) {
+    BitmapDrawPlan& drawPlan = op.drawPlan;
+    drawPlan.width = physicalWidth;
+    drawPlan.height = physicalHeight;
+    for (BitmapDrawPlan::FillTriangle& triangle : drawPlan.fillTriangles) {
+      scaleTriangle(&triangle);
+    }
+    for (BitmapDrawPlan::BoundaryEdge& edge : drawPlan.boundaryEdges) {
+      scaleEdge(&edge);
+    }
+    for (BitmapDrawPlan::FillTriangle& triangle : drawPlan.strokeTriangles) {
+      scaleTriangle(&triangle);
+    }
+    for (BitmapDrawPlan::BoundaryEdge& edge : drawPlan.strokeBoundaryEdges) {
+      scaleEdge(&edge);
+    }
+    for (BitmapDrawPlan::PathFillVertex& vertex : drawPlan.pathFillVertices) {
+      vertex.x *= scaleX;
+      vertex.y *= scaleY;
+    }
+    for (BitmapDrawPlan::PathFill& pathFill : drawPlan.pathFills) {
+      pathFill.minX *= scaleX;
+      pathFill.minY *= scaleY;
+      pathFill.maxX *= scaleX;
+      pathFill.maxY *= scaleY;
+    }
+    for (BitmapDrawPlan::ImageDraw& image : drawPlan.imageDraws) {
+      image.x1 *= scaleX;
+      image.y1 *= scaleY;
+      image.x2 *= scaleX;
+      image.y2 *= scaleY;
+      image.x3 *= scaleX;
+      image.y3 *= scaleY;
+      image.x4 *= scaleX;
+      image.y4 *= scaleY;
+    }
+    for (BitmapDrawPlan::FilterPass& filter : drawPlan.filterPasses) {
+      // Blur is the only filter whose numeric value is a pixel radius.
+      if (filter.filterKind == BITMAP_FILTER_BLUR) {
+        filter.value *= effectScale;
+      }
+    }
+    for (BitmapDrawPlan::DrawBatch& batch : drawPlan.drawBatches) {
+      batch.clipMinX *= scaleX;
+      batch.clipMinY *= scaleY;
+      batch.clipMaxX *= scaleX;
+      batch.clipMaxY *= scaleY;
+    }
+  }
+
+  plan->width = physicalWidth;
+  plan->height = physicalHeight;
+}
+
 void ClearBitmapGpuTextAtlasCacheByKey(std::uint64_t cacheKey) {
   if (cacheKey == 0) {
     return;
@@ -2832,55 +2750,6 @@ void ClearAllBitmapGpuTextAtlasCaches() {
   const std::lock_guard<std::mutex> lock(gTextAtlasCacheMutex);
   gTextAtlasCacheByInstance.clear();
   gTextAtlasNextImageIdByInstance.clear();
-}
-
-bool BuildBitmapFramePlan(
-  PF_LayerDef* output,
-  BitmapGpuExecutionProfile profile,
-  std::uint64_t cacheKey,
-  long targetFrame,
-  const std::vector<std::pair<long, ScenePayload>>& scenes,
-  BitmapFramePlan* outPlan,
-  std::string* errorMessage
-) {
-  if (!output || !outPlan) {
-    if (errorMessage) {
-      *errorMessage = "Bitmap frame plan request is missing an output target.";
-    }
-    return false;
-  }
-
-  BitmapFramePlan framePlan;
-  framePlan.profile = profile;
-  framePlan.cacheKey = cacheKey;
-  framePlan.targetFrame = targetFrame;
-  framePlan.width = output->width;
-  framePlan.height = output->height;
-
-  for (std::size_t index = 0; index < scenes.size(); index += 1) {
-    BitmapFramePlanOp op;
-    op.frame = scenes[index].first;
-    if (!BuildBitmapGpuPlan(
-      output,
-      cacheKey,
-      scenes[index].first,
-      scenes[index].second,
-      &op.drawPlan,
-      errorMessage
-    )) {
-      framePlan.supported = false;
-      framePlan.unsupportedReason =
-        errorMessage && !errorMessage->empty()
-          ? *errorMessage
-          : "GPU bitmap v2 does not support one or more commands in this sketch.";
-      *outPlan = framePlan;
-      return false;
-    }
-    framePlan.operations.push_back(op);
-  }
-
-  *outPlan = framePlan;
-  return true;
 }
 
 }  // namespace momentum

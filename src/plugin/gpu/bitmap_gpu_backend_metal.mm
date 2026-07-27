@@ -3,7 +3,7 @@
 #import <simd/simd.h>
 
 #include "bitmap_gpu_backend.h"
-#include "bitmap_gpu_plan.h"
+#include "bitmap_draw_plan.h"
 #include "../runtime/runtime_core.h"
 
 #include <algorithm>
@@ -24,20 +24,6 @@ namespace momentum {
 
 namespace {
 
-std::string SummarizeGpuDrawPlanForTrace(const GpuRenderPlan& plan) {
-  std::ostringstream stream;
-  stream
-    << "clear=" << (plan.clearsSurface ? 1 : 0)
-    << ",ca=" << static_cast<int>(plan.clearColor.alpha)
-    << ",fills=" << plan.fillTriangles.size()
-    << ",strokes=" << plan.strokeTriangles.size()
-    << ",paths=" << plan.pathFills.size()
-    << ",images=" << plan.imageDraws.size()
-    << ",filters=" << plan.filterPasses.size()
-    << ",masks=" << plan.maskPasses.size();
-  return stream.str();
-}
-
 static NSString* const kBitmapGpuShaderSource =
   @"#include <metal_stdlib>\n"
    "using namespace metal;\n"
@@ -49,8 +35,10 @@ static NSString* const kBitmapGpuShaderSource =
    "  uint height;\n"
    "  uint rowPixels;\n"
    "  uint pad;\n"
-   "  uint sourceOriginX;\n"
-   "  uint sourceOriginY;\n"
+   "  float sourceOriginX;\n"
+   "  float sourceOriginY;\n"
+   "  float sourceStepX;\n"
+   "  float sourceStepY;\n"
    "  uint logicalWidth;\n"
    "  uint logicalHeight;\n"
    "};\n"
@@ -504,25 +492,16 @@ static NSString* const kBitmapGpuShaderSource =
    "  }\n"
    "  float logicalWidth = max(float(uniforms.logicalWidth), 1.0f);\n"
    "  float logicalHeight = max(float(uniforms.logicalHeight), 1.0f);\n"
-   "  float2 logicalPoint = float2(float(gid.x + uniforms.sourceOriginX) + 0.5f, float(gid.y + uniforms.sourceOriginY) + 0.5f);\n"
-   "  if (logicalPoint.x < 0.0f || logicalPoint.y < 0.0f || logicalPoint.x > logicalWidth || logicalPoint.y > logicalHeight) {\n"
+   "  float2 logicalPoint = float2(\n"
+   "    uniforms.sourceOriginX + (float(gid.x) + 0.5f) * uniforms.sourceStepX,\n"
+   "    uniforms.sourceOriginY + (float(gid.y) + 0.5f) * uniforms.sourceStepY);\n"
+   "  if (logicalPoint.x < 0.0f || logicalPoint.y < 0.0f || logicalPoint.x >= logicalWidth || logicalPoint.y >= logicalHeight) {\n"
    "    const uint index = gid.y * uniforms.rowPixels + gid.x;\n"
    "    destination[index] = float4(0.0f);\n"
    "    return;\n"
    "  }\n"
-   "  float4 premultiplied;\n"
-   "  if (uniforms.logicalWidth == sourceTexture.get_width() && uniforms.logicalHeight == sourceTexture.get_height()) {\n"
-   "    uint2 sourceGid = uint2(gid.x + uniforms.sourceOriginX, gid.y + uniforms.sourceOriginY);\n"
-   "    if (sourceGid.x >= sourceTexture.get_width() || sourceGid.y >= sourceTexture.get_height()) {\n"
-   "      const uint index = gid.y * uniforms.rowPixels + gid.x;\n"
-   "      destination[index] = float4(0.0f);\n"
-   "      return;\n"
-   "    }\n"
-   "    premultiplied = sourceTexture.read(sourceGid);\n"
-   "  } else {\n"
-   "    float2 uv = float2(logicalPoint.x / logicalWidth, logicalPoint.y / logicalHeight);\n"
-   "    premultiplied = copy_sample_linear(sourceTexture, uv);\n"
-   "  }\n"
+   "  float2 uv = float2(logicalPoint.x / logicalWidth, logicalPoint.y / logicalHeight);\n"
+   "  float4 premultiplied = copy_sample_linear(sourceTexture, uv);\n"
    "  float alpha = premultiplied.a;\n"
    "  float3 straight = alpha > 1e-6f ? premultiplied.rgb / alpha : float3(0.0f);\n"
    "  const uint index = gid.y * uniforms.rowPixels + gid.x;\n"
@@ -684,8 +663,10 @@ struct CopyUniforms {
   std::uint32_t height = 0;
   std::uint32_t rowPixels = 0;
   std::uint32_t pad = 0;
-  std::uint32_t sourceOriginX = 0;
-  std::uint32_t sourceOriginY = 0;
+  float sourceOriginX = 0.0f;
+  float sourceOriginY = 0.0f;
+  float sourceStepX = 1.0f;
+  float sourceStepY = 1.0f;
   std::uint32_t logicalWidth = 0;
   std::uint32_t logicalHeight = 0;
 };
@@ -1134,9 +1115,9 @@ struct FillBatchGeometry {
 };
 
 FillBatchGeometry BuildTriangleBatchGeometry(
-  const std::vector<GpuRenderPlan::FillTriangle>& trianglesSource,
-  const std::vector<GpuRenderPlan::BoundaryEdge>& explicitEdgesSource,
-  const GpuRenderPlan::DrawBatch& batch
+  const std::vector<BitmapDrawPlan::FillTriangle>& trianglesSource,
+  const std::vector<BitmapDrawPlan::BoundaryEdge>& explicitEdgesSource,
+  const BitmapDrawPlan::DrawBatch& batch
 ) {
   FillBatchGeometry geometry;
   if (batch.start + batch.count > trianglesSource.size()) {
@@ -1153,7 +1134,7 @@ FillBatchGeometry BuildTriangleBatchGeometry(
   }
 
   for (std::size_t index = 0; index < batch.count; ++index) {
-    const GpuRenderPlan::FillTriangle& triangle = trianglesSource[batch.start + index];
+    const BitmapDrawPlan::FillTriangle& triangle = trianglesSource[batch.start + index];
     const simd_float2 a = simd_make_float2(triangle.x1, triangle.y1);
     const simd_float2 b = simd_make_float2(triangle.x2, triangle.y2);
     const simd_float2 c = simd_make_float2(triangle.x3, triangle.y3);
@@ -1183,7 +1164,7 @@ FillBatchGeometry BuildTriangleBatchGeometry(
   if (useExplicitEdges) {
     geometry.boundaryEdges.reserve(batch.explicitEdgeCount);
     for (std::size_t index = 0; index < batch.explicitEdgeCount; ++index) {
-      const GpuRenderPlan::BoundaryEdge& edge = explicitEdgesSource[batch.explicitEdgeStart + index];
+      const BitmapDrawPlan::BoundaryEdge& edge = explicitEdgesSource[batch.explicitEdgeStart + index];
       geometry.boundaryEdges.push_back(MetalEdgeSegment{
         simd_make_float2(edge.x1, edge.y1),
         simd_make_float2(edge.x2, edge.y2)
@@ -1457,7 +1438,12 @@ bool EnsureAccumulationTexture(
   auto& canvasStates = useRecoveryCanvas ? gMetalRecoveryCanvasStates : gMetalPlaybackCanvasStates;
   MetalCanvasState& cache = canvasStates[cacheKey];
   if (!cache.texture || cache.width != width || cache.height != height) {
-    ClearMetalExactFrameTexturesUnlocked(cacheKey);
+    // Creating the recovery lane for the first time must not evict immutable
+    // exact-frame textures produced by the playback lane. Only a real size
+    // change makes those textures incompatible.
+    if (cache.texture && (cache.width != width || cache.height != height)) {
+      ClearMetalExactFrameTexturesUnlocked(cacheKey);
+    }
     id<MTLTexture> previousTexture = cache.texture;
     id<MTLTexture> previousScratch = cache.scratchTexture;
     cache.texture = CreateRenderTexture(device, width, height, errorMessage);
@@ -1505,7 +1491,7 @@ bool EnsureImageTexture(
   std::lock_guard<std::mutex> lock(gMetalRendererMutex);
   auto& texturesById = gMetalImageTextures[cacheKey];
   MetalImageTextureState& textureState = texturesById[asset.id];
-  const bool sceneBacked = asset.gpuSceneBacked && static_cast<bool>(asset.gpuScene);
+  const bool sceneBacked = asset.sceneBacked && static_cast<bool>(asset.sceneSource);
   const bool needsRecreate =
     !textureState.texture ||
     textureState.width != asset.width ||
@@ -1558,7 +1544,8 @@ bool EnsureImageTexture(
 
   const bool needsUpload = textureState.version != asset.version;
   if (!sceneBacked && needsUpload) {
-    if (asset.pixels.empty()) {
+    const std::vector<PF_Pixel>& pixels = ReadImagePixels(asset);
+    if (pixels.empty()) {
       if (errorMessage) {
         *errorMessage = "CPU-backed image has no pixels to upload.";
       }
@@ -1568,9 +1555,9 @@ bool EnsureImageTexture(
       static_cast<std::size_t>(asset.width * asset.height),
       simd_make_float4(0.0f, 0.0f, 0.0f, 0.0f)
     );
-    const std::size_t pixelCount = std::min(rgbaPixels.size(), asset.pixels.size());
+    const std::size_t pixelCount = std::min(rgbaPixels.size(), pixels.size());
     for (std::size_t index = 0; index < pixelCount; ++index) {
-      const PF_Pixel& pixel = asset.pixels[index];
+      const PF_Pixel& pixel = pixels[index];
       const float alpha = static_cast<float>(static_cast<double>(pixel.alpha) / 255.0);
       const float red = static_cast<float>(static_cast<double>(pixel.red) / 255.0);
       const float green = static_cast<float>(static_cast<double>(pixel.green) / 255.0);
@@ -1666,8 +1653,10 @@ PF_Err EncodeCopyTextureRaw(
     static_cast<std::uint32_t>(std::max<A_long>(0, height)),
     0U,
     0U,
-    0U,
-    0U,
+    0.0f,
+    0.0f,
+    1.0f,
+    1.0f,
     static_cast<std::uint32_t>(std::max<A_long>(0, width)),
     static_cast<std::uint32_t>(std::max<A_long>(0, height))
   };
@@ -1864,8 +1853,10 @@ PF_Err EncodeCopyTextureToOutput(
     static_cast<std::uint32_t>(std::max<A_long>(0, target.outputWorld->height)),
     static_cast<std::uint32_t>(target.outputWorld->rowbytes / sizeof(GpuBgra128Pixel)),
     0U,
-    static_cast<std::uint32_t>(std::max<A_long>(0, target.sourceOriginX)),
-    static_cast<std::uint32_t>(std::max<A_long>(0, target.sourceOriginY)),
+    static_cast<float>(std::max<double>(0.0, target.sourceOriginX)),
+    static_cast<float>(std::max<double>(0.0, target.sourceOriginY)),
+    static_cast<float>(std::max<double>(0.0, target.sourceStepX)),
+    static_cast<float>(std::max<double>(0.0, target.sourceStepY)),
     static_cast<std::uint32_t>(std::max<A_long>(0, target.logicalWidth)),
     static_cast<std::uint32_t>(std::max<A_long>(0, target.logicalHeight))
   };
@@ -1891,7 +1882,7 @@ PF_Err RenderDrawPlanToTexture(
   const MetalRendererState& state,
   id<MTLTexture> targetTexture,
   id<MTLTexture> scratchTexture,
-  const GpuRenderPlan& plan,
+  const BitmapDrawPlan& plan,
   std::uint64_t cacheKey,
   bool clearTexture,
   std::unordered_set<int>* imageRenderStack,
@@ -1921,14 +1912,14 @@ PF_Err RenderDrawPlanToTexture(
   std::vector<simd_float2> pathFillVertices;
   pathFillVertices.reserve(plan.pathFillVertices.size());
   for (std::size_t index = 0; index < plan.pathFillVertices.size(); ++index) {
-    const GpuRenderPlan::PathFillVertex& vertex = plan.pathFillVertices[index];
+    const BitmapDrawPlan::PathFillVertex& vertex = plan.pathFillVertices[index];
     pathFillVertices.push_back(simd_make_float2(vertex.x, vertex.y));
   }
 
   std::vector<MetalPathFillContour> pathFillContours;
   pathFillContours.reserve(plan.pathFillContours.size());
   for (std::size_t index = 0; index < plan.pathFillContours.size(); ++index) {
-    const GpuRenderPlan::PathFillContour& contour = plan.pathFillContours[index];
+    const BitmapDrawPlan::PathFillContour& contour = plan.pathFillContours[index];
     MetalPathFillContour metalContour;
     metalContour.vertexStart = contour.vertexStart;
     metalContour.vertexCount = contour.vertexCount;
@@ -1983,7 +1974,7 @@ PF_Err RenderDrawPlanToTexture(
     )) {
       return nil;
     }
-    if (!asset.gpuSceneBacked || !asset.gpuScene || !needsUpdate) {
+    if (!asset.sceneBacked || !asset.sceneSource || !needsUpdate) {
       return imageTexture;
     }
 
@@ -2004,13 +1995,13 @@ PF_Err RenderDrawPlanToTexture(
     PF_LayerDef sceneOutput{};
     sceneOutput.width = asset.width;
     sceneOutput.height = asset.height;
-    GpuRenderPlan scenePlan;
+    BitmapDrawPlan scenePlan;
     std::string scenePlanError;
-    if (!BuildBitmapGpuPlan(
+    if (!BuildBitmapDrawPlan(
       &sceneOutput,
       cacheKey,
       plan.targetFrame,
-      *asset.gpuScene,
+      *asset.sceneSource,
       &scenePlan,
       &scenePlanError
     )) {
@@ -2067,7 +2058,7 @@ PF_Err RenderDrawPlanToTexture(
     return texture;
   };
 
-  auto resolveClipTextureForBatch = [&](const GpuRenderPlan::DrawBatch& batch) -> id<MTLTexture> {
+  auto resolveClipTextureForBatch = [&](const BitmapDrawPlan::DrawBatch& batch) -> id<MTLTexture> {
     if (batch.clipImageId == 0) {
       return state.whiteMaskTexture;
     }
@@ -2104,9 +2095,9 @@ PF_Err RenderDrawPlanToTexture(
     id<MTLTexture> destinationTexture,
     bool clearDestination,
     const simd_float4& destinationClearColor,
-    const GpuRenderPlan::DrawBatch& batch
+    const BitmapDrawPlan::DrawBatch& batch
   ) -> PF_Err {
-    if (batch.type == GpuRenderPlan::DRAW_BATCH_FILLS) {
+    if (batch.type == BitmapDrawPlan::DRAW_BATCH_FILLS) {
       if (batch.start + batch.count > plan.fillTriangles.size()) {
         if (errorMessage) {
           *errorMessage = "Metal fill batch references out-of-range fill triangles.";
@@ -2122,7 +2113,7 @@ PF_Err RenderDrawPlanToTexture(
         return PF_Err_NONE;
       }
 
-      const GpuRenderPlan::FillTriangle& firstTriangle = plan.fillTriangles[batch.start];
+      const BitmapDrawPlan::FillTriangle& firstTriangle = plan.fillTriangles[batch.start];
       const simd_float4 fillColor = ToStraightFloatColor(firstTriangle.color);
       const int startX = std::max(0, static_cast<int>(std::floor(geometry.bounds.x - 1.0f)));
       const int startY = std::max(0, static_cast<int>(std::floor(geometry.bounds.y - 1.0f)));
@@ -2218,7 +2209,7 @@ PF_Err RenderDrawPlanToTexture(
       return PF_Err_NONE;
     }
 
-    if (batch.type == GpuRenderPlan::DRAW_BATCH_STROKES) {
+    if (batch.type == BitmapDrawPlan::DRAW_BATCH_STROKES) {
       if (batch.start + batch.count > plan.strokeTriangles.size()) {
         if (errorMessage) {
           *errorMessage = "Metal stroke batch references out-of-range stroke triangles.";
@@ -2235,7 +2226,7 @@ PF_Err RenderDrawPlanToTexture(
         return PF_Err_NONE;
       }
 
-      const GpuRenderPlan::FillTriangle& firstTriangle = plan.strokeTriangles[batch.start];
+      const BitmapDrawPlan::FillTriangle& firstTriangle = plan.strokeTriangles[batch.start];
       const simd_float4 fillColor = ToStraightFloatColor(firstTriangle.color);
       const int startX = std::max(0, static_cast<int>(std::floor(geometry.bounds.x - 1.0f)));
       const int startY = std::max(0, static_cast<int>(std::floor(geometry.bounds.y - 1.0f)));
@@ -2329,7 +2320,7 @@ PF_Err RenderDrawPlanToTexture(
       return PF_Err_NONE;
     }
 
-    if (batch.type == GpuRenderPlan::DRAW_BATCH_PATH_FILLS) {
+    if (batch.type == BitmapDrawPlan::DRAW_BATCH_PATH_FILLS) {
       if (batch.start + batch.count > plan.pathFills.size()) {
         if (errorMessage) {
           *errorMessage = "Metal path-fill batch references out-of-range path fill entries.";
@@ -2369,7 +2360,7 @@ PF_Err RenderDrawPlanToTexture(
       const std::uint32_t canvasWidth = static_cast<std::uint32_t>(std::max<A_long>(0, plan.width));
       const std::uint32_t canvasHeight = static_cast<std::uint32_t>(std::max<A_long>(0, plan.height));
       for (std::size_t index = 0; index < batch.count; ++index) {
-        const GpuRenderPlan::PathFill& pathFill = plan.pathFills[batch.start + index];
+        const BitmapDrawPlan::PathFill& pathFill = plan.pathFills[batch.start + index];
         if (pathFill.contourCount == 0) {
           continue;
         }
@@ -2456,8 +2447,8 @@ PF_Err RenderDrawPlanToTexture(
       return PF_Err_INTERNAL_STRUCT_DAMAGED;
     }
 
-    if (batch.type == GpuRenderPlan::DRAW_BATCH_IMAGES ||
-        batch.type == GpuRenderPlan::DRAW_BATCH_TEXT_IMAGES) {
+    if (batch.type == BitmapDrawPlan::DRAW_BATCH_IMAGES ||
+        batch.type == BitmapDrawPlan::DRAW_BATCH_TEXT_IMAGES) {
       if (batch.start + batch.count > plan.imageDraws.size()) {
         [encoder endEncoding];
         if (errorMessage) {
@@ -2466,7 +2457,7 @@ PF_Err RenderDrawPlanToTexture(
         return PF_Err_INTERNAL_STRUCT_DAMAGED;
       }
       [encoder setRenderPipelineState:
-        batch.type == GpuRenderPlan::DRAW_BATCH_TEXT_IMAGES
+        batch.type == BitmapDrawPlan::DRAW_BATCH_TEXT_IMAGES
           ? state.textImagePipeline
           : state.imagePipeline];
       [encoder setVertexBytes:&viewport length:sizeof(viewport) atIndex:1];
@@ -2474,7 +2465,7 @@ PF_Err RenderDrawPlanToTexture(
       [encoder setFragmentTexture:clipTexture atIndex:1];
 
       for (std::size_t i = 0; i < batch.count; ++i) {
-        const GpuRenderPlan::ImageDraw& draw = plan.imageDraws[batch.start + i];
+        const BitmapDrawPlan::ImageDraw& draw = plan.imageDraws[batch.start + i];
         id<MTLTexture> imageTexture = resolveImageTextureById(draw.imageId);
         if (!imageTexture) {
           if (errorMessage && errorMessage->empty()) {
@@ -2511,7 +2502,7 @@ PF_Err RenderDrawPlanToTexture(
     return PF_Err_NONE;
   };
 
-  auto encodeCompositeScratchIntoTarget = [&](const GpuRenderPlan::DrawBatch& batch) -> PF_Err {
+  auto encodeCompositeScratchIntoTarget = [&](const BitmapDrawPlan::DrawBatch& batch) -> PF_Err {
     id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
     if (!encoder) {
       if (errorMessage) {
@@ -2556,7 +2547,7 @@ PF_Err RenderDrawPlanToTexture(
     );
   };
 
-  auto encodeFilterBatch = [&](const GpuRenderPlan::DrawBatch& batch) -> PF_Err {
+  auto encodeFilterBatch = [&](const BitmapDrawPlan::DrawBatch& batch) -> PF_Err {
     if (batch.start + batch.count > plan.filterPasses.size()) {
       if (errorMessage) {
         *errorMessage = "Metal filter batch references out-of-range filter passes.";
@@ -2571,7 +2562,7 @@ PF_Err RenderDrawPlanToTexture(
     id<MTLTexture> destinationTexture = scratchTexture;
     bool wroteToScratch = false;
     for (std::size_t index = 0; index < batch.count; ++index) {
-      const GpuRenderPlan::FilterPass& pass = plan.filterPasses[batch.start + index];
+      const BitmapDrawPlan::FilterPass& pass = plan.filterPasses[batch.start + index];
       id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
       if (!encoder) {
         if (errorMessage) {
@@ -2610,7 +2601,7 @@ PF_Err RenderDrawPlanToTexture(
     return PF_Err_NONE;
   };
 
-  auto encodeMaskBatch = [&](const GpuRenderPlan::DrawBatch& batch) -> PF_Err {
+  auto encodeMaskBatch = [&](const BitmapDrawPlan::DrawBatch& batch) -> PF_Err {
     if (batch.start + batch.count > plan.maskPasses.size()) {
       if (errorMessage) {
         *errorMessage = "Metal mask batch references out-of-range mask passes.";
@@ -2622,7 +2613,7 @@ PF_Err RenderDrawPlanToTexture(
     }
 
     for (std::size_t index = 0; index < batch.count; ++index) {
-      const GpuRenderPlan::MaskPass& pass = plan.maskPasses[batch.start + index];
+      const BitmapDrawPlan::MaskPass& pass = plan.maskPasses[batch.start + index];
       id<MTLTexture> maskTexture = resolveImageTextureById(pass.maskImageId);
       if (!maskTexture) {
         if (errorMessage && errorMessage->empty()) {
@@ -2643,8 +2634,10 @@ PF_Err RenderDrawPlanToTexture(
         static_cast<std::uint32_t>(std::max<A_long>(0, plan.height)),
         0U,
         0U,
-        0U,
-        0U,
+        0.0f,
+        0.0f,
+        1.0f,
+        1.0f,
         static_cast<std::uint32_t>(std::max<A_long>(0, plan.width)),
         static_cast<std::uint32_t>(std::max<A_long>(0, plan.height))
       };
@@ -2670,18 +2663,18 @@ PF_Err RenderDrawPlanToTexture(
     return PF_Err_NONE;
   };
 
-  std::vector<GpuRenderPlan::DrawBatch> drawBatches = plan.drawBatches;
+  std::vector<BitmapDrawPlan::DrawBatch> drawBatches = plan.drawBatches;
   if (drawBatches.empty()) {
     if (!plan.fillTriangles.empty()) {
-      GpuRenderPlan::DrawBatch batch;
-      batch.type = GpuRenderPlan::DRAW_BATCH_FILLS;
+      BitmapDrawPlan::DrawBatch batch;
+      batch.type = BitmapDrawPlan::DRAW_BATCH_FILLS;
       batch.start = 0;
       batch.count = plan.fillTriangles.size();
       drawBatches.push_back(batch);
     }
     if (!plan.strokeTriangles.empty()) {
-      GpuRenderPlan::DrawBatch batch;
-      batch.type = GpuRenderPlan::DRAW_BATCH_STROKES;
+      BitmapDrawPlan::DrawBatch batch;
+      batch.type = BitmapDrawPlan::DRAW_BATCH_STROKES;
       batch.start = 0;
       batch.count = plan.strokeTriangles.size();
       batch.explicitEdgeStart = 0;
@@ -2689,29 +2682,29 @@ PF_Err RenderDrawPlanToTexture(
       drawBatches.push_back(batch);
     }
     if (!plan.imageDraws.empty()) {
-      GpuRenderPlan::DrawBatch batch;
-      batch.type = GpuRenderPlan::DRAW_BATCH_IMAGES;
+      BitmapDrawPlan::DrawBatch batch;
+      batch.type = BitmapDrawPlan::DRAW_BATCH_IMAGES;
       batch.start = 0;
       batch.count = plan.imageDraws.size();
       drawBatches.push_back(batch);
     }
     if (!plan.pathFills.empty()) {
-      GpuRenderPlan::DrawBatch batch;
-      batch.type = GpuRenderPlan::DRAW_BATCH_PATH_FILLS;
+      BitmapDrawPlan::DrawBatch batch;
+      batch.type = BitmapDrawPlan::DRAW_BATCH_PATH_FILLS;
       batch.start = 0;
       batch.count = plan.pathFills.size();
       drawBatches.push_back(batch);
     }
     if (!plan.filterPasses.empty()) {
-      GpuRenderPlan::DrawBatch batch;
-      batch.type = GpuRenderPlan::DRAW_BATCH_FILTERS;
+      BitmapDrawPlan::DrawBatch batch;
+      batch.type = BitmapDrawPlan::DRAW_BATCH_FILTERS;
       batch.start = 0;
       batch.count = plan.filterPasses.size();
       drawBatches.push_back(batch);
     }
     if (!plan.maskPasses.empty()) {
-      GpuRenderPlan::DrawBatch batch;
-      batch.type = GpuRenderPlan::DRAW_BATCH_MASKS;
+      BitmapDrawPlan::DrawBatch batch;
+      batch.type = BitmapDrawPlan::DRAW_BATCH_MASKS;
       batch.start = 0;
       batch.count = plan.maskPasses.size();
       drawBatches.push_back(batch);
@@ -2719,14 +2712,14 @@ PF_Err RenderDrawPlanToTexture(
   }
 
   for (std::size_t batchIndex = 0; batchIndex < drawBatches.size(); ++batchIndex) {
-    const GpuRenderPlan::DrawBatch& batch = drawBatches[batchIndex];
+    const BitmapDrawPlan::DrawBatch& batch = drawBatches[batchIndex];
     if (batch.clipImageId != 0) {
       if (!resolveImageTextureById(batch.clipImageId)) {
         return PF_Err_INTERNAL_STRUCT_DAMAGED;
       }
     }
-    if (batch.type == GpuRenderPlan::DRAW_BATCH_IMAGES ||
-        batch.type == GpuRenderPlan::DRAW_BATCH_TEXT_IMAGES) {
+    if (batch.type == BitmapDrawPlan::DRAW_BATCH_IMAGES ||
+        batch.type == BitmapDrawPlan::DRAW_BATCH_TEXT_IMAGES) {
       if (batch.start + batch.count > plan.imageDraws.size()) {
         if (errorMessage) {
           *errorMessage = "Metal image batch references out-of-range image draw entries.";
@@ -2734,14 +2727,14 @@ PF_Err RenderDrawPlanToTexture(
         return PF_Err_INTERNAL_STRUCT_DAMAGED;
       }
       for (std::size_t index = 0; index < batch.count; ++index) {
-        const GpuRenderPlan::ImageDraw& draw = plan.imageDraws[batch.start + index];
+        const BitmapDrawPlan::ImageDraw& draw = plan.imageDraws[batch.start + index];
         if (draw.imageId > 0 && !resolveImageTextureById(draw.imageId)) {
           return PF_Err_INTERNAL_STRUCT_DAMAGED;
         }
       }
       continue;
     }
-    if (batch.type == GpuRenderPlan::DRAW_BATCH_MASKS) {
+    if (batch.type == BitmapDrawPlan::DRAW_BATCH_MASKS) {
       if (batch.start + batch.count > plan.maskPasses.size()) {
         if (errorMessage) {
           *errorMessage = "Metal mask batch references out-of-range mask passes.";
@@ -2749,7 +2742,7 @@ PF_Err RenderDrawPlanToTexture(
         return PF_Err_INTERNAL_STRUCT_DAMAGED;
       }
       for (std::size_t index = 0; index < batch.count; ++index) {
-        const GpuRenderPlan::MaskPass& pass = plan.maskPasses[batch.start + index];
+        const BitmapDrawPlan::MaskPass& pass = plan.maskPasses[batch.start + index];
         if (pass.maskImageId > 0 && !resolveImageTextureById(pass.maskImageId)) {
           return PF_Err_INTERNAL_STRUCT_DAMAGED;
         }
@@ -2761,8 +2754,8 @@ PF_Err RenderDrawPlanToTexture(
   bool targetCleared = !clearTexture;
   PF_Err drawErr = PF_Err_NONE;
   for (std::size_t batchIndex = 0; batchIndex < drawBatches.size(); ++batchIndex) {
-    const GpuRenderPlan::DrawBatch& batch = drawBatches[batchIndex];
-    if (batch.type == GpuRenderPlan::DRAW_BATCH_FILTERS) {
+    const BitmapDrawPlan::DrawBatch& batch = drawBatches[batchIndex];
+    if (batch.type == BitmapDrawPlan::DRAW_BATCH_FILTERS) {
       if (!targetCleared) {
         drawErr = encodeClearTarget(targetTexture, clearColor);
         if (drawErr != PF_Err_NONE) {
@@ -2776,7 +2769,7 @@ PF_Err RenderDrawPlanToTexture(
       }
       continue;
     }
-    if (batch.type == GpuRenderPlan::DRAW_BATCH_MASKS) {
+    if (batch.type == BitmapDrawPlan::DRAW_BATCH_MASKS) {
       if (!targetCleared) {
         drawErr = encodeClearTarget(targetTexture, clearColor);
         if (drawErr != PF_Err_NONE) {
@@ -2828,17 +2821,6 @@ PF_Err RenderDrawPlanToTexture(
   }
 
   return PF_Err_NONE;
-}
-
-bool IsDrawPlanEmpty(const GpuRenderPlan& plan) {
-  return
-    !plan.clearsSurface &&
-    plan.fillTriangles.empty() &&
-    plan.strokeTriangles.empty() &&
-    plan.pathFills.empty() &&
-    plan.imageDraws.empty() &&
-    plan.filterPasses.empty() &&
-    plan.maskPasses.empty();
 }
 
 PF_Err CommitAndWait(id<MTLCommandBuffer> commandBuffer, std::string* errorMessage) {
@@ -2936,6 +2918,32 @@ bool QueryMetalBitmapCanvasCursor(
   return true;
 }
 
+bool QueryMetalBitmapRecoveryCanvasCursor(
+  std::uint64_t cacheKey,
+  long* outLastFrame,
+  bool* outInitialized
+) {
+  std::lock_guard<std::mutex> lock(gMetalRendererMutex);
+  const auto it = gMetalRecoveryCanvasStates.find(cacheKey);
+  if (it == gMetalRecoveryCanvasStates.end()) {
+    if (outLastFrame) {
+      *outLastFrame = 0;
+    }
+    if (outInitialized) {
+      *outInitialized = false;
+    }
+    return false;
+  }
+
+  if (outLastFrame) {
+    *outLastFrame = it->second.lastFrame;
+  }
+  if (outInitialized) {
+    *outInitialized = it->second.initialized;
+  }
+  return true;
+}
+
 bool QueryMetalBitmapNearestCheckpoint(
   std::uint64_t cacheKey,
   long targetFrame,
@@ -2966,7 +2974,7 @@ PF_Err RenderBitmapPlanWithMetal(
     if (errorMessage) {
       *errorMessage = !plan.unsupportedReason.empty()
         ? plan.unsupportedReason
-        : "GPU bitmap v2 does not support this sketch.";
+        : "The Bitmap frame plan is not supported by the Metal executor.";
     }
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
@@ -3026,7 +3034,7 @@ PF_Err RenderBitmapPlanWithMetal(
   const bool havePlaybackCanvas =
     QueryMetalBitmapCanvasCursor(plan.cacheKey, &playbackCanvasLastFrame, &playbackCanvasInitialized);
   const bool useRecoveryCanvas =
-    plan.profile == BITMAP_GPU_PROFILE_DIRECT_FRAME ||
+    plan.useRecoveryCanvas ||
     plan.hasSeedGpuCheckpoint ||
     (havePlaybackCanvas && playbackCanvasInitialized && plan.targetFrame < playbackCanvasLastFrame);
 
@@ -3043,10 +3051,17 @@ PF_Err RenderBitmapPlanWithMetal(
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
 
+  const bool canUsePreferredRecoveryCursor =
+    useRecoveryCanvas &&
+    plan.hasPreferredRecoveryCursor &&
+    canvasState.initialized &&
+    plan.preferredRecoveryFrame >= 0 &&
+    plan.preferredRecoveryFrame <= plan.targetFrame &&
+    canvasState.lastFrame == plan.preferredRecoveryFrame;
   const bool replayFromScratch =
-    plan.profile == BITMAP_GPU_PROFILE_DIRECT_FRAME ||
-    !canvasState.initialized ||
-    plan.targetFrame < canvasState.lastFrame;
+    !canUsePreferredRecoveryCursor &&
+    (!canvasState.initialized ||
+      plan.targetFrame < canvasState.lastFrame);
 
   id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
   if (!commandBuffer) {
@@ -3057,7 +3072,10 @@ PF_Err RenderBitmapPlanWithMetal(
   }
 
   PF_Err err = PF_Err_NONE;
-  const bool seededFromGpuCheckpoint = plan.hasSeedGpuCheckpoint && plan.seedFrame >= 0;
+  const bool seededFromGpuCheckpoint =
+    !canUsePreferredRecoveryCursor &&
+    plan.hasSeedGpuCheckpoint &&
+    plan.seedFrame >= 0;
   if (seededFromGpuCheckpoint) {
     const auto checkpoint = GetMetalCanvasCheckpoint(plan.cacheKey, plan.seedFrame);
     if (!checkpoint.has_value() || !checkpoint->texture) {
@@ -3086,20 +3104,6 @@ PF_Err RenderBitmapPlanWithMetal(
     ? (plan.seedFrame + 1)
     : (replayFromScratch ? 0 : (canvasState.lastFrame + 1));
   std::size_t executedOps = 0;
-  std::size_t executedFills = 0;
-  std::size_t executedStrokes = 0;
-  std::size_t executedImages = 0;
-
-  if (!plan.operations.empty()) {
-    const BitmapFramePlanOp& firstOp = plan.operations.front();
-    const BitmapFramePlanOp& lastOp = plan.operations.back();
-    (void)firstOp;
-    (void)lastOp;
-  }
-
-  long firstExecutedFrame = -1;
-  bool firstExecutedClearTexture = false;
-  std::string firstExecutedPlanSummary;
   for (std::size_t index = 0; index < plan.operations.size(); index += 1) {
     const BitmapFramePlanOp& op = plan.operations[index];
     if (op.frame < firstOperationFrame) {
@@ -3109,11 +3113,6 @@ PF_Err RenderBitmapPlanWithMetal(
       seededFromGpuCheckpoint
         ? op.drawPlan.clearsSurface
         : (replayFromScratch ? (executedOps == 0 ? true : op.drawPlan.clearsSurface) : op.drawPlan.clearsSurface);
-    if (firstExecutedFrame < 0) {
-      firstExecutedFrame = op.frame;
-      firstExecutedClearTexture = clearTexture;
-      firstExecutedPlanSummary = SummarizeGpuDrawPlanForTrace(op.drawPlan);
-    }
     err = RenderDrawPlanToTexture(
       commandBuffer,
       rendererState,
@@ -3130,15 +3129,12 @@ PF_Err RenderBitmapPlanWithMetal(
       return err;
     }
     executedOps += 1;
-    executedFills += op.drawPlan.fillTriangles.size();
-    executedStrokes += op.drawPlan.strokeTriangles.size();
-    executedImages += op.drawPlan.imageDraws.size();
   }
 
   if (!seededFromGpuCheckpoint &&
       replayFromScratch &&
       executedOps == 0) {
-    GpuRenderPlan clearPlan;
+    BitmapDrawPlan clearPlan;
     clearPlan.width = plan.width;
     clearPlan.height = plan.height;
     clearPlan.clearColor = PF_Pixel{0, 0, 0, 0};
@@ -3159,15 +3155,6 @@ PF_Err RenderBitmapPlanWithMetal(
       return err;
     }
   }
-
-  (void)firstExecutedFrame;
-  (void)firstExecutedClearTexture;
-  (void)firstExecutedPlanSummary;
-  (void)executedFills;
-  (void)executedStrokes;
-  (void)executedImages;
-  (void)useRecoveryCanvas;
-  (void)seededFromGpuCheckpoint;
 
   id<MTLTexture> exactFrameTextureToStore = CreateRenderTexture(device, plan.width, plan.height, errorMessage);
   if (exactFrameTextureToStore) {
@@ -3190,7 +3177,6 @@ PF_Err RenderBitmapPlanWithMetal(
 
   const bool shouldStoreCheckpoint =
     !useRecoveryCanvas &&
-    plan.profile == BITMAP_GPU_PROFILE_STATEFUL_ACCUMULATION &&
     plan.checkpointInterval > 0 &&
     plan.targetFrame > 0 &&
     (plan.targetFrame % plan.checkpointInterval) == 0;

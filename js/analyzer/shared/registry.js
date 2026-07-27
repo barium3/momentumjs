@@ -59,14 +59,6 @@ function getShapeTypeMap(cache) {
   return map;
 }
 
-function getShapeBuilders(shapeName) {
-  var registry = functionRegistry || window.functionRegistry || null;
-  if (!registry || !registry.shapes || !registry.shapes[shapeName]) {
-    return null;
-  }
-  return registry.shapes[shapeName].builders || null;
-}
-
 function getBuilderInfo(funcName) {
   return window.compilerSymbols.getBuilderInfo(funcName);
 }

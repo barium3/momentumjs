@@ -232,7 +232,7 @@ bool CanReuseCanvasImage(
   if (!requireSceneBacked) {
     return !IsSceneBackedAsset(*asset);
   }
-  return asset->gpuSceneBacked && static_cast<bool>(asset->gpuScene);
+  return asset->sceneBacked && static_cast<bool>(asset->sceneSource);
 }
 
 RuntimeImageAsset MakeCanvasImageAsset(
@@ -338,7 +338,7 @@ RuntimeImageAsset* SnapshotSceneToCanvasImage() {
     PF_Pixel{0, 0, 0, 0}
   );
   ApplySceneToRaster8(&raster, extent.width, extent.height, g_activeRuntime->scene);
-  asset.pixels.swap(raster);
+  ReplaceImagePixels(&asset, std::move(raster));
 
   g_activeRuntime->imageAssets[imageId] = asset;
   ReplaceSceneWithCanvasImage(g_activeRuntime->imageAssets[imageId]);
@@ -363,11 +363,11 @@ RuntimeImageAsset* GetOrCreateSceneBackedCanvasImage() {
 
   RuntimeImageAsset asset =
     MakeCanvasImageAsset(imageId, extent, "__canvas_scene__", NextCanvasImageVersion(imageId));
-  asset.pixels.clear();
-  asset.gpuSceneBacked = true;
-  asset.gpuScene = std::make_shared<ScenePayload>(g_activeRuntime->scene);
-  if (asset.gpuScene) {
-    asset.gpuScene->imageAssets.erase(imageId);
+  ClearImagePixels(&asset);
+  asset.sceneBacked = true;
+  asset.sceneSource = std::make_shared<ScenePayload>(g_activeRuntime->scene);
+  if (asset.sceneSource) {
+    asset.sceneSource->imageAssets.erase(imageId);
   }
 
   g_activeRuntime->imageAssets[imageId] = asset;
@@ -399,7 +399,7 @@ RuntimeImageAsset* GetOrCreateMutableCanvasImage() {
 }
 
 bool IsSceneBackedAsset(const RuntimeImageAsset& asset) {
-  return asset.gpuSceneBacked && static_cast<bool>(asset.gpuScene);
+  return asset.sceneBacked && static_cast<bool>(asset.sceneSource);
 }
 
 bool IsActiveCanvasImageId(int imageId) {
@@ -420,12 +420,12 @@ void RefreshSceneBackedCanvasAssetFromScene(int imageId) {
   asset->width = canvasWidth;
   asset->height = canvasHeight;
   asset->loaded = true;
-  asset->gpuSceneBacked = true;
-  asset->gpuScene = std::make_shared<ScenePayload>(g_activeRuntime->scene);
-  if (asset->gpuScene) {
-    asset->gpuScene->imageAssets.erase(imageId);
+  asset->sceneBacked = true;
+  asset->sceneSource = std::make_shared<ScenePayload>(g_activeRuntime->scene);
+  if (asset->sceneSource) {
+    asset->sceneSource->imageAssets.erase(imageId);
   }
-  asset->pixels.clear();
+  ClearImagePixels(asset);
   asset->version += 1;
   g_activeRuntime->canvasImageSceneVersion = g_activeRuntime->sceneVersion;
 }
@@ -442,12 +442,12 @@ RuntimeImageAsset* CreateSceneSnapshotAssetFromCurrentScene() {
   asset.path.clear();
   asset.pixelDensity = std::max(1.0, g_activeRuntime->pixelDensity);
   asset.loaded = true;
-  asset.gpuSceneBacked = true;
-  asset.gpuScene = std::make_shared<ScenePayload>(g_activeRuntime->scene);
-  if (asset.gpuScene) {
-    asset.gpuScene->imageAssets.erase(imageId);
+  asset.sceneBacked = true;
+  asset.sceneSource = std::make_shared<ScenePayload>(g_activeRuntime->scene);
+  if (asset.sceneSource) {
+    asset.sceneSource->imageAssets.erase(imageId);
   }
-  asset.pixels.clear();
+  ClearImagePixels(&asset);
   g_activeRuntime->imageAssets[imageId] = asset;
   return &g_activeRuntime->imageAssets[imageId];
 }
@@ -459,17 +459,17 @@ bool EnsureCpuPixelsMaterialized(RuntimeImageAsset* asset, bool dropSceneBacking
   if (!IsSceneBackedAsset(*asset)) {
     return true;
   }
-  if (asset->gpuScene && asset->pixels.empty()) {
+  if (asset->sceneSource && !HasImagePixels(*asset)) {
     std::vector<PF_Pixel> raster(
       static_cast<std::size_t>(asset->width * asset->height),
       PF_Pixel{0, 0, 0, 0}
     );
-    ApplySceneToRaster8(&raster, asset->width, asset->height, *asset->gpuScene);
-    asset->pixels.swap(raster);
+    ApplySceneToRaster8(&raster, asset->width, asset->height, *asset->sceneSource);
+    ReplaceImagePixels(asset, std::move(raster));
   }
   if (dropSceneBacking) {
-    asset->gpuSceneBacked = false;
-    asset->gpuScene.reset();
+    asset->sceneBacked = false;
+    asset->sceneSource.reset();
   }
   return true;
 }
@@ -600,6 +600,7 @@ void WritePixelsToAsset(RuntimeImageAsset* asset, const std::vector<unsigned cha
     return;
   }
 
+  std::vector<PF_Pixel>& pixels = AcquireWritableImagePixels(*asset);
   for (int row = 0; row < regionHeight; ++row) {
     for (int col = 0; col < regionWidth; ++col) {
       const int dstX = regionX + col;
@@ -615,7 +616,7 @@ void WritePixelsToAsset(RuntimeImageAsset* asset, const std::vector<unsigned cha
         return;
       }
       const std::size_t dstIndex = static_cast<std::size_t>(dstY * asset->width + dstX);
-      asset->pixels[dstIndex] = PF_Pixel{
+      pixels[dstIndex] = PF_Pixel{
         values[srcIndex + 3],
         values[srcIndex + 0],
         values[srcIndex + 1],
@@ -623,8 +624,8 @@ void WritePixelsToAsset(RuntimeImageAsset* asset, const std::vector<unsigned cha
       };
     }
   }
-  asset->gpuSceneBacked = false;
-  asset->gpuScene.reset();
+  asset->sceneBacked = false;
+  asset->sceneSource.reset();
   asset->version += 1;
 }
 
@@ -634,12 +635,13 @@ JSObjectRef MakePixelsArray(JSContextRef ctx, const RuntimeImageAsset& asset) {
     return array;
   }
 
-  for (std::size_t i = 0; i < asset.pixels.size(); ++i) {
+  const std::vector<PF_Pixel>& pixels = ReadImagePixels(asset);
+  for (std::size_t i = 0; i < pixels.size(); ++i) {
     const unsigned baseIndex = static_cast<unsigned>(i * 4);
-    JSObjectSetPropertyAtIndex(ctx, array, baseIndex + 0, JSValueMakeNumber(ctx, asset.pixels[i].red), NULL);
-    JSObjectSetPropertyAtIndex(ctx, array, baseIndex + 1, JSValueMakeNumber(ctx, asset.pixels[i].green), NULL);
-    JSObjectSetPropertyAtIndex(ctx, array, baseIndex + 2, JSValueMakeNumber(ctx, asset.pixels[i].blue), NULL);
-    JSObjectSetPropertyAtIndex(ctx, array, baseIndex + 3, JSValueMakeNumber(ctx, asset.pixels[i].alpha), NULL);
+    JSObjectSetPropertyAtIndex(ctx, array, baseIndex + 0, JSValueMakeNumber(ctx, pixels[i].red), NULL);
+    JSObjectSetPropertyAtIndex(ctx, array, baseIndex + 1, JSValueMakeNumber(ctx, pixels[i].green), NULL);
+    JSObjectSetPropertyAtIndex(ctx, array, baseIndex + 2, JSValueMakeNumber(ctx, pixels[i].blue), NULL);
+    JSObjectSetPropertyAtIndex(ctx, array, baseIndex + 3, JSValueMakeNumber(ctx, pixels[i].alpha), NULL);
   }
   return array;
 }
@@ -1126,7 +1128,8 @@ JSValueRef JsMomentumNativeImageSetColor(
   const int pixelX = static_cast<int>(std::floor(x));
   const int pixelY = static_cast<int>(std::floor(y));
   if (pixelX >= 0 && pixelY >= 0 && pixelX < asset->width && pixelY < asset->height) {
-    asset->pixels[static_cast<std::size_t>(pixelY * asset->width + pixelX)] = NormalizeColorArgument(ctx, arguments[3]);
+    std::vector<PF_Pixel>& pixels = AcquireWritableImagePixels(*asset);
+    pixels[static_cast<std::size_t>(pixelY * asset->width + pixelX)] = NormalizeColorArgument(ctx, arguments[3]);
     asset->version += 1;
   }
   SyncCanvasSceneAsset(asset->id);

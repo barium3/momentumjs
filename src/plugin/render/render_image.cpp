@@ -48,15 +48,6 @@ PF_Pixel MakePixel(double red, double green, double blue, double alpha) {
   };
 }
 
-PF_Pixel MultiplyPixelByTint(const PF_Pixel& pixel, const PF_Pixel& tint) {
-  return PF_Pixel{
-    static_cast<A_u_char>(std::round((static_cast<double>(pixel.alpha) * tint.alpha) / 255.0)),
-    static_cast<A_u_char>(std::round((static_cast<double>(pixel.red) * tint.red) / 255.0)),
-    static_cast<A_u_char>(std::round((static_cast<double>(pixel.green) * tint.green) / 255.0)),
-    static_cast<A_u_char>(std::round((static_cast<double>(pixel.blue) * tint.blue) / 255.0))
-  };
-}
-
 double BlendChannel(double destination, double source, int blendMode) {
   switch (blendMode) {
     case BLEND_MODE_ADD:
@@ -163,7 +154,8 @@ void NormalizeRegion(double* x, double* y, double* width, double* height) {
 }
 
 PF_Pixel SampleImagePixelBilinearInternal(const RuntimeImageAsset& asset, double x, double y) {
-  if (!asset.loaded || asset.width <= 0 || asset.height <= 0 || asset.pixels.empty()) {
+  const std::vector<PF_Pixel>& pixels = ReadImagePixels(asset);
+  if (!asset.loaded || asset.width <= 0 || asset.height <= 0 || pixels.empty()) {
     return TransparentPixel();
   }
 
@@ -171,7 +163,7 @@ PF_Pixel SampleImagePixelBilinearInternal(const RuntimeImageAsset& asset, double
   y = std::max(0.0, std::min(y, static_cast<double>(asset.height - 1)));
 
   if (NearlyInteger(x) && NearlyInteger(y)) {
-    return asset.pixels[PixelIndex(
+    return pixels[PixelIndex(
       asset.width,
       ClampInt(static_cast<int>(std::llround(x)), 0, asset.width - 1),
       ClampInt(static_cast<int>(std::llround(y)), 0, asset.height - 1)
@@ -185,10 +177,10 @@ PF_Pixel SampleImagePixelBilinearInternal(const RuntimeImageAsset& asset, double
   const double tx = x - static_cast<double>(x0);
   const double ty = y - static_cast<double>(y0);
 
-  const PF_Pixel p00 = asset.pixels[PixelIndex(asset.width, x0, y0)];
-  const PF_Pixel p10 = asset.pixels[PixelIndex(asset.width, x1, y0)];
-  const PF_Pixel p01 = asset.pixels[PixelIndex(asset.width, x0, y1)];
-  const PF_Pixel p11 = asset.pixels[PixelIndex(asset.width, x1, y1)];
+  const PF_Pixel p00 = pixels[PixelIndex(asset.width, x0, y0)];
+  const PF_Pixel p10 = pixels[PixelIndex(asset.width, x1, y0)];
+  const PF_Pixel p01 = pixels[PixelIndex(asset.width, x0, y1)];
+  const PF_Pixel p11 = pixels[PixelIndex(asset.width, x1, y1)];
 
   const auto sampleChannel = [tx, ty](double c00, double c10, double c01, double c11) {
     const double top = c00 + (c10 - c00) * tx;
@@ -265,7 +257,7 @@ void CopyRegionScaled(
     return;
   }
 
-  std::vector<PF_Pixel> nextPixels = destination->pixels;
+  std::vector<PF_Pixel> nextPixels = ReadImagePixels(*destination);
   for (int y = destStartY; y < destEndY; ++y) {
     for (int x = destStartX; x < destEndX; ++x) {
       const double u = (static_cast<double>(x) + 0.5 - dstX) / dstWidth;
@@ -284,7 +276,7 @@ void CopyRegionScaled(
     }
   }
 
-  destination->pixels.swap(nextPixels);
+  ReplaceImagePixels(destination, std::move(nextPixels));
 }
 
 double ComputeLuma(const PF_Pixel& pixel) {
@@ -353,7 +345,7 @@ bool DecodeImageFileApple(const std::string& path, RuntimeImageAsset* outAsset) 
 
   outAsset->width = static_cast<int>(width);
   outAsset->height = static_cast<int>(height);
-  outAsset->pixels.resize(width * height);
+  std::vector<PF_Pixel> decodedPixels(width * height);
 
   for (std::size_t i = 0; i < width * height; ++i) {
     const unsigned char red = rgba[i * 4 + 0];
@@ -361,13 +353,14 @@ bool DecodeImageFileApple(const std::string& path, RuntimeImageAsset* outAsset) 
     const unsigned char blue = rgba[i * 4 + 2];
     const unsigned char alpha = rgba[i * 4 + 3];
     if (alpha == 0) {
-      outAsset->pixels[i] = PF_Pixel{0, 0, 0, 0};
+      decodedPixels[i] = PF_Pixel{0, 0, 0, 0};
       continue;
     }
 
     const double scale = 255.0 / static_cast<double>(alpha);
-    outAsset->pixels[i] = MakePixel(red * scale, green * scale, blue * scale, alpha);
+    decodedPixels[i] = MakePixel(red * scale, green * scale, blue * scale, alpha);
   }
+  ReplaceImagePixels(outAsset, std::move(decodedPixels));
 
   outAsset->loaded = true;
   outAsset->loadError.clear();
@@ -390,7 +383,7 @@ bool LoadImageAssetFromFile(const std::string& path, int id, RuntimeImageAsset* 
   outAsset->version = 1;
   outAsset->loaded = false;
   outAsset->loadError.clear();
-  outAsset->pixels.clear();
+  ClearImagePixels(outAsset);
 
 #if defined(__APPLE__)
   if (DecodeImageFileApple(path, outAsset)) {
@@ -410,7 +403,13 @@ RuntimeImageAsset CreateBlankImageAsset(int id, int width, int height) {
   asset.pixelDensity = 1.0;
   asset.version = 1;
   asset.loaded = true;
-  asset.pixels.assign(static_cast<std::size_t>(asset.width * asset.height), TransparentPixel());
+  ReplaceImagePixels(
+    &asset,
+    std::vector<PF_Pixel>(
+      static_cast<std::size_t>(asset.width * asset.height),
+      TransparentPixel()
+    )
+  );
   return asset;
 }
 
@@ -437,9 +436,10 @@ bool CropImageAsset(
     return true;
   }
 
+  std::vector<PF_Pixel>& outputPixels = AcquireWritableImagePixels(*outAsset);
   for (int row = 0; row < safeHeight; ++row) {
     for (int col = 0; col < safeWidth; ++col) {
-      outAsset->pixels[PixelIndex(safeWidth, col, row)] = GetImagePixelNearest(source, x + col, y + row);
+      outputPixels[PixelIndex(safeWidth, col, row)] = GetImagePixelNearest(source, x + col, y + row);
     }
   }
   return true;
@@ -471,17 +471,18 @@ bool ResizeImageAsset(RuntimeImageAsset* asset, int width, int height) {
   RuntimeImageAsset resized = CreateBlankImageAsset(asset->id, targetWidth, targetHeight);
   resized.source = asset->source;
   resized.path = asset->path;
+  std::vector<PF_Pixel>& resizedPixels = AcquireWritableImagePixels(resized);
   for (int y = 0; y < targetHeight; ++y) {
     for (int x = 0; x < targetWidth; ++x) {
       const double srcX = ((static_cast<double>(x) + 0.5) / targetWidth) * asset->width - 0.5;
       const double srcY = ((static_cast<double>(y) + 0.5) / targetHeight) * asset->height - 0.5;
-      resized.pixels[PixelIndex(targetWidth, x, y)] = SampleImagePixelBilinearInternal(*asset, srcX, srcY);
+      resizedPixels[PixelIndex(targetWidth, x, y)] = SampleImagePixelBilinearInternal(*asset, srcX, srcY);
     }
   }
 
   asset->width = resized.width;
   asset->height = resized.height;
-  asset->pixels.swap(resized.pixels);
+  asset->pixelBuffer = std::move(resized.pixelBuffer);
   asset->version += 1;
   return true;
 }
@@ -499,13 +500,15 @@ bool ApplyMaskToImageAsset(RuntimeImageAsset* asset, const RuntimeImageAsset& ma
     }
   }
 
+  const std::vector<PF_Pixel>& maskPixels = ReadImagePixels(resizedMask);
+  std::vector<PF_Pixel>& targetPixels = AcquireWritableImagePixels(*asset);
   for (int y = 0; y < asset->height; ++y) {
     for (int x = 0; x < asset->width; ++x) {
       const std::size_t index = PixelIndex(asset->width, x, y);
-      const PF_Pixel maskPixel = resizedMask.pixels[index];
+      const PF_Pixel maskPixel = maskPixels[index];
       const double maskAlpha = static_cast<double>(maskPixel.alpha) / 255.0;
-      asset->pixels[index].alpha =
-        static_cast<A_u_char>(std::round((static_cast<double>(asset->pixels[index].alpha) * maskAlpha)));
+      targetPixels[index].alpha =
+        static_cast<A_u_char>(std::round((static_cast<double>(targetPixels[index].alpha) * maskAlpha)));
     }
   }
   asset->version += 1;
@@ -555,39 +558,43 @@ bool ApplyFilterToImageAsset(RuntimeImageAsset* asset, const std::string& filter
 
   const std::string kind = filterKind;
   if (kind == "GRAY") {
-    for (std::size_t i = 0; i < asset->pixels.size(); ++i) {
-      const double gray = ComputeLuma(asset->pixels[i]);
-      asset->pixels[i].red = static_cast<A_u_char>(std::round(gray));
-      asset->pixels[i].green = static_cast<A_u_char>(std::round(gray));
-      asset->pixels[i].blue = static_cast<A_u_char>(std::round(gray));
+    std::vector<PF_Pixel>& pixels = AcquireWritableImagePixels(*asset);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+      const double gray = ComputeLuma(pixels[i]);
+      pixels[i].red = static_cast<A_u_char>(std::round(gray));
+      pixels[i].green = static_cast<A_u_char>(std::round(gray));
+      pixels[i].blue = static_cast<A_u_char>(std::round(gray));
     }
     asset->version += 1;
     return true;
   }
   if (kind == "INVERT") {
-    for (std::size_t i = 0; i < asset->pixels.size(); ++i) {
-      asset->pixels[i].red = static_cast<A_u_char>(255 - asset->pixels[i].red);
-      asset->pixels[i].green = static_cast<A_u_char>(255 - asset->pixels[i].green);
-      asset->pixels[i].blue = static_cast<A_u_char>(255 - asset->pixels[i].blue);
+    std::vector<PF_Pixel>& pixels = AcquireWritableImagePixels(*asset);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+      pixels[i].red = static_cast<A_u_char>(255 - pixels[i].red);
+      pixels[i].green = static_cast<A_u_char>(255 - pixels[i].green);
+      pixels[i].blue = static_cast<A_u_char>(255 - pixels[i].blue);
     }
     asset->version += 1;
     return true;
   }
   if (kind == "OPAQUE") {
-    for (std::size_t i = 0; i < asset->pixels.size(); ++i) {
-      asset->pixels[i].alpha = 255;
+    std::vector<PF_Pixel>& pixels = AcquireWritableImagePixels(*asset);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+      pixels[i].alpha = 255;
     }
     asset->version += 1;
     return true;
   }
   if (kind == "THRESHOLD") {
     const double threshold = ClampUnit(value > 0.0 ? value : 0.5) * 255.0;
-    for (std::size_t i = 0; i < asset->pixels.size(); ++i) {
-      const double gray = ComputeLuma(asset->pixels[i]);
+    std::vector<PF_Pixel>& pixels = AcquireWritableImagePixels(*asset);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+      const double gray = ComputeLuma(pixels[i]);
       const A_u_char next = gray >= threshold ? 255 : 0;
-      asset->pixels[i].red = next;
-      asset->pixels[i].green = next;
-      asset->pixels[i].blue = next;
+      pixels[i].red = next;
+      pixels[i].green = next;
+      pixels[i].blue = next;
     }
     asset->version += 1;
     return true;
@@ -595,10 +602,11 @@ bool ApplyFilterToImageAsset(RuntimeImageAsset* asset, const std::string& filter
   if (kind == "POSTERIZE") {
     const int levels = std::max(2, static_cast<int>(std::round(value)));
     const double step = 255.0 / static_cast<double>(levels - 1);
-    for (std::size_t i = 0; i < asset->pixels.size(); ++i) {
-      asset->pixels[i].red = static_cast<A_u_char>(std::round(std::round(asset->pixels[i].red / step) * step));
-      asset->pixels[i].green = static_cast<A_u_char>(std::round(std::round(asset->pixels[i].green / step) * step));
-      asset->pixels[i].blue = static_cast<A_u_char>(std::round(std::round(asset->pixels[i].blue / step) * step));
+    std::vector<PF_Pixel>& pixels = AcquireWritableImagePixels(*asset);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+      pixels[i].red = static_cast<A_u_char>(std::round(std::round(pixels[i].red / step) * step));
+      pixels[i].green = static_cast<A_u_char>(std::round(std::round(pixels[i].green / step) * step));
+      pixels[i].blue = static_cast<A_u_char>(std::round(std::round(pixels[i].blue / step) * step));
     }
     asset->version += 1;
     return true;
@@ -609,8 +617,9 @@ bool ApplyFilterToImageAsset(RuntimeImageAsset* asset, const std::string& filter
     const int height = asset->height;
     const int windowSize = radius * 2 + 1;
     const double invWindow = 1.0 / static_cast<double>(windowSize);
-    std::vector<PF_Pixel> horizontal = asset->pixels;
-    std::vector<PF_Pixel> blurred = asset->pixels;
+    const std::vector<PF_Pixel>& sourcePixels = ReadImagePixels(*asset);
+    std::vector<PF_Pixel> horizontal = sourcePixels;
+    std::vector<PF_Pixel> blurred = sourcePixels;
 
     for (int y = 0; y < height; ++y) {
       double sumA = 0.0;
@@ -619,7 +628,7 @@ bool ApplyFilterToImageAsset(RuntimeImageAsset* asset, const std::string& filter
       double sumB = 0.0;
       for (int offset = -radius; offset <= radius; ++offset) {
         const int sampleX = ClampInt(offset, 0, width - 1);
-        const PF_Pixel sample = asset->pixels[PixelIndex(width, sampleX, y)];
+        const PF_Pixel sample = sourcePixels[PixelIndex(width, sampleX, y)];
         sumA += sample.alpha;
         sumR += sample.red;
         sumG += sample.green;
@@ -632,8 +641,8 @@ bool ApplyFilterToImageAsset(RuntimeImageAsset* asset, const std::string& filter
 
         const int removeX = ClampInt(x - radius, 0, width - 1);
         const int addX = ClampInt(x + radius + 1, 0, width - 1);
-        const PF_Pixel removed = asset->pixels[PixelIndex(width, removeX, y)];
-        const PF_Pixel added = asset->pixels[PixelIndex(width, addX, y)];
+        const PF_Pixel removed = sourcePixels[PixelIndex(width, removeX, y)];
+        const PF_Pixel added = sourcePixels[PixelIndex(width, addX, y)];
         sumA += static_cast<double>(added.alpha) - static_cast<double>(removed.alpha);
         sumR += static_cast<double>(added.red) - static_cast<double>(removed.red);
         sumG += static_cast<double>(added.green) - static_cast<double>(removed.green);
@@ -670,13 +679,13 @@ bool ApplyFilterToImageAsset(RuntimeImageAsset* asset, const std::string& filter
       }
     }
 
-    asset->pixels.swap(blurred);
+    ReplaceImagePixels(asset, std::move(blurred));
     asset->version += 1;
     return true;
   }
   if (kind == "ERODE" || kind == "DILATE") {
-    std::vector<PF_Pixel> sourcePixels = asset->pixels;
-    std::vector<PF_Pixel> next = asset->pixels;
+    std::vector<PF_Pixel> sourcePixels = ReadImagePixels(*asset);
+    std::vector<PF_Pixel> next = sourcePixels;
     for (int y = 0; y < asset->height; ++y) {
       for (int x = 0; x < asset->width; ++x) {
         PF_Pixel chosen = sourcePixels[PixelIndex(asset->width, x, y)];
@@ -697,7 +706,7 @@ bool ApplyFilterToImageAsset(RuntimeImageAsset* asset, const std::string& filter
         next[PixelIndex(asset->width, x, y)] = chosen;
       }
     }
-    asset->pixels.swap(next);
+    ReplaceImagePixels(asset, std::move(next));
     asset->version += 1;
     return true;
   }
@@ -706,13 +715,14 @@ bool ApplyFilterToImageAsset(RuntimeImageAsset* asset, const std::string& filter
 }
 
 PF_Pixel GetImagePixelNearest(const RuntimeImageAsset& asset, int x, int y) {
-  if (!asset.loaded || asset.width <= 0 || asset.height <= 0 || asset.pixels.empty()) {
+  const std::vector<PF_Pixel>& pixels = ReadImagePixels(asset);
+  if (!asset.loaded || asset.width <= 0 || asset.height <= 0 || pixels.empty()) {
     return TransparentPixel();
   }
   if (x < 0 || y < 0 || x >= asset.width || y >= asset.height) {
     return TransparentPixel();
   }
-  return asset.pixels[PixelIndex(asset.width, x, y)];
+  return pixels[PixelIndex(asset.width, x, y)];
 }
 
 PF_Pixel SampleImagePixelBilinear(const RuntimeImageAsset& asset, double x, double y) {

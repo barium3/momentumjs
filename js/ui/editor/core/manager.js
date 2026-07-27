@@ -21,39 +21,6 @@ window.momentumEditorManagerFactory = (function () {
     return (hash >>> 0).toString(16);
   }
 
-  function normalizeBackgroundMode(compiled, code) {
-    if (compiled && compiled.analysis && compiled.analysis.backgroundMode) {
-      return compiled.analysis.backgroundMode;
-    }
-
-    if (!code) {
-      return "unknown";
-    }
-
-    const match = code.match(/background\s*\(([^)]*)\)/);
-    if (!match) {
-      return "transparent-likely";
-    }
-
-    const args = match[1]
-      .split(",")
-      .map((part) => part.trim())
-      .filter(Boolean);
-
-    if (args.length >= 2) {
-      const alpha = Number(args[args.length - 1]);
-      if (Number.isFinite(alpha) && alpha < 255) {
-        return "accumulation-likely";
-      }
-    }
-
-    return "opaque-likely";
-  }
-
-  function inferStateProfile(compiled, code) {
-    return "stateful-timeline-js";
-  }
-
   function getBitmapCompConfig(compiled, fileName) {
     return window.momentumPluginBitmap.getCompConfig(compiled, fileName);
   }
@@ -107,11 +74,6 @@ window.momentumEditorManagerFactory = (function () {
   function readBooleanArg(args, index, fallbackValue) {
     const value = literalValueFromNode(args[index]);
     return typeof value === "boolean" ? value : fallbackValue;
-  }
-
-  function readArrayArg(args, index, fallbackValue) {
-    const value = literalValueFromNode(args[index]);
-    return Array.isArray(value) ? value : fallbackValue;
   }
 
   function buildColorControllerConfig(args) {
@@ -540,8 +502,6 @@ window.momentumEditorManagerFactory = (function () {
     const source = String(code || "");
     const sourceHash = hashString(source);
     const comp = getBitmapCompConfig(compiled, fileName);
-    const backgroundMode = normalizeBackgroundMode(compiled, source);
-    const profile = inferStateProfile(compiled, source);
     const staticControllerConfigs = extractBitmapControllerConfigs(source);
     const controllerConfigs = mergeBitmapControllerConfigs(
       staticControllerConfigs,
@@ -558,10 +518,6 @@ window.momentumEditorManagerFactory = (function () {
       sourceHash,
       pixelDensity: Math.max(1, Number(window.devicePixelRatio) || 1),
       comp,
-      analysis: {
-        profile,
-        backgroundMode,
-      },
       controller: {
         hash: controllerHash,
         configs: controllerConfigs,
@@ -569,8 +525,6 @@ window.momentumEditorManagerFactory = (function () {
       cache: {
         recentFrameBudgetMB: 512,
         checkpointInterval: 12,
-        denseWindowBacktrack: 8,
-        denseWindowForward: 24,
       },
     };
   }

@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <JavaScriptCore/JavaScript.h>
@@ -123,10 +124,6 @@ constexpr int ControllerAngleUiParamIndex(int slot) {
   return ControllerSlotParamBaseIndex(slot) + 6;
 }
 
-constexpr int ControllerAngleParamIndex(int slot) {
-  return ControllerAngleValueParamIndex(slot);
-}
-
 struct ScalarSpec {
   std::string mode;
   double value = 0.0;
@@ -236,6 +233,10 @@ enum BlendMode {
   BLEND_MODE_BURN = 414,
 };
 
+struct RuntimeImagePixelBuffer {
+  std::vector<PF_Pixel> values;
+};
+
 struct RuntimeImageAsset {
   int id = 0;
   std::string source;
@@ -246,10 +247,47 @@ struct RuntimeImageAsset {
   std::uint64_t version = 1;
   bool loaded = false;
   std::string loadError;
-  std::vector<PF_Pixel> pixels;
-  bool gpuSceneBacked = false;
-  std::shared_ptr<ScenePayload> gpuScene;
+  // Pixel storage is copy-on-write. Scene snapshots and frame plans may retain
+  // the same immutable contents without copying the decoded image for every
+  // frame. Mutating image APIs must acquire a writable buffer through
+  // AcquireWritableImagePixels() before changing any pixel.
+  std::shared_ptr<RuntimeImagePixelBuffer> pixelBuffer;
+  bool sceneBacked = false;
+  std::shared_ptr<ScenePayload> sceneSource;
 };
+
+inline const std::vector<PF_Pixel>& ReadImagePixels(const RuntimeImageAsset& asset) {
+  static const std::vector<PF_Pixel> emptyPixels;
+  return asset.pixelBuffer ? asset.pixelBuffer->values : emptyPixels;
+}
+
+inline bool HasImagePixels(const RuntimeImageAsset& asset) {
+  return asset.pixelBuffer && !asset.pixelBuffer->values.empty();
+}
+
+inline std::vector<PF_Pixel>& AcquireWritableImagePixels(RuntimeImageAsset& asset) {
+  if (!asset.pixelBuffer) {
+    asset.pixelBuffer = std::make_shared<RuntimeImagePixelBuffer>();
+  } else if (asset.pixelBuffer.use_count() != 1) {
+    asset.pixelBuffer = std::make_shared<RuntimeImagePixelBuffer>(*asset.pixelBuffer);
+  }
+  return asset.pixelBuffer->values;
+}
+
+inline void ReplaceImagePixels(RuntimeImageAsset* asset, std::vector<PF_Pixel> pixels) {
+  if (!asset) {
+    return;
+  }
+  auto buffer = std::make_shared<RuntimeImagePixelBuffer>();
+  buffer->values = std::move(pixels);
+  asset->pixelBuffer = std::move(buffer);
+}
+
+inline void ClearImagePixels(RuntimeImageAsset* asset) {
+  if (asset) {
+    asset->pixelBuffer.reset();
+  }
+}
 
 struct SceneCommand {
   std::string type;
@@ -432,30 +470,17 @@ struct JsHostRuntime : RuntimeEngineState {
 extern thread_local JsHostRuntime* g_activeRuntime;
 
 struct CachedSketchState {
-  enum BitmapExecutionProfile {
-    BITMAP_PROFILE_DIRECT_FRAME = 0,
-    BITMAP_PROFILE_STATEFUL_ACCUMULATION = 1,
-  };
-
   struct FrameSnapshot {
     long frame = 0;
     ScenePayload scene;
-    bool sceneIsAccumulated = true;
-    std::vector<PF_Pixel> raster;
-    std::string debugSample;
-    std::string runtimeStateJson;
     ControllerPoolState controllerState;
     bool hasControllerState = false;
-    RuntimeEngineState engineState;
-    bool hasEngineState = false;
   };
 
   JSGlobalContextRef context = NULL;
   JSValueRef drawFn = NULL;
   ScenePayload latestScene;
-  bool latestSceneIsAccumulated = true;
   JsHostRuntime runtime;
-  std::vector<PF_Pixel> raster;
   std::string source;
   std::string sourceHash;
   std::string controllerHash;
@@ -465,8 +490,6 @@ struct CachedSketchState {
   A_long revision = -1;
   std::size_t frameCacheBudgetBytes = 512ULL * 1024ULL * 1024ULL;
   long checkpointInterval = 12;
-  long denseWindowBacktrack = 8;
-  long denseWindowForward = 24;
   A_long outputWidth = 0;
   A_long outputHeight = 0;
   long lastFrame = 0;
@@ -474,12 +497,11 @@ struct CachedSketchState {
   bool controllerHistoryDirty = false;
   long controllerHistoryDirtyFrame = -1;
   bool valid = false;
-  BitmapExecutionProfile bitmapProfile = BITMAP_PROFILE_STATEFUL_ACCUMULATION;
   std::unordered_map<long, FrameSnapshot> exactSnapshots;
   std::vector<long> exactSnapshotOrder;
-  std::unordered_map<long, FrameSnapshot> checkpointSnapshots;
-  std::vector<long> checkpointOrder;
-  std::unordered_map<long, ScenePayload> gpuFrameScenes;
+  // Immutable per-frame command deltas shared by every raster backend.
+  std::unordered_map<long, ScenePayload> frameScenes;
+  std::unordered_map<long, std::uint64_t> frameControllerTimelineHashes;
 };
 
 struct RuntimePointControllerSpec {
@@ -557,31 +579,24 @@ struct RuntimeSketchBundle {
   std::string sourceHash;
   std::string debugTracePath;
   std::string debugSessionId;
-  std::string profile;
-  std::string backgroundMode;
   std::string controllerHash;
   std::vector<RuntimeControllerSlotSpec> controllerSlots;
   double pixelDensity = 1.0;
   std::size_t recentFrameBudgetBytes = 512ULL * 1024ULL * 1024ULL;
   long checkpointInterval = 12;
-  long denseWindowBacktrack = 8;
-  long denseWindowForward = 24;
   bool hasEmbeddedSource = false;
 };
 
-enum BitmapGpuExecutionProfile {
-  BITMAP_GPU_PROFILE_DIRECT_FRAME = 0,
-  BITMAP_GPU_PROFILE_STATEFUL_ACCUMULATION = 1,
-};
-
-struct GpuRenderPlan {
+struct BitmapDrawPlan {
   ScenePayload scene;
   A_long width = 0;
   A_long height = 0;
-  double pixelDensity = 1.0;
   std::uint64_t cacheKey = 0;
   long targetFrame = 0;
   bool clearsSurface = false;
+  // True only when this plan contains a compositor-safe full-surface reset.
+  // A frame plan may discard all earlier frame operations at this boundary.
+  bool resetsHistory = false;
   PF_Pixel clearColor = {0, 0, 0, 0};
 
   struct FillTriangle {
@@ -697,11 +712,10 @@ struct GpuRenderPlan {
 
 struct BitmapFramePlanOp {
   long frame = 0;
-  GpuRenderPlan drawPlan;
+  BitmapDrawPlan drawPlan;
 };
 
 struct BitmapFramePlan {
-  BitmapGpuExecutionProfile profile = BITMAP_GPU_PROFILE_STATEFUL_ACCUMULATION;
   std::uint64_t cacheKey = 0;
   long targetFrame = 0;
   A_long width = 0;
@@ -711,6 +725,9 @@ struct BitmapFramePlan {
   long checkpointInterval = 0;
   bool hasSeedGpuCheckpoint = false;
   long seedFrame = 0;
+  bool useRecoveryCanvas = false;
+  bool hasPreferredRecoveryCursor = false;
+  long preferredRecoveryFrame = 0;
   bool supported = true;
   std::string unsupportedReason;
   std::vector<BitmapFramePlanOp> operations;
@@ -720,17 +737,16 @@ struct BitmapGpuRenderTarget {
   PF_EffectWorld* outputWorld = NULL;
   PF_PixelFormat pixelFormat = PF_PixelFormat_INVALID;
   void* outputWorldData = NULL;
-  A_long sourceOriginX = 0;
-  A_long sourceOriginY = 0;
+  double sourceOriginX = 0.0;
+  double sourceOriginY = 0.0;
+  double sourceStepX = 1.0;
+  double sourceStepY = 1.0;
   A_long logicalWidth = 0;
   A_long logicalHeight = 0;
   PF_GPUDeviceInfo deviceInfo;
 };
 
 constexpr std::size_t kDefaultRecentFrameBudgetBytes = 512ULL * 1024ULL * 1024ULL;
-constexpr std::size_t kMaxCheckpointSnapshots = 32;
-constexpr long kDefaultDenseWindowBacktrack = 8;
-constexpr long kDefaultDenseWindowForward = 24;
 
 struct SequenceCacheData {
   A_u_long magic = 0;
@@ -739,10 +755,16 @@ struct SequenceCacheData {
   A_long syncedRevision = -1;
   A_u_long bundleTextSize = 0;
   A_u_long sourceTextSize = 0;
+  // Process-local identity for transient custom-control UI state only. Render
+  // evaluators use invocation-owned runtimes and never depend on this value.
+  // It is cleared from every flattened Document snapshot.
+  std::uint64_t uiSessionToken = 0;
 };
 
 constexpr A_u_long kSequenceCacheDataMagic = 0x4D4F4D54UL;  // 'MOMT'
 constexpr A_u_long kSequenceCacheDataLegacyVersion = 2;
-constexpr A_u_long kSequenceCacheDataVersion = 3;
+constexpr A_u_long kSequenceCacheDataSnapshotVersion = 3;
+constexpr A_u_long kSequenceCacheDataSharedRuntimeVersion = 4;
+constexpr A_u_long kSequenceCacheDataVersion = 5;
 
 }  // namespace momentum

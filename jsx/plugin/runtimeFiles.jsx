@@ -1,14 +1,68 @@
 var __momentumBitmapInstanceIdCounter =
   $.global.__momentumBitmapInstanceIdCounter || 1000;
 $.global.__momentumBitmapInstanceIdCounter = __momentumBitmapInstanceIdCounter;
+var __momentumBitmapInstanceIdSeeded = false;
 
-function _momentumNextBitmapInstanceId() {
-  __momentumBitmapInstanceIdCounter += 1;
-  if (__momentumBitmapInstanceIdCounter > 2000000000) {
-    __momentumBitmapInstanceIdCounter = 1000;
+function _momentumSeedBitmapInstanceIdCounter() {
+  if (__momentumBitmapInstanceIdSeeded) {
+    return;
+  }
+  __momentumBitmapInstanceIdSeeded = true;
+
+  var runtimeFolder = _momentumGetRuntimeFolder();
+  var instancesFolder = runtimeFolder
+    ? new Folder(runtimeFolder.fsName + "/instances")
+    : null;
+  if (!instancesFolder || !instancesFolder.exists) {
+    return;
+  }
+
+  var entries = [];
+  try {
+    entries = instancesFolder.getFiles(function (entry) {
+      return entry instanceof Folder;
+    });
+  } catch (_instanceSeedListError) {
+    entries = [];
+  }
+
+  for (var index = 0; index < entries.length; index++) {
+    var parsedId = Math.floor(Number(entries[index].name));
+    if (
+      isFinite(parsedId) &&
+      parsedId > __momentumBitmapInstanceIdCounter &&
+      parsedId < 2000000000
+    ) {
+      __momentumBitmapInstanceIdCounter = parsedId;
+    }
   }
   $.global.__momentumBitmapInstanceIdCounter = __momentumBitmapInstanceIdCounter;
-  return __momentumBitmapInstanceIdCounter;
+}
+
+function _momentumNextBitmapInstanceId() {
+  _momentumSeedBitmapInstanceIdCounter();
+  var runtimeFolder = _momentumGetRuntimeFolder();
+
+  for (var attempt = 0; attempt < 100000; attempt++) {
+    __momentumBitmapInstanceIdCounter += 1;
+    if (__momentumBitmapInstanceIdCounter > 2000000000) {
+      __momentumBitmapInstanceIdCounter = 1001;
+    }
+
+    var candidateFolder = runtimeFolder
+      ? new Folder(
+          runtimeFolder.fsName +
+          "/instances/" +
+          String(__momentumBitmapInstanceIdCounter)
+        )
+      : null;
+    if (!candidateFolder || !candidateFolder.exists) {
+      $.global.__momentumBitmapInstanceIdCounter = __momentumBitmapInstanceIdCounter;
+      return __momentumBitmapInstanceIdCounter;
+    }
+  }
+
+  throw new Error("Unable to allocate a unique Momentum runtime instance id.");
 }
 
 function _momentumGetRuntimeFolder() {

@@ -18,6 +18,11 @@ bool QueryMetalBitmapCanvasCursor(
   long* outLastFrame,
   bool* outInitialized
 );
+bool QueryMetalBitmapRecoveryCanvasCursor(
+  std::uint64_t cacheKey,
+  long* outLastFrame,
+  bool* outInitialized
+);
 bool QueryMetalBitmapNearestCheckpoint(
   std::uint64_t cacheKey,
   long targetFrame,
@@ -29,7 +34,6 @@ namespace {
 class BitmapGpuBackend {
 public:
   virtual ~BitmapGpuBackend() = default;
-  virtual PF_GPU_Framework framework() const = 0;
   virtual PF_Err Render(
     const BitmapGpuRenderTarget& target,
     const BitmapFramePlan& plan,
@@ -39,13 +43,6 @@ public:
 
 class UnsupportedBitmapGpuBackend : public BitmapGpuBackend {
 public:
-  explicit UnsupportedBitmapGpuBackend(PF_GPU_Framework frameworkValue)
-    : frameworkValue_(frameworkValue) {}
-
-  PF_GPU_Framework framework() const override {
-    return frameworkValue_;
-  }
-
   PF_Err Render(
     const BitmapGpuRenderTarget&,
     const BitmapFramePlan&,
@@ -56,18 +53,11 @@ public:
     }
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
   }
-
-private:
-  PF_GPU_Framework frameworkValue_ = PF_GPU_Framework_NONE;
 };
 
 #if defined(__APPLE__)
 class MetalBitmapBackend : public BitmapGpuBackend {
 public:
-  PF_GPU_Framework framework() const override {
-    return PF_GPU_Framework_METAL;
-  }
-
   PF_Err Render(
     const BitmapGpuRenderTarget& target,
     const BitmapFramePlan& plan,
@@ -78,28 +68,7 @@ public:
 };
 #endif
 
-#if defined(_WIN32)
-class DirectXBitmapBackend : public BitmapGpuBackend {
-public:
-  PF_GPU_Framework framework() const override {
-    return PF_GPU_Framework_DIRECTX;
-  }
-
-  PF_Err Render(
-    const BitmapGpuRenderTarget&,
-    const BitmapFramePlan&,
-    std::string* errorMessage
-  ) override {
-    if (errorMessage) {
-      *errorMessage = "DirectX bitmap GPU backend is not implemented yet.";
-    }
-    return PF_Err_INTERNAL_STRUCT_DAMAGED;
-  }
-};
-#endif
-
 struct BitmapGpuDeviceContext {
-  PF_GPU_Framework framework = PF_GPU_Framework_NONE;
   A_u_long deviceIndex = 0;
   std::unique_ptr<BitmapGpuBackend> backend;
 };
@@ -114,36 +83,17 @@ std::unique_ptr<BitmapGpuBackend> CreateBackend(PF_GPU_Framework framework) {
     return std::make_unique<MetalBitmapBackend>();
   }
 #endif
-#if defined(_WIN32)
-  if (framework == PF_GPU_Framework_DIRECTX) {
-    return std::make_unique<DirectXBitmapBackend>();
-  }
-#endif
-  return std::make_unique<UnsupportedBitmapGpuBackend>(framework);
+  return std::make_unique<UnsupportedBitmapGpuBackend>();
 }
 
 }  // namespace
 
 bool BitmapGpuBackendAvailable() {
-#if defined(__APPLE__) || defined(_WIN32)
+#if defined(__APPLE__)
   return true;
 #else
   return false;
 #endif
-}
-
-bool BitmapGpuFrameworkSupported(PF_GPU_Framework framework) {
-#if defined(__APPLE__)
-  if (framework == PF_GPU_Framework_METAL) {
-    return true;
-  }
-#endif
-#if defined(_WIN32)
-  if (framework == PF_GPU_Framework_DIRECTX) {
-    return true;
-  }
-#endif
-  return false;
 }
 
 bool QueryBitmapGpuCanvasCursor(
@@ -153,6 +103,23 @@ bool QueryBitmapGpuCanvasCursor(
 ) {
 #if defined(__APPLE__)
   return QueryMetalBitmapCanvasCursor(cacheKey, outLastFrame, outInitialized);
+#endif
+  if (outLastFrame) {
+    *outLastFrame = 0;
+  }
+  if (outInitialized) {
+    *outInitialized = false;
+  }
+  return false;
+}
+
+bool QueryBitmapGpuRecoveryCanvasCursor(
+  std::uint64_t cacheKey,
+  long* outLastFrame,
+  bool* outInitialized
+) {
+#if defined(__APPLE__)
+  return QueryMetalBitmapRecoveryCanvasCursor(cacheKey, outLastFrame, outInitialized);
 #endif
   if (outLastFrame) {
     *outLastFrame = 0;
@@ -225,7 +192,6 @@ PF_Err CreateBitmapGpuDeviceContext(
   }
 
   auto context = std::make_unique<BitmapGpuDeviceContext>();
-  context->framework = framework;
   context->deviceIndex = deviceIndex;
   context->backend = CreateBackend(framework);
   if (!context->backend) {
@@ -296,8 +262,10 @@ PF_Err RenderBitmapFramePlan(
   void* gpuData,
   PF_EffectWorld* outputWorld,
   PF_PixelFormat pixelFormat,
-  A_long sourceOriginX,
-  A_long sourceOriginY,
+  double sourceOriginX,
+  double sourceOriginY,
+  double sourceStepX,
+  double sourceStepY,
   const BitmapFramePlan& plan,
   std::string* errorMessage
 ) {
@@ -369,6 +337,8 @@ PF_Err RenderBitmapFramePlan(
   target.outputWorldData = outputWorldData;
   target.sourceOriginX = sourceOriginX;
   target.sourceOriginY = sourceOriginY;
+  target.sourceStepX = sourceStepX;
+  target.sourceStepY = sourceStepY;
   target.logicalWidth = plan.logicalWidth > 0 ? plan.logicalWidth : outputWorld->width;
   target.logicalHeight = plan.logicalHeight > 0 ? plan.logicalHeight : outputWorld->height;
   target.deviceInfo = deviceInfo;
@@ -402,6 +372,21 @@ bool QueryMetalBitmapCanvasCursor(
   }
   return false;
 }
+
+bool QueryMetalBitmapRecoveryCanvasCursor(
+  std::uint64_t,
+  long* outLastFrame,
+  bool* outInitialized
+) {
+  if (outLastFrame) {
+    *outLastFrame = 0;
+  }
+  if (outInitialized) {
+    *outInitialized = false;
+  }
+  return false;
+}
+
 #endif
 
 }  // namespace momentum

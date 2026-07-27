@@ -1,5 +1,6 @@
 #include "AEConfig.h"
 #include "AE_EffectVers.h"
+#include "momentum_effect_contract.h"
 #include "momentum_version.h"
 
 #ifndef AE_OS_WIN
@@ -36,10 +37,10 @@ resource 'PiPL' (16000) {
       0
     },
     AE_Effect_Global_OutFlags {
-      0x06008404
+      MOMENTUM_EFFECT_OUT_FLAGS
     },
     AE_Effect_Global_OutFlags_2 {
-      0x02001401
+      MOMENTUM_EFFECT_OUT_FLAGS2
     },
     AE_Effect_Match_Name {
       "Momentum"

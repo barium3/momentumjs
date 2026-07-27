@@ -20,8 +20,9 @@ set(AE_SDK_ROOT "$ENV{AE_SDK_ROOT}")
 
 add_library(${MOMENTUM_PLUGIN_NAME} MODULE
   src/plugin/entry/effect_main.cpp
+  src/plugin/model/controller_schema.cpp
   src/plugin/gpu/bitmap_gpu_backend.cpp
-  src/plugin/gpu/bitmap_gpu_plan.cpp
+  src/plugin/gpu/bitmap_draw_plan.cpp
   src/plugin/render/render_core.cpp
   src/plugin/cache/frame_cache.cpp
   src/plugin/api/api_shared.cpp
@@ -35,6 +36,7 @@ add_library(${MOMENTUM_PLUGIN_NAME} MODULE
   src/plugin/api/api_shapes.cpp
   src/plugin/api/api_paths.cpp
   src/plugin/api/api_bootstrap.cpp
+  src/plugin/api/api_controller.cpp
   src/plugin/render/render_image.cpp
   src/plugin/render/render_text.cpp
   src/plugin/runtime/runtime_core.cpp

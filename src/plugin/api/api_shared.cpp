@@ -12,8 +12,6 @@ namespace momentum {
 
 namespace {
 
-constexpr double kCurveFlatnessTolerance = 0.125;
-constexpr int kCurveSubdivisionDepthLimit = 12;
 constexpr double kBezierArcMaxSweep = 3.14159265358979323846 * 0.5;
 
 double ClampColorByte(double value) {
@@ -294,55 +292,6 @@ bool ParseCssColorString(const std::string& rawValue, PF_Pixel* outColor) {
     parseFunctionColor("hsla", true, false, true);
 }
 
-double PointLineDistanceSquared(
-  double px,
-  double py,
-  double x0,
-  double y0,
-  double x1,
-  double y1
-) {
-  const double dx = x1 - x0;
-  const double dy = y1 - y0;
-  const double lengthSquared = dx * dx + dy * dy;
-  if (lengthSquared <= 1e-12) {
-    const double ddx = px - x0;
-    const double ddy = py - y0;
-    return ddx * ddx + ddy * ddy;
-  }
-
-  const double areaTwice = dx * (py - y0) - dy * (px - x0);
-  return (areaTwice * areaTwice) / lengthSquared;
-}
-
-bool CubicFlatEnough(
-  double x0,
-  double y0,
-  double x1,
-  double y1,
-  double x2,
-  double y2,
-  double x3,
-  double y3,
-  double toleranceSquared
-) {
-  const double d1 = PointLineDistanceSquared(x1, y1, x0, y0, x3, y3);
-  const double d2 = PointLineDistanceSquared(x2, y2, x0, y0, x3, y3);
-  return std::max(d1, d2) <= toleranceSquared;
-}
-
-bool QuadraticFlatEnough(
-  double x0,
-  double y0,
-  double cx,
-  double cy,
-  double x1,
-  double y1,
-  double toleranceSquared
-) {
-  return PointLineDistanceSquared(cx, cy, x0, y0, x1, y1) <= toleranceSquared;
-}
-
 void AppendCubicArcSegment(
   PathSubpath* subpath,
   double cx,
@@ -375,114 +324,6 @@ void AppendCubicArcSegment(
     x3,
     y3
   ));
-}
-
-void AppendAdaptiveCubicVertices(
-  std::vector<VertexSpec>* vertices,
-  double x0,
-  double y0,
-  double x1,
-  double y1,
-  double x2,
-  double y2,
-  double x3,
-  double y3,
-  double toleranceSquared,
-  int depth
-) {
-  if (!vertices) {
-    return;
-  }
-
-  if (
-    depth >= kCurveSubdivisionDepthLimit ||
-    CubicFlatEnough(x0, y0, x1, y1, x2, y2, x3, y3, toleranceSquared)
-  ) {
-    vertices->push_back(MakeVertexSpec(x3, y3));
-    return;
-  }
-
-  const double x01 = (x0 + x1) * 0.5;
-  const double y01 = (y0 + y1) * 0.5;
-  const double x12 = (x1 + x2) * 0.5;
-  const double y12 = (y1 + y2) * 0.5;
-  const double x23 = (x2 + x3) * 0.5;
-  const double y23 = (y2 + y3) * 0.5;
-
-  const double x012 = (x01 + x12) * 0.5;
-  const double y012 = (y01 + y12) * 0.5;
-  const double x123 = (x12 + x23) * 0.5;
-  const double y123 = (y12 + y23) * 0.5;
-
-  const double x0123 = (x012 + x123) * 0.5;
-  const double y0123 = (y012 + y123) * 0.5;
-
-  AppendAdaptiveCubicVertices(
-    vertices,
-    x0, y0,
-    x01, y01,
-    x012, y012,
-    x0123, y0123,
-    toleranceSquared,
-    depth + 1
-  );
-  AppendAdaptiveCubicVertices(
-    vertices,
-    x0123, y0123,
-    x123, y123,
-    x23, y23,
-    x3, y3,
-    toleranceSquared,
-    depth + 1
-  );
-}
-
-void AppendAdaptiveQuadraticVertices(
-  std::vector<VertexSpec>* vertices,
-  double x0,
-  double y0,
-  double cx,
-  double cy,
-  double x1,
-  double y1,
-  double toleranceSquared,
-  int depth
-) {
-  if (!vertices) {
-    return;
-  }
-
-  if (
-    depth >= kCurveSubdivisionDepthLimit ||
-    QuadraticFlatEnough(x0, y0, cx, cy, x1, y1, toleranceSquared)
-  ) {
-    vertices->push_back(MakeVertexSpec(x1, y1));
-    return;
-  }
-
-  const double x01 = (x0 + cx) * 0.5;
-  const double y01 = (y0 + cy) * 0.5;
-  const double x12 = (cx + x1) * 0.5;
-  const double y12 = (cy + y1) * 0.5;
-  const double x012 = (x01 + x12) * 0.5;
-  const double y012 = (y01 + y12) * 0.5;
-
-  AppendAdaptiveQuadraticVertices(
-    vertices,
-    x0, y0,
-    x01, y01,
-    x012, y012,
-    toleranceSquared,
-    depth + 1
-  );
-  AppendAdaptiveQuadraticVertices(
-    vertices,
-    x012, y012,
-    x12, y12,
-    x1, y1,
-    toleranceSquared,
-    depth + 1
-  );
 }
 
 }  // namespace
@@ -550,20 +391,6 @@ void RestoreRuntimeStyleState(JsHostRuntime* runtime, const RuntimeSnapshot& sna
   }
 
   static_cast<RuntimeStyleState&>(*runtime) = snapshot;
-}
-
-RuntimeEngineState CaptureRuntimeEngineStateSnapshot(const JsHostRuntime& runtime) {
-  return static_cast<const RuntimeEngineState&>(runtime);
-}
-
-void RestoreRuntimeEngineStateSnapshot(JsHostRuntime* runtime, const RuntimeEngineState& state) {
-  if (!runtime) {
-    return;
-  }
-
-  static_cast<RuntimeEngineState&>(*runtime) = state;
-  runtime->noiseInitialized = false;
-  runtime->noiseValues.clear();
 }
 
 void MarkSceneDirty(JsHostRuntime* runtime) {
@@ -913,21 +740,6 @@ void NormalizeEllipseArgs(int mode, double* x, double* y, double* width, double*
   }
 }
 
-SceneCommand MakePolygonCommandFromVertices(
-  const std::vector<VertexSpec>& vertices,
-  bool closePath,
-  const std::vector<std::vector<VertexSpec>>* contours
-) {
-  SceneCommand command;
-  command.type = "polygon";
-  command.vertices = vertices;
-  if (contours) {
-    command.contours = *contours;
-  }
-  command.closePath = closePath;
-  return command;
-}
-
 SceneCommand MakePointCommandFromVertex(const VertexSpec& vertex) {
   SceneCommand command;
   command.type = "point";
@@ -1036,158 +848,6 @@ void AppendCurvePathSegment(
   ));
 }
 
-void AppendBezierSegmentVertices(
-  std::vector<VertexSpec>* vertices,
-  double x0,
-  double y0,
-  double x1,
-  double y1,
-  double x2,
-  double y2,
-  double x3,
-  double y3,
-  int segments
-) {
-  if (!vertices) {
-    return;
-  }
-
-  const double toleranceScale = segments > 0
-    ? std::sqrt(8.0 / static_cast<double>(std::max(8, segments)))
-    : 1.0;
-  const double toleranceSquared =
-    std::pow(kCurveFlatnessTolerance * toleranceScale, 2.0);
-  AppendAdaptiveCubicVertices(
-    vertices,
-    x0, y0,
-    x1, y1,
-    x2, y2,
-    x3, y3,
-    toleranceSquared,
-    0
-  );
-}
-
-void AppendQuadraticSegmentVertices(
-  std::vector<VertexSpec>* vertices,
-  double x0,
-  double y0,
-  double cx,
-  double cy,
-  double x1,
-  double y1,
-  int segments
-) {
-  if (!vertices) {
-    return;
-  }
-
-  const double toleranceScale = segments > 0
-    ? std::sqrt(8.0 / static_cast<double>(std::max(8, segments)))
-    : 1.0;
-  const double toleranceSquared =
-    std::pow(kCurveFlatnessTolerance * toleranceScale, 2.0);
-  AppendAdaptiveQuadraticVertices(
-    vertices,
-    x0, y0,
-    cx, cy,
-    x1, y1,
-    toleranceSquared,
-    0
-  );
-}
-
-void AppendCurveSegmentVertices(
-  std::vector<VertexSpec>* vertices,
-  const VertexSpec& p0,
-  const VertexSpec& p1,
-  const VertexSpec& p2,
-  const VertexSpec& p3,
-  int segments,
-  double tightness
-) {
-  if (!vertices) {
-    return;
-  }
-
-  const std::pair<double, double> a = VertexToPair(p0);
-  const std::pair<double, double> b = VertexToPair(p1);
-  const std::pair<double, double> c = VertexToPair(p2);
-  const std::pair<double, double> d = VertexToPair(p3);
-  const double scale = (1.0 - tightness) * 0.5;
-  const double m1x = (c.first - a.first) * scale;
-  const double m1y = (c.second - a.second) * scale;
-  const double m2x = (d.first - b.first) * scale;
-  const double m2y = (d.second - b.second) * scale;
-  const double bx0 = b.first;
-  const double by0 = b.second;
-  const double bx1 = b.first + m1x / 3.0;
-  const double by1 = b.second + m1y / 3.0;
-  const double bx2 = c.first - m2x / 3.0;
-  const double by2 = c.second - m2y / 3.0;
-  const double bx3 = c.first;
-  const double by3 = c.second;
-  const double toleranceScale = segments > 0
-    ? std::sqrt(8.0 / static_cast<double>(std::max(8, segments)))
-    : 1.0;
-  const double toleranceSquared =
-    std::pow(kCurveFlatnessTolerance * toleranceScale, 2.0);
-  AppendAdaptiveCubicVertices(
-    vertices,
-    bx0, by0,
-    bx1, by1,
-    bx2, by2,
-    bx3, by3,
-    toleranceSquared,
-    0
-  );
-}
-
-std::vector<VertexSpec> BuildCurveShapeVertices(
-  const std::vector<VertexSpec>& controlVertices,
-  bool closePath,
-  double tightness
-) {
-  std::vector<VertexSpec> vertices;
-  if (controlVertices.size() < 4) {
-    return vertices;
-  }
-
-  if (!closePath) {
-    vertices.push_back(controlVertices[1]);
-    for (std::size_t index = 0; index + 3 < controlVertices.size(); index += 1) {
-      AppendCurveSegmentVertices(
-        &vertices,
-        controlVertices[index],
-        controlVertices[index + 1],
-        controlVertices[index + 2],
-        controlVertices[index + 3],
-        24,
-        tightness
-      );
-    }
-    return vertices;
-  }
-
-  std::vector<VertexSpec> wrapped = controlVertices;
-  wrapped.insert(wrapped.begin(), controlVertices[controlVertices.size() - 2]);
-  wrapped.push_back(controlVertices[1]);
-  wrapped.push_back(controlVertices[2]);
-  vertices.push_back(wrapped[1]);
-  for (std::size_t index = 0; index + 3 < wrapped.size(); index += 1) {
-    AppendCurveSegmentVertices(
-      &vertices,
-      wrapped[index],
-      wrapped[index + 1],
-      wrapped[index + 2],
-      wrapped[index + 3],
-      24,
-      tightness
-    );
-  }
-  return vertices;
-}
-
 void ApplyCurrentStyle(SceneCommand* command) {
   if (!command || !g_activeRuntime) {
     return;
@@ -1214,45 +874,6 @@ void ApplyCurrentStyle(SceneCommand* command) {
     command->eraseStrokeStrength = g_activeRuntime->eraseStrokeStrength;
   }
   command->transform = g_activeRuntime->currentTransform;
-}
-
-std::vector<VertexSpec> BuildArcVertices(
-  double cx,
-  double cy,
-  double width,
-  double height,
-  double start,
-  double stop,
-  bool includeCenter
-) {
-  std::vector<VertexSpec> vertices;
-  const double rx = std::max(0.0, width * 0.5);
-  const double ry = std::max(0.0, height * 0.5);
-  if (rx <= 0.0 || ry <= 0.0) {
-    return vertices;
-  }
-
-  const double sweep = stop - start;
-  if (std::fabs(sweep) < 1e-9) {
-    return vertices;
-  }
-
-  const double absSweep = std::fabs(sweep);
-  const double maxRadius = std::max(rx, ry);
-  const double angularStep = std::max(M_PI / 48.0, std::acos(std::max(-1.0, 1.0 - 0.5 / std::max(1.0, maxRadius))));
-  const int segments = std::max(12, static_cast<int>(std::ceil(absSweep / angularStep)));
-  if (includeCenter) {
-    vertices.push_back(VertexSpec{{"pixels", cx}, {"pixels", cy}});
-  }
-  for (int i = 0; i <= segments; ++i) {
-    const double t = static_cast<double>(i) / static_cast<double>(segments);
-    const double angle = start + sweep * t;
-    vertices.push_back(VertexSpec{
-      {"pixels", cx + std::cos(angle) * rx},
-      {"pixels", cy + std::sin(angle) * ry}
-    });
-  }
-  return vertices;
 }
 
 PathSubpath BuildArcSubpath(
@@ -1296,50 +917,6 @@ PathSubpath BuildArcSubpath(
     subpath.segments.push_back(MakeCloseSegment());
   }
   return subpath;
-}
-
-std::vector<VertexSpec> BuildRoundedRectVertices(
-  double x,
-  double y,
-  double width,
-  double height,
-  double tl,
-  double tr,
-  double br,
-  double bl
-) {
-  std::vector<VertexSpec> vertices;
-  if (width <= 0.0 || height <= 0.0) {
-    return vertices;
-  }
-
-  const double maxRadius = std::max(0.0, std::min(width, height) * 0.5);
-  tl = std::min(std::max(0.0, tl), maxRadius);
-  tr = std::min(std::max(0.0, tr), maxRadius);
-  br = std::min(std::max(0.0, br), maxRadius);
-  bl = std::min(std::max(0.0, bl), maxRadius);
-
-  auto appendCorner = [&vertices](double cx, double cy, double radius, double start, double stop) {
-    if (radius <= 0.0) {
-      vertices.push_back(VertexSpec{{"pixels", cx}, {"pixels", cy}});
-      return;
-    }
-    const int segments = std::max(8, static_cast<int>(std::ceil(radius / 2.5)));
-    for (int i = 0; i <= segments; ++i) {
-      const double t = static_cast<double>(i) / static_cast<double>(segments);
-      const double angle = start + (stop - start) * t;
-      vertices.push_back(VertexSpec{
-        {"pixels", cx + std::cos(angle) * radius},
-        {"pixels", cy + std::sin(angle) * radius}
-      });
-    }
-  };
-
-  appendCorner(x + width - tr, y + tr, tr, -M_PI * 0.5, 0.0);
-  appendCorner(x + width - br, y + height - br, br, 0.0, M_PI * 0.5);
-  appendCorner(x + bl, y + height - bl, bl, M_PI * 0.5, M_PI);
-  appendCorner(x + tl, y + tl, tl, M_PI, M_PI * 1.5);
-  return vertices;
 }
 
 PathSubpath BuildRoundedRectSubpath(
@@ -1393,16 +970,6 @@ PathSubpath BuildRoundedRectSubpath(
   }
   subpath.segments.push_back(MakeCloseSegment());
   return subpath;
-}
-
-std::vector<VertexSpec> BuildRectVertices(double x, double y, double width, double height) {
-  std::vector<VertexSpec> vertices;
-  vertices.reserve(4);
-  vertices.push_back(MakeVertexSpec(x, y));
-  vertices.push_back(MakeVertexSpec(x + width, y));
-  vertices.push_back(MakeVertexSpec(x + width, y + height));
-  vertices.push_back(MakeVertexSpec(x, y + height));
-  return vertices;
 }
 
 PathSubpath BuildRectSubpath(double x, double y, double width, double height) {
