@@ -70,14 +70,19 @@ C:\Users\YourUsername\AppData\Roaming\Adobe\CEP\extensions\momentumjs
 
 #### macOS
 
+From an unpacked Momentum release or repository, run:
+
 ```bash
-sudo rm -rf "$HOME/Library/Application Support/Adobe/CEP/extensions/momentumjs"
-sudo find "$HOME/Library/Application Support/Adobe/Common/Plug-ins" -maxdepth 2 -type d -name MediaCore -exec rm -rf "{}/Momentum" \;
+sh scripts/uninstall.sh
 ```
+
+The uninstaller removes Momentum while preserving the CEP extension's `user/`
+workspace. To remove the workspace too, run it with
+`MOMENTUM_REMOVE_USER_DATA=1`.
 
 #### Windows
 
-Remove:
+Back up the extension's `user` folder, then remove:
 
 ```text
 C:\Users\YourUsername\AppData\Roaming\Adobe\CEP\extensions\momentumjs

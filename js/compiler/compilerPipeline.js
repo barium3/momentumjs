@@ -42,6 +42,7 @@ window.compilerPipeline = (function () {
 
   function collectPreTransformData(ctx) {
     ctx.assets = window.compilerAssetCollectionPass.collect(ctx.ast);
+    ctx.controllers = window.compilerControllerCollectionPass.analyze(ctx.ast);
   }
 
   function instrumentSource(ctx) {
@@ -175,6 +176,7 @@ window.compilerPipeline = (function () {
       globals: ctx.globals || createEmptyGlobals(),
       config: ctx.config || createEmptyConfig(),
       assets: ctx.assets || createEmptyAssets(),
+      controllers: ctx.controllers || createEmptyControllers(),
       dependencies: ctx.dependencies || null,
       analysis: ctx.analysis || createEmptyAnalysis(ctx.transformedSource),
       ae: ctx.ae,
@@ -205,6 +207,7 @@ window.compilerPipeline = (function () {
       height: null,
       frameRate: null,
       duration: null,
+      pixelDensity: null,
     };
   }
 
@@ -215,6 +218,14 @@ window.compilerPipeline = (function () {
       tables: [],
       json: [],
       hasText: false,
+    };
+  }
+
+  function createEmptyControllers() {
+    return {
+      declarations: [],
+      configs: [],
+      fingerprint: "[]",
     };
   }
 

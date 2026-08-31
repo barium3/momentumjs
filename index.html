@@ -3,34 +3,51 @@
   <head>
     <meta charset="UTF-8" />
     <title>momentum.js</title>
-    <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+    <script src="js/vendor/p5.min.js"></script>
     <script src="js/CSInterface.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/acorn@8.11.3/dist/acorn.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/acorn-walk@8.3.2/dist/walk.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.30.1/min/vs/loader.min.js"></script>
+    <script src="js/vendor/acorn.min.js"></script>
+    <link rel="stylesheet" href="js/ui/editor/editorSurface.css" />
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
     />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="js/ui/files/files.css" />
+    <link rel="stylesheet" href="js/ui/effectCode.css" />
+    <link rel="stylesheet" href="js/ui/tooltip.css" />
+    <link rel="stylesheet" href="js/ui/console/console.css" />
   </head>
-  <body>
+  <body class="panel-launch-pending">
     <div id="container">
       <div id="toolbar">
         <div class="toolbar-left">
           <button
             id="toggleFileList"
             class="icon-button toggle-file-list-button"
-            title="Collapse file list"
             aria-label="Collapse file list"
           >
             <i class="fas fa-bars"></i>
           </button>
-          <button id="newFile" class="icon-button">
+          <button
+            id="cancelEffectCode"
+            class="icon-button effect-code-action effect-code-exit-button"
+            aria-label="Exit Edit Code"
+          >
+            <span class="effect-code-button-label">Exit</span>
+          </button>
+          <button
+            id="newFile"
+            class="icon-button"
+            aria-label="New file"
+          >
             <i class="fas fa-plus"></i>
           </button>
-          <button id="saveFile" class="icon-button">
-            <i class="fas fa-save"></i>
+          <button
+            id="newFolder"
+            class="icon-button"
+            aria-label="New folder"
+          >
+            <i class="fas fa-folder-plus"></i>
           </button>
         </div>
 
@@ -39,12 +56,37 @@
         </div>
 
         <div class="toolbar-right">
-          <select id="renderModeSelect" class="run-mode-select" title="Render mode">
+          <select
+            id="renderModeSelect"
+            class="run-mode-select"
+            aria-label="Render mode"
+          >
             <option value="vector">Vector</option>
             <option value="bitmap">Bitmap</option>
           </select>
-          <button id="runEditorScript" class="icon-button" hidden>
+          <button
+            id="runEditorScript"
+            class="icon-button"
+            aria-label="Run code"
+            hidden
+          >
             <i class="fas fa-play"></i>
+          </button>
+          <button
+            id="commitCodeCue"
+            class="icon-button effect-code-action effect-code-keyframe-button"
+            data-tooltip="Add Code keyframe"
+            aria-label="Add Code keyframe"
+          >
+            <span class="effect-code-keyframe-diamond" aria-hidden="true"></span>
+          </button>
+          <button
+            id="modifyBaseCode"
+            class="icon-button effect-code-action effect-code-label-button"
+            data-tooltip="Modify Base Code"
+            aria-label="Modify Base Code"
+          >
+            <span class="effect-code-button-label">Base Code</span>
           </button>
         </div>
       </div>
@@ -53,8 +95,9 @@
         <div id="file-list"></div>
 
         <div id="right-panel">
-          <div id="editor-container">
+          <div id="editor-container" tabindex="-1">
             <div id="editor"></div>
+            <div id="image-container" hidden></div>
           </div>
 
           <div id="console-container">
@@ -65,9 +108,11 @@
       </div>
     </div>
 
-    <script src="js/ui/console/manager.js"></script>
+    <script src="js/ui/console/consoleManager.js"></script>
+    <script src="js/ui/timelineClock.js"></script>
     <script src="js/ui/console/debugTraceManager.js"></script>
-    <script src="js/ui/editor/runtime/preprocessor.js"></script>
+    <script src="js/ui/workspace.js"></script>
+    <script src="js/ui/editor/preprocessor.js"></script>
     <script src="bundle/includes/registry.js"></script>
     <script src="js/compiler/core/ast.js"></script>
     <script src="js/compiler/core/context.js"></script>
@@ -78,6 +123,7 @@
     <script src="js/compiler/collectors/entryPoints.js"></script>
     <script src="js/compiler/collectors/globalBindings.js"></script>
     <script src="js/compiler/collectors/environmentConfig.js"></script>
+    <script src="js/compiler/collectors/controllerCollection.js"></script>
     <script src="js/compiler/collectors/assetCollection.js"></script>
     <script src="js/compiler/validators/undeclaredIdentifiers.js"></script>
     <script src="js/compiler/validators/assetValidationPass.js"></script>
@@ -87,15 +133,24 @@
     <script src="js/compiler/analyzers/backgroundAnalysis.js"></script>
     <script src="js/compiler/analyzers/dependencyAnalysis.js"></script>
     <script src="js/compiler/analyzers/runtimeAnalysis.js"></script>
+    <script src="js/compiler/analyzers/codeCueSafety.js"></script>
     <script src="js/compiler/rewriters/callsiteInstrumentation.js"></script>
     <script src="js/compiler/rewriters/reservedData.js"></script>
     <script src="js/compiler/compilerPipeline.js"></script>
     <script src="js/plugin/bridge.js"></script>
     <script src="js/plugin/asset.js"></script>
     <script src="js/plugin/bitmap.js"></script>
-    <script src="js/ui/editor/runtime/codeExecutor.js"></script>
-    <script src="js/ui/editor/runtime/capabilities.js"></script>
+    <script src="js/ui/codeBundle.js"></script>
+    <script src="js/ui/editor/bitmapControllerBootstrap.js"></script>
+    <script src="js/ui/editor/codeExecutor.js"></script>
+    <script src="js/ui/editor/capabilities.js"></script>
+    <script src="js/ui/files/fileEntry.js"></script>
+    <script src="js/ui/files/fileTypes.js"></script>
+    <script src="js/ui/files/fileSystem.js"></script>
+    <script src="js/ui/files/fileOrder.js"></script>
+    <script src="js/ui/files/fileDrop.js"></script>
     <script src="js/ui/files/fileTree.js"></script>
+    <script src="js/ui/files/activeFile.js"></script>
     <script src="js/ui/files/fileManager.js"></script>
     <script src="js/analyzer/shared/ast.js"></script>
     <script src="js/analyzer/shared/registry.js"></script>
@@ -110,12 +165,17 @@
     <script src="js/analyzer/assets/fonts.js"></script>
     <script src="js/analyzer/assets/images.js"></script>
     <script src="js/analyzer/index.js"></script>
-    <script src="js/ui/editor/features/validation.js"></script>
-    <script src="js/ui/editor/features/autocomplete.js"></script>
-    <script src="js/ui/editor/features/interactions.js"></script>
-    <script src="js/ui/editor/core/manager.js"></script>
-    <script src="js/ui/editor/index.js"></script>
-    <script src="js/ui/app/host.js"></script>
-    <script src="js/ui/app/bootstrap.js"></script>
+    <script src="js/ui/editor/validation.js"></script>
+    <script src="js/ui/editor/autocompleteBindings.js"></script>
+    <script src="js/ui/editor/autocompleteFonts.js"></script>
+    <script src="js/ui/editor/autocomplete.js"></script>
+    <script src="js/ui/editor/editorSurface.js"></script>
+    <script src="js/ui/editor/interactions.js"></script>
+    <script src="js/ui/editor/editorManager.js"></script>
+    <script src="js/ui/effectCodeDiff.js"></script>
+    <script src="js/ui/effectCodeClock.js"></script>
+    <script src="js/ui/effectCode.js"></script>
+    <script src="js/ui/tooltip.js"></script>
+    <script src="js/ui/bootstrap.js"></script>
   </body>
 </html>

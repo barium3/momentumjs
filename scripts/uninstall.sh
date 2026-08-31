@@ -23,14 +23,14 @@ remove_if_exists() {
 
 case "${CEP_SCOPE}" in
   user)
-    remove_if_exists "${USER_CEP_TARGET_DIR}"
+    remove_extension_preserving_user "${USER_CEP_TARGET_DIR}"
     ;;
   system)
-    remove_if_exists "${SYSTEM_CEP_TARGET_DIR}"
+    remove_extension_preserving_user "${SYSTEM_CEP_TARGET_DIR}"
     ;;
   all)
-    remove_if_exists "${USER_CEP_TARGET_DIR}"
-    remove_if_exists "${SYSTEM_CEP_TARGET_DIR}"
+    remove_extension_preserving_user "${USER_CEP_TARGET_DIR}"
+    remove_extension_preserving_user "${SYSTEM_CEP_TARGET_DIR}"
     ;;
   *)
     echo "Error: Unsupported MOMENTUM_CEP_SCOPE='${CEP_SCOPE}'. Use 'user', 'system', or 'all'." >&2
@@ -45,4 +45,8 @@ if [ -d "${COMMON_PLUGINS_DIR}" ]; then
   done
 fi
 
-echo "Momentum uninstall completed."
+if [ "${MOMENTUM_REMOVE_USER_DATA:-0}" = "1" ]; then
+  echo "Momentum uninstall completed, including user workspaces."
+else
+  echo "Momentum uninstall completed. User workspaces were preserved."
+fi

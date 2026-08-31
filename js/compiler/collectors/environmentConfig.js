@@ -1,4 +1,21 @@
 window.compilerEnvironmentConfigPass = (function () {
+  function parseDurationTimecode(value, frameRate) {
+    var parts = String(value || "").split(":");
+    if (parts.length !== 3 && parts.length !== 4) return null;
+    var nums = [];
+    for (var index = 0; index < parts.length; index++) {
+      if (!/^\d+$/.test(parts[index])) return null;
+      nums.push(Number(parts[index]));
+    }
+    var hours = parts.length === 4 ? nums[0] : 0;
+    var minutes = parts.length === 4 ? nums[1] : nums[0];
+    var seconds = parts.length === 4 ? nums[2] : nums[1];
+    var frames = parts.length === 4 ? nums[3] : nums[2];
+    var fps = frameRate || 30;
+    if (minutes >= 60 || seconds >= 60 || frames >= fps) return null;
+    return hours * 3600 + minutes * 60 + seconds + frames / fps;
+  }
+
   function parseDurationArgs(args, frameRate, numericBindings) {
     var items = Array.isArray(args) ? args : [];
     var fps = frameRate || 30;
@@ -15,7 +32,7 @@ window.compilerEnvironmentConfigPass = (function () {
 
       var timecode = window.compilerAst.getStringLiteralValue(items[0]);
       if (timecode) {
-        return timecode;
+        return parseDurationTimecode(timecode, fps);
       }
 
       return null;
@@ -80,6 +97,15 @@ window.compilerEnvironmentConfigPass = (function () {
       return;
     }
 
+    if (name === "pixelDensity" && expr.arguments && expr.arguments.length > 0) {
+      var density = window.compilerAst.getStaticNumber(
+        expr.arguments[0],
+        numericBindings,
+      );
+      if (density !== null) config.pixelDensity = density;
+      return;
+    }
+
     if (parseDuration && name === "duration") {
       var parsedDuration = parseDurationArgs(
         expr.arguments,
@@ -98,6 +124,7 @@ window.compilerEnvironmentConfigPass = (function () {
       height: null,
       frameRate: null,
       duration: null,
+      pixelDensity: null,
     };
     var numericBindings =
       globalBindings && globalBindings.numeric ? globalBindings.numeric : null;

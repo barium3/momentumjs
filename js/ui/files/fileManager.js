@@ -1,52 +1,28 @@
-// File panel state, file I/O, and editor/preview switching.
+// File panel coordination, mutations, refresh, and responsive layout.
 window.fileManager = (function () {
-  const DRAFT_FILE_NAME = "Untitled.js";
-  const DEFAULT_JS_TEMPLATE = [
-    "function setup() {",
-    "  createCanvas(400, 400);",
-    "}",
-    "",
-    "function draw() {",
-    "  background(220);",
-    "}",
-    "",
-  ].join("\n");
-  const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "bmp"];
-  const LANGUAGE_BY_EXTENSION = {
-    js: "javascript",
-    jsx: "javascript",
-    html: "html",
-    css: "css",
-    json: "json",
-    xml: "xml",
-    csv: "csv",
-  };
-  let currentFilePath = null;
-  let currentSessionName = DRAFT_FILE_NAME;
-  let isDraftSession = false;
-  let recentlyCreatedFile = null;
-  let pendingEditorState = null;
+  const Entry = window.fileEntry;
+  const ActiveFile = window.activeFile;
+  const FileSystem = window.fileSystem;
+  const FileOrder = window.fileOrder;
+  const FileTypes = window.fileTypes;
+  let pendingEntryHighlightPath = null;
   let isFileListManuallyCollapsed = false;
   let isResponsiveFileListForcedOpen = false;
   let isResponsiveNarrowViewport = false;
-  let responsiveLayoutInitialized = false;
   let responsiveResizeFrame = 0;
+  let fileMutationChain = Promise.resolve(true);
+  let pendingNewItemType = null;
+  let fileListRequestGeneration = 0;
+  let activeSessionResolutionPromise = null;
+  let startupSessionInitialized = false;
+  let initialized = false;
   const FILE_LIST_RETRY_LIMIT = 6;
   const FILE_LIST_RETRY_DELAY_MS = 250;
   const FILE_LIST_COLLAPSED_CLASS = "file-list-collapsed";
   const RESPONSIVE_FILE_LIST_BREAKPOINT = 500;
 
-  function escapeFilePathForEval(filePath) {
-    return filePath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  }
-
   function getUserFolderPath() {
     return csInterface.getSystemPath(SystemPath.EXTENSION) + "/user";
-  }
-
-  function getFileExtension(filePath) {
-    const parts = String(filePath || "").split(".");
-    return parts.length > 1 ? parts.pop().toLowerCase() : "";
   }
 
   function setFileListMessage(html) {
@@ -59,18 +35,6 @@ window.fileManager = (function () {
 
   function getFileListToggleButton() {
     return document.getElementById("toggleFileList");
-  }
-
-  function requestEditorLayout() {
-    window.requestAnimationFrame(function () {
-      if (
-        window.editorManager &&
-        window.editorManager.editor &&
-        typeof window.editorManager.editor.layout === "function"
-      ) {
-        window.editorManager.editor.layout();
-      }
-    });
   }
 
   function getViewportWidth() {
@@ -101,12 +65,9 @@ window.fileManager = (function () {
     if (toggleButton) {
       const nextLabel = isCollapsed ? "Expand file list" : "Collapse file list";
 
-      toggleButton.title = nextLabel;
       toggleButton.setAttribute("aria-label", nextLabel);
       toggleButton.setAttribute("aria-pressed", String(!isCollapsed));
     }
-
-    requestEditorLayout();
   }
 
   function toggleFileListCollapsed() {
@@ -135,16 +96,15 @@ window.fileManager = (function () {
     const nextResponsiveNarrowViewport =
       getViewportWidth() <= RESPONSIVE_FILE_LIST_BREAKPOINT;
 
-    if (isResponsiveNarrowViewport !== nextResponsiveNarrowViewport) {
-      isResponsiveNarrowViewport = nextResponsiveNarrowViewport;
-      if (!isResponsiveNarrowViewport) {
-        isResponsiveFileListForcedOpen = false;
-      }
-      syncFileListCollapsedUI();
+    if (isResponsiveNarrowViewport === nextResponsiveNarrowViewport) {
       return;
     }
 
-    requestEditorLayout();
+    isResponsiveNarrowViewport = nextResponsiveNarrowViewport;
+    if (!isResponsiveNarrowViewport) {
+      isResponsiveFileListForcedOpen = false;
+    }
+    syncFileListCollapsedUI();
   }
 
   function scheduleResponsiveLayoutSync() {
@@ -159,178 +119,292 @@ window.fileManager = (function () {
   }
 
   function initResponsiveLayout() {
-    if (responsiveLayoutInitialized) {
-      return;
-    }
-
-    responsiveLayoutInitialized = true;
     syncResponsiveLayout();
     window.addEventListener("resize", scheduleResponsiveLayoutSync);
   }
 
-  function isEmptyEvalScriptResult(result) {
-    return result === undefined || result === null || result === "";
+  function getMutationHighlightPath(options, result) {
+    if (typeof options.getHighlightPath === "function") {
+      return options.getHighlightPath(result);
+    }
+    if (Object.prototype.hasOwnProperty.call(options, "highlightPath")) {
+      return options.highlightPath;
+    }
+    return undefined;
   }
 
-  function isEvalScriptFailure(result) {
-    return (
-      typeof result === "string" &&
-      (/^EvalScript error\./i.test(result) || /^Error:/i.test(result))
-    );
-  }
-
-  function writeEncodedFile(filePath, content, callback) {
-    const escapedFilePath = escapeFilePathForEval(filePath);
-    csInterface.evalScript(
-      'writeFile("' + escapedFilePath + '", "' + encodeURIComponent(content) + '")',
-      callback,
-    );
-  }
-
-  function clearConsole() {
-    window.consoleManager.clearConsole();
-  }
-
-  function stopDebugTraceSession() {
-    if (
-      window.debugTraceManager &&
-      typeof window.debugTraceManager.stop === "function"
-    ) {
-      window.debugTraceManager.stop();
-    }
-  }
-
-  function flushPendingEditorState() {
-    if (!pendingEditorState || !window.editorManager || !window.editorManager.editor) {
-      return false;
+  function refreshAfterFileMutation(options, result) {
+    const highlightPath = getMutationHighlightPath(options, result);
+    if (highlightPath !== undefined) {
+      pendingEntryHighlightPath = Entry.normalizePath(highlightPath) || null;
     }
 
-    const editor = window.editorManager.editor;
-    const model = editor.getModel();
-    if (!model) {
-      return false;
-    }
-
-    const nextContent = pendingEditorState.content || "";
-    const nextLanguage = pendingEditorState.language || "plaintext";
-    const currentContent =
-      typeof model.getValue === "function" ? model.getValue() : "";
-    const currentLanguage =
-      typeof model.getLanguageId === "function"
-        ? model.getLanguageId()
-        : "plaintext";
-    const contentChanged = currentContent !== nextContent;
-    const languageChanged = currentLanguage !== nextLanguage;
-
-    if (contentChanged) {
-      model.setValue(nextContent);
-    }
-
-    if (languageChanged) {
-      monaco.editor.setModelLanguage(model, nextLanguage);
-    }
-
-    if (
-      (contentChanged || languageChanged) &&
-      nextLanguage === "javascript" &&
-      typeof window.editorManager.formatDocument === "function"
-    ) {
-      Promise.resolve(
-        window.editorManager.formatDocument({
-          restoreFocus: false,
-        }),
-      ).catch(() => false);
-    }
-
-    pendingEditorState = null;
-    return true;
-  }
-
-  window.addEventListener("momentum:editor-ready", flushPendingEditorState);
-
-  function loadFileList() {
-    const folderPath = getUserFolderPath();
-    const escapedPath = escapeFilePathForEval(folderPath);
-
-    function renderFileListResult(result) {
-      try {
-        const response = JSON.parse(result);
-        if (response.error) {
-          setFileListMessage("<div>Error: " + response.error + "</div>");
-        } else if (response.files && response.files.length > 0) {
-          window.fileTree = response.files;
-
-          filterDSStoreFiles(window.fileTree);
-
-          sortFileTree(window.fileTree);
-
-          window.fileTreeUI.renderFileTree(
-            window.fileTree,
-            document.getElementById("file-list"),
-          );
-
-          if (recentlyCreatedFile) {
-            highlightFile(recentlyCreatedFile);
-            recentlyCreatedFile = null;
-          } else if (!isDraftSession && currentFilePath) {
-            window.fileTreeUI.selectFile(currentFilePath);
-          }
-        } else {
-          const pathHint = response.folderPath
-            ? " (Path: " + response.folderPath + ")"
-            : "";
-          setFileListMessage(
-            "<div class='no-files-hint'>No files found" +
-            pathHint +
-            "<br><small>Click the New button above to create your first file</small></div>",
-          );
-        }
-      } catch (_error) {
-        setFileListMessage("<div>Error loading file list</div>");
+    return loadFileList(options.loadOptions).then(function (refreshed) {
+      if (!refreshed) {
+        console.error(
+          (options.errorMessage || "File operation failed") +
+            ": the file tree could not be refreshed.",
+        );
       }
-    }
-
-    function requestFileList(attempt) {
-      csInterface.evalScript(
-        'getFileList("' + escapedPath + '")',
-        function (result) {
-          if (isEmptyEvalScriptResult(result)) {
-            if (attempt < FILE_LIST_RETRY_LIMIT) {
-              window.setTimeout(function () {
-                requestFileList(attempt + 1);
-              }, FILE_LIST_RETRY_DELAY_MS);
-              return;
-            }
-
-            csInterface.evalScript("typeof getFileList === 'function'", function (availability) {
-              const detail =
-                availability === "true"
-                  ? "empty result after retries"
-                  : "ExtendScript bridge not ready";
-              setFileListMessage("<div>Failed to get file list: " + detail + "</div>");
-            });
-            return;
-          }
-
-          if (isEvalScriptFailure(result)) {
-            setFileListMessage("<div>Failed to get file list: " + result + "</div>");
-            return;
-          }
-
-          renderFileListResult(result);
+      if (typeof options.afterRefresh !== "function") {
+        return true;
+      }
+      return Promise.resolve(options.afterRefresh(result, refreshed)).then(
+        function () {
+          return true;
         },
       );
+    });
+  }
+
+  function executeFileMutation(mutationOptions) {
+    const persistPromise = mutationOptions.persistEditor === false
+      ? Promise.resolve(true)
+      : ActiveFile.persist();
+
+    return persistPromise.then(function (persisted) {
+      if (!persisted) {
+        return false;
+      }
+
+      return Promise.resolve().then(function () {
+        return mutationOptions.mutate();
+      }).then(function (result) {
+        if (
+          typeof mutationOptions.isSuccessful === "function" &&
+          !mutationOptions.isSuccessful(result)
+        ) {
+          return false;
+        }
+
+        const successResult = typeof mutationOptions.onSuccess === "function"
+          ? mutationOptions.onSuccess(result)
+          : null;
+        return Promise.resolve(successResult).then(function () {
+          return refreshAfterFileMutation(mutationOptions, result);
+        });
+      });
+    }).catch(function (error) {
+      console.error(
+        mutationOptions.errorMessage || "File operation failed:",
+        error,
+      );
+      if (error && error.data && error.data.changed === true) {
+        return loadFileList().then(function () {
+          return false;
+        });
+      }
+      return false;
+    });
+  }
+
+  function runFileMutation(options) {
+    const mutationOptions = options || {};
+    const queuedMutation = fileMutationChain.then(
+      function () {
+        return executeFileMutation(mutationOptions);
+      },
+      function () {
+        return executeFileMutation(mutationOptions);
+      },
+    );
+    fileMutationChain = queuedMutation.then(
+      function () {
+        return true;
+      },
+      function () {
+        return true;
+      },
+    );
+    return queuedMutation;
+  }
+
+  function findEntryByPath(items, entryPath) {
+    const normalizedPath = Entry.normalizePath(entryPath);
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (Entry.normalizePath(item.path) === normalizedPath) {
+        return item;
+      }
+      if (Entry.isFolder(item)) {
+        const nestedMatch = findEntryByPath(item.children || [], normalizedPath);
+        if (nestedMatch) {
+          return nestedMatch;
+        }
+      }
+    }
+    return null;
+  }
+
+  function findFirstOpenableEntry(items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!Entry.isFolder(item) && canAutoOpenImportedPath(item.path)) {
+        return item;
+      }
+      if (Entry.isFolder(item)) {
+        const nestedEntry = findFirstOpenableEntry(item.children || []);
+        if (nestedEntry) {
+          return nestedEntry;
+        }
+      }
+    }
+    return null;
+  }
+
+  function openStartupEntry(entry) {
+    return ActiveFile.open(entry.path, entry.name).then(function (succeeded) {
+      if (succeeded) {
+        highlightFile(entry.path);
+      }
+      return succeeded;
+    });
+  }
+
+  function createDefaultStartupFile(folderPath) {
+    const fileName = "sketch.js";
+    return FileSystem.createFile(
+      folderPath,
+      fileName,
+      ActiveFile.getDefaultContent(fileName),
+    ).then(
+      function (entry) {
+        FileOrder.promote(entry.path, folderPath);
+        pendingEntryHighlightPath = entry.path;
+        return ActiveFile.open(entry.path, entry.name).then(function (succeeded) {
+          if (!succeeded) {
+            return false;
+          }
+          return loadFileList({ skipActiveSessionResolution: true });
+        });
+      },
+      function (error) {
+        console.error("Could not create the default sketch file:", error);
+        return false;
+      },
+    );
+  }
+
+  function ensureActiveFileSession(entries, folderPath, createDefaultIfEmpty) {
+    if (ActiveFile.isDraft()) {
+      return Promise.resolve(true);
     }
 
-    requestFileList(0);
+    const currentFilePath = ActiveFile.getCurrentPath();
+    if (currentFilePath) {
+      const currentEntry = findEntryByPath(entries, currentFilePath);
+      if (currentEntry && !Entry.isFolder(currentEntry)) {
+        return Promise.resolve(true);
+      }
+      ActiveFile.forgetLastOpened();
+      ActiveFile.reset();
+    }
+
+    if (activeSessionResolutionPromise) {
+      return activeSessionResolutionPromise;
+    }
+
+    const lastOpenedPath = ActiveFile.getLastOpenedPath();
+    const lastOpenedEntry = lastOpenedPath
+      ? findEntryByPath(entries, lastOpenedPath)
+      : null;
+    if (lastOpenedPath && (!lastOpenedEntry || Entry.isFolder(lastOpenedEntry))) {
+      ActiveFile.forgetLastOpened();
+    }
+
+    const startupEntry = lastOpenedEntry && !Entry.isFolder(lastOpenedEntry)
+      ? lastOpenedEntry
+      : findFirstOpenableEntry(entries);
+    if (!startupEntry && !createDefaultIfEmpty) {
+      return Promise.resolve(true);
+    }
+
+    const resolution = startupEntry
+      ? openStartupEntry(startupEntry)
+      : createDefaultStartupFile(folderPath);
+
+    activeSessionResolutionPromise = Promise.resolve(resolution).then(
+      function (succeeded) {
+        activeSessionResolutionPromise = null;
+        return succeeded;
+      },
+      function (error) {
+        activeSessionResolutionPromise = null;
+        throw error;
+      },
+    );
+    return activeSessionResolutionPromise;
+  }
+
+  function loadFileList(options) {
+    const loadOptions = options || {};
+    const folderPath = getUserFolderPath();
+    const requestGeneration = ++fileListRequestGeneration;
+    return FileSystem.listEntries(folderPath, {
+      retries: FILE_LIST_RETRY_LIMIT,
+      retryDelayMs: FILE_LIST_RETRY_DELAY_MS,
+    }).then(
+      function (response) {
+        if (requestGeneration !== fileListRequestGeneration) {
+          return true;
+        }
+        window.fileTree = response.entries;
+        filterDSStoreFiles(window.fileTree);
+        FileOrder.applyTree(window.fileTree, response.folderPath || folderPath);
+
+        const fileListElement = document.getElementById("file-list");
+        fileListElement.setAttribute(
+          "data-root-path",
+          response.folderPath || folderPath,
+        );
+        window.fileTreeUI.renderFileTree(window.fileTree, fileListElement);
+
+        if (window.fileTree.length === 0) {
+          const emptyHint = document.createElement("div");
+          emptyHint.className = "no-files-hint";
+          emptyHint.innerHTML =
+            "No files found<br><small>Drop files or folders here, or create a new item above</small>";
+          fileListElement.appendChild(emptyHint);
+        }
+
+        if (pendingEntryHighlightPath) {
+          highlightFile(pendingEntryHighlightPath);
+          pendingEntryHighlightPath = null;
+        } else if (ActiveFile.getSelectionPath()) {
+          window.fileTreeUI.selectFile(ActiveFile.getSelectionPath());
+        }
+        if (loadOptions.skipActiveSessionResolution) {
+          return true;
+        }
+        const isInitializingStartupSession = !startupSessionInitialized;
+        return ensureActiveFileSession(
+          window.fileTree,
+          response.folderPath || folderPath,
+          isInitializingStartupSession,
+        ).then(function (succeeded) {
+          if (isInitializingStartupSession && succeeded) {
+            startupSessionInitialized = true;
+          }
+          return succeeded;
+        });
+      },
+      function (error) {
+        if (requestGeneration !== fileListRequestGeneration) {
+          return false;
+        }
+        console.error("Failed to get file list:", error);
+        setFileListMessage("<div>Failed to get file list</div>");
+        return false;
+      },
+    );
   }
 
   function filterDSStoreFiles(items) {
     for (let i = items.length - 1; i >= 0; i--) {
-      if (!items[i].isFolder && items[i].name === ".DS_Store") {
+      if (!Entry.isFolder(items[i]) && items[i].name === ".DS_Store") {
         items.splice(i, 1);
       } else if (
-        items[i].isFolder &&
+        Entry.isFolder(items[i]) &&
         items[i].children &&
         items[i].children.length > 0
       ) {
@@ -339,321 +413,337 @@ window.fileManager = (function () {
     }
   }
 
-  // Keep files above folders and bubble the newest file to the top.
-  function sortFileTree(items) {
-    const files = items.filter((item) => !item.isFolder);
-    const folders = items.filter((item) => item.isFolder);
-
-    files.sort((a, b) => {
-      if (recentlyCreatedFile) {
-        if (a.path === recentlyCreatedFile) return -1;
-        if (b.path === recentlyCreatedFile) return 1;
-      }
-      return a.name.localeCompare(b.name);
-    });
-
-    folders.sort((a, b) => a.name.localeCompare(b.name));
-
-    folders.forEach((folder) => {
-      if (folder.children && folder.children.length > 0) {
-        sortFileTree(folder.children);
-      }
-    });
-
-    items.length = 0;
-    items.push(...files, ...folders);
-  }
-
   function highlightFile(filePath) {
-    setTimeout(() => {
-      window.fileTreeUI.selectFile(filePath, { scrollIntoView: true });
-    }, 600);
+    window.fileTreeUI.selectFile(filePath, { scrollIntoView: true });
   }
 
-  function resolveEditorLanguage(fileExtension) {
-    return LANGUAGE_BY_EXTENSION[fileExtension] || "plaintext";
-  }
-
-  function getDefaultFileContent(fileName) {
-    const fileExtension = getFileExtension(fileName || "");
-    if (fileExtension === "js") {
-      return DEFAULT_JS_TEMPLATE;
-    }
-    return "";
-  }
-
-  function applyEditorContent(content, language) {
-    pendingEditorState = {
-      content: content || "",
-      language: language || "plaintext",
-    };
-    flushPendingEditorState();
-  }
-
-  function isImageExtension(fileExtension) {
-    return IMAGE_EXTENSIONS.indexOf(fileExtension) !== -1;
-  }
-
-  function isRunnableExtension(fileExtension) {
-    return fileExtension === "js";
-  }
-
-  function syncRunAvailability(fileExtension) {
-    if (
-      window.editorManager &&
-      typeof window.editorManager.setRunEnabled === "function"
-    ) {
-      window.editorManager.setRunEnabled(isRunnableExtension(fileExtension));
-    }
-  }
-
-  function ensureImageContainer() {
-    let imageContainer = document.getElementById("image-container");
-    if (!imageContainer) {
-      imageContainer = document.createElement("div");
-      imageContainer.id = "image-container";
-      imageContainer.style.display = "flex";
-      imageContainer.style.justifyContent = "center";
-      imageContainer.style.alignItems = "center";
-      imageContainer.style.height = "100%";
-      document.getElementById("editor-container").appendChild(imageContainer);
-    }
-
-    return imageContainer;
-  }
-
-  function showImagePreview(filePath) {
-    document.getElementById("editor").style.display = "none";
-    const imageContainer = ensureImageContainer();
-    imageContainer.style.display = "flex";
-    imageContainer.innerHTML =
-      '<img src="file://' +
-      filePath +
-      '" alt="Image" style="max-width: 100%; max-height: 100%;">';
-  }
-
-  function showCodeEditor() {
-    document.getElementById("editor").style.display = "block";
-    const imageContainer = document.getElementById("image-container");
-    if (imageContainer) {
-      imageContainer.style.display = "none";
-    }
-  }
-
-  function loadTextFileIntoEditor(filePath, fileExtension) {
-    const escapedFilePath = escapeFilePathForEval(filePath);
-
-    csInterface.evalScript(
-      'readFile("' + escapedFilePath + '")',
-      function (content) {
-        if (content && content.startsWith("Error:")) {
-          applyEditorContent("// Unable to read file: " + content, "javascript");
-          return;
-        }
-
-        const language = resolveEditorLanguage(fileExtension);
-        applyEditorContent(content, language);
-      },
-    );
-  }
-
-  function setCurrentFilenameLabel(fileName) {
-    document.getElementById("current-filename").textContent = fileName || "";
-  }
-
-  function clearSelectedFiles() {
-    if (
-      window.fileTreeUI &&
-      typeof window.fileTreeUI.clearSelectedFiles === "function"
-    ) {
-      window.fileTreeUI.clearSelectedFiles();
-    }
-  }
-
-  function setDraftSessionState(fileName) {
-    currentFilePath = null;
-    currentSessionName = fileName || DRAFT_FILE_NAME;
-    isDraftSession = true;
-  }
-
-  function setPersistedSessionState(filePath) {
-    currentFilePath = filePath;
-    currentSessionName = filePath.split("/").pop();
-    isDraftSession = false;
-  }
-
-  function initializeDraftSession(options) {
-    const sessionOptions = options || {};
-    const fileName = sessionOptions.fileName || DRAFT_FILE_NAME;
-    const content =
-      sessionOptions.content !== undefined
-        ? sessionOptions.content
-        : getDefaultFileContent(fileName);
-
-    setDraftSessionState(fileName);
-    stopDebugTraceSession();
-    clearSelectedFiles();
-    showCodeEditor();
-    applyEditorContent(content, "javascript");
-    syncRunAvailability("js");
-    setCurrentFilenameLabel(fileName);
-
-    if (
-      window.editorManager &&
-      window.editorManager.editor &&
-      typeof window.editorManager.editor.focus === "function"
-    ) {
-      window.editorManager.editor.focus();
-    }
-  }
-
-  function openPathInEditor(filePath) {
-    setPersistedSessionState(filePath);
-    const fileExtension = getFileExtension(filePath);
-    syncRunAvailability(fileExtension);
-
-    if (isImageExtension(fileExtension)) {
-      showImagePreview(filePath);
-    } else {
-      showCodeEditor();
-      loadTextFileIntoEditor(filePath, fileExtension);
-    }
-
-    setCurrentFilenameLabel(currentSessionName);
-  }
-
-  function openFile(filePath) {
-    stopDebugTraceSession();
-    clearConsole();
-    openPathInEditor(filePath);
-  }
-
-  function saveFile() {
-    if (isDraftSession || !currentFilePath) {
-      saveDraftAsFile();
-      return;
-    }
-
-    const fileExtension = getFileExtension(currentFilePath);
-    if (isImageExtension(fileExtension)) {
-      return;
-    }
-
-    Promise.resolve(
-      window.editorManager &&
-        typeof window.editorManager.formatDocument === "function"
-        ? window.editorManager.formatDocument()
-        : false,
-    )
-      .catch(() => false)
-      .then(function () {
-        const content = window.editorManager.editor.getValue();
-        writeEncodedFile(currentFilePath, content, function (result) {
-          if (result.startsWith("Error:")) {
-            console.error("Error saving file:", result);
-          }
-        });
-      });
-  }
-
-  function saveDraftAsFile() {
-    expandFileList();
-    window.fileTreeUI.showNewFileInput(function (fileName) {
-      if (!fileName) {
-        return;
-      }
-
-      if (!fileName.includes(".")) {
-        fileName += ".js";
-      }
-
-      const newFilePath = getUserFolderPath() + "/" + fileName;
-
-      Promise.resolve(
-        window.editorManager &&
-          typeof window.editorManager.formatDocument === "function"
-          ? window.editorManager.formatDocument()
-          : false,
-      )
-        .catch(() => false)
-        .then(function () {
-          const content =
-            window.editorManager &&
-            window.editorManager.editor &&
-            typeof window.editorManager.editor.getValue === "function"
-              ? window.editorManager.editor.getValue()
-              : "";
-
-          recentlyCreatedFile = newFilePath;
-
-          writeEncodedFile(newFilePath, content, function (result) {
-            if (result.startsWith("Error:")) {
-              console.error("Error saving draft file:", result);
-              recentlyCreatedFile = null;
-              return;
-            }
-
-            loadFileList();
-
-            setTimeout(function () {
-              openFile(newFilePath);
-            }, 700);
-          });
-        });
-    });
+  function getNewEntryTargetFolderPath() {
+    return window.fileTreeUI.getSelectedTargetFolderPath() ||
+      getUserFolderPath();
   }
 
   function createNewFile() {
+    if (pendingNewItemType) {
+      return;
+    }
+
+    const targetFolderPath = getNewEntryTargetFolderPath();
+    pendingNewItemType = "preparing-file";
     expandFileList();
-    window.fileTreeUI.showNewFileInput(function (fileName) {
-      if (!fileName) {
+    ActiveFile.persist().then(function (succeeded) {
+      if (!succeeded) {
+        pendingNewItemType = null;
         return;
       }
 
-      stopDebugTraceSession();
-      clearConsole();
-
-      if (!fileName.includes(".")) {
-        fileName += ".js";
-      }
-
-      const newFilePath = getUserFolderPath() + "/" + fileName;
-      const content = getDefaultFileContent(fileName);
-
-      recentlyCreatedFile = newFilePath;
-
-      writeEncodedFile(newFilePath, content, function (result) {
-        if (result.startsWith("Error:")) {
-          console.error("Error creating file:", result);
-          recentlyCreatedFile = null;
-        } else {
-          loadFileList();
-
-          setTimeout(function () {
-            openFile(newFilePath);
-          }, 700);
-        }
+      ActiveFile.beginDraft({
+        fileName: "sketch.js",
+        folderPath: targetFolderPath,
       });
+      pendingNewItemType = "file";
+
+      window.fileTreeUI.showNewItemInput(function (fileName) {
+        if (!fileName) {
+          pendingNewItemType = null;
+          return ActiveFile.cancelDraft();
+        }
+
+        if (!fileName.includes(".")) {
+          fileName += ".js";
+        }
+
+        const creationTask = ActiveFile.prepareCreation(fileName);
+
+        return runFileMutation({
+          errorMessage: "Error creating file:",
+          persistEditor: false,
+          mutate: function () {
+            return FileSystem.createFile(
+              targetFolderPath,
+              fileName,
+              creationTask.content,
+            );
+          },
+          onSuccess: function (entry) {
+            pendingNewItemType = null;
+            FileOrder.promote(entry.path, targetFolderPath);
+            ActiveFile.acceptCreation(entry, creationTask);
+          },
+          getHighlightPath: function (entry) {
+            return entry.path;
+          },
+        });
+      }, {
+        parentFolderPath: targetFolderPath,
+      });
+    }, function () {
+      pendingNewItemType = null;
     });
   }
 
-  function getCurrentFileName() {
-    if (currentSessionName) {
-      return currentSessionName.replace(/\.[^/.]+$/, "");
+  function createNewFolder() {
+    if (pendingNewItemType) {
+      return;
     }
-    return null;
+
+    const targetFolderPath = getNewEntryTargetFolderPath();
+    pendingNewItemType = "preparing-folder";
+    expandFileList();
+    ActiveFile.persist().then(function (succeeded) {
+      if (!succeeded) {
+        pendingNewItemType = null;
+        return;
+      }
+
+      pendingNewItemType = "folder";
+      window.fileTreeUI.showNewItemInput(function (folderName) {
+        if (!folderName) {
+          pendingNewItemType = null;
+          return Promise.resolve(true);
+        }
+
+        return runFileMutation({
+          errorMessage: "Error creating folder:",
+          persistEditor: false,
+          mutate: function () {
+            return FileSystem.createFolder(targetFolderPath, folderName);
+          },
+          onSuccess: function (entry) {
+            pendingNewItemType = null;
+            FileOrder.promote(entry.path, targetFolderPath);
+          },
+          getHighlightPath: function (entry) {
+            return entry.path;
+          },
+        });
+      }, {
+        kind: "folder",
+        initialValue: "New Folder",
+        parentFolderPath: targetFolderPath,
+      });
+    }, function () {
+      pendingNewItemType = null;
+    });
+  }
+
+  function renameEntry(rawEntry, nextName) {
+    const entry = Entry.create(rawEntry);
+    const requestedName = String(nextName || "").trim();
+    if (!entry.path || !requestedName) {
+      return Promise.resolve(false);
+    }
+
+    return runFileMutation({
+      errorMessage: "Error renaming entry:",
+      mutate: function () {
+        return FileSystem.renameEntry(entry, requestedName);
+      },
+      onSuccess: function (renamedEntry) {
+        ActiveFile.handleRelocation(entry, renamedEntry);
+        FileOrder.replacePath(entry.path, renamedEntry.path);
+        window.fileTreeUI.remapExpandedEntry(entry.path, renamedEntry.path);
+      },
+      getHighlightPath: function (renamedEntry) {
+        return renamedEntry.path;
+      },
+    });
+  }
+
+  function deleteEntry(rawEntry) {
+    const entry = Entry.create(rawEntry);
+    if (!entry.path) {
+      return Promise.resolve(false);
+    }
+
+    return runFileMutation({
+      errorMessage: "Error deleting entry:",
+      mutate: function () {
+        return FileSystem.deleteEntry(entry);
+      },
+      isSuccessful: function (response) {
+        return Boolean(response && response.deleted === true);
+      },
+      onSuccess: function () {
+        ActiveFile.handleDeletion(entry);
+        FileOrder.remove(entry);
+        window.fileTreeUI.removeExpandedEntry(entry.path);
+      },
+      highlightPath: null,
+    });
+  }
+
+  function moveEntry(
+    rawEntry,
+    targetFolderPath,
+    referencePath,
+    position,
+  ) {
+    const entry = Entry.create(rawEntry);
+    const normalizedTargetFolderPath = Entry.normalizePath(targetFolderPath);
+    if (!entry.path || !normalizedTargetFolderPath) {
+      return Promise.resolve(false);
+    }
+    if (
+      Entry.isFolder(entry) &&
+      Entry.isPathInside(normalizedTargetFolderPath, entry.path)
+    ) {
+      return Promise.resolve(false);
+    }
+
+    const sourceFolderPath = Entry.getParentPath(entry.path);
+    const isOrderOnlyMutation = sourceFolderPath === normalizedTargetFolderPath;
+    return runFileMutation({
+      errorMessage: "Error moving entry:",
+      mutate: function () {
+        return isOrderOnlyMutation
+          ? Promise.resolve(entry)
+          : FileSystem.moveEntry(entry, normalizedTargetFolderPath);
+      },
+      onSuccess: function (movedEntry) {
+        if (isOrderOnlyMutation) {
+          FileOrder.place(
+            entry.path,
+            normalizedTargetFolderPath,
+            referencePath,
+            position,
+          );
+          return;
+        }
+
+        ActiveFile.handleRelocation(entry, movedEntry);
+        const movedPath = Entry.normalizePath(movedEntry.path);
+        window.fileTreeUI.remapExpandedEntry(entry.path, movedPath);
+        FileOrder.move(
+          entry.path,
+          movedPath,
+          sourceFolderPath,
+          normalizedTargetFolderPath,
+          referencePath,
+          position,
+        );
+      },
+      getHighlightPath: function (movedEntry) {
+        return movedEntry.path;
+      },
+    });
+  }
+
+  function placeImportedEntries(
+    importedEntries,
+    targetFolderPath,
+    referencePath,
+    position,
+  ) {
+    const entriesToPlace = importedEntries.slice();
+    if (position === "top" || position === "after") {
+      entriesToPlace.reverse();
+    }
+    entriesToPlace.forEach(function (entry) {
+      if (entry && entry.path) {
+        FileOrder.place(
+          entry.path,
+          targetFolderPath,
+          referencePath,
+          position,
+        );
+      }
+    });
+  }
+
+  function canAutoOpenImportedPath(filePath) {
+    return FileTypes.canAutoOpen(filePath);
+  }
+
+  function importExternalDrop(
+    dataTransfer,
+    targetFolderPath,
+    referencePath,
+    position,
+  ) {
+    const capturedDrop = window.fileDrop.captureDrop(dataTransfer);
+    const resolvedTargetFolderPath = Entry.normalizePath(targetFolderPath) ||
+      getUserFolderPath();
+    const resolvedPosition = position || "top";
+    if (
+      !capturedDrop ||
+      (capturedDrop.files.length === 0 && capturedDrop.entries.length === 0)
+    ) {
+      return Promise.resolve(false);
+    }
+
+    expandFileList();
+    return runFileMutation({
+      errorMessage: "Could not import dropped entries:",
+      mutate: function () {
+        return window.fileDrop.importCapturedDrop(
+          capturedDrop,
+          resolvedTargetFolderPath,
+        );
+      },
+      isSuccessful: function (response) {
+        const importedEntries = response && Array.isArray(response.entries)
+          ? response.entries
+          : [];
+        if (response && response.errors && response.errors.length > 0) {
+          console.error(
+            "Some dropped entries could not be imported:",
+            response.errors.join("\n"),
+          );
+        }
+        return Boolean(
+          response && response.ok === true && importedEntries.length > 0,
+        );
+      },
+      onSuccess: function (response) {
+        const importedEntries = response.entries;
+        placeImportedEntries(
+          importedEntries,
+          resolvedTargetFolderPath,
+          referencePath,
+          resolvedPosition,
+        );
+      },
+      getHighlightPath: function (response) {
+        const firstFilePath = Entry.normalizePath(response.firstFilePath);
+        const firstImportedPath = Entry.normalizePath(response.entries[0].path);
+        return firstFilePath || firstImportedPath;
+      },
+      afterRefresh: function (response) {
+        const firstFilePath = Entry.normalizePath(response.firstFilePath);
+        if (firstFilePath && canAutoOpenImportedPath(firstFilePath)) {
+          return ActiveFile.open(
+            firstFilePath,
+            firstFilePath.split("/").pop(),
+          );
+        }
+        return true;
+      },
+    });
+  }
+
+  function init() {
+    if (initialized) {
+      return;
+    }
+    initialized = true;
+    ActiveFile.setRefreshHandler(function (highlightPath, options) {
+      pendingEntryHighlightPath = Entry.normalizePath(highlightPath) || null;
+      return loadFileList(options);
+    });
+    initResponsiveLayout();
   }
 
   return {
-    initializeDraftSession: initializeDraftSession,
     loadFileList: loadFileList,
-    loadFile: openFile,
-    saveFile: saveFile,
     createNewFile: createNewFile,
-    openFile: openFile,
-    getCurrentFileName: getCurrentFileName,
-    expandFileList: expandFileList,
-    initResponsiveLayout: initResponsiveLayout,
+    createNewFolder: createNewFolder,
+    deleteEntry: deleteEntry,
+    moveEntry: moveEntry,
+    importExternalDrop: importExternalDrop,
+    renameEntry: renameEntry,
+    openFile: ActiveFile.open,
+    getCurrentFileName: ActiveFile.getCurrentFileName,
+    init: init,
     toggleFileListCollapsed: toggleFileListCollapsed,
   };
 })();

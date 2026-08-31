@@ -1,4 +1,29 @@
 window.compilerAst = (function () {
+  var OMITTED_CANONICAL_KEYS = {
+    start: true,
+    end: true,
+    loc: true,
+    range: true,
+    raw: true,
+    parent: true,
+  };
+
+  function canonicalValue(value) {
+    if (value === null) return "null";
+    if (value === undefined) return "undefined";
+    if (typeof value === "bigint") return "bigint:" + String(value);
+    if (typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return "[" + value.map(canonicalValue).join(",") + "]";
+    }
+    var keys = Object.keys(value)
+      .filter(function (key) { return !OMITTED_CANONICAL_KEYS[key]; })
+      .sort();
+    return "{" + keys.map(function (key) {
+      return JSON.stringify(key) + ":" + canonicalValue(value[key]);
+    }).join(",") + "}";
+  }
+
   function parse(code, options) {
     if (typeof acorn === "undefined") {
       throw new Error("Acorn is not available");
@@ -223,6 +248,7 @@ window.compilerAst = (function () {
   return {
     addParentLinks: addParentLinks,
     applyTextReplacements: applyTextReplacements,
+    canonicalValue: canonicalValue,
     getCalleeName: getCalleeName,
     getStaticNumber: getStaticNumber,
     getStringLiteralValue: getStringLiteralValue,

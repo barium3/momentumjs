@@ -194,6 +194,9 @@ function draw() {
 ## The `user/` Directory
 
 Momentum uses the extension's `user/` directory as the working area for sketch assets.
+Momentum's macOS installer and uninstaller preserve this directory during
+application updates and normal uninstall operations. Bundled examples are only
+copied when the corresponding file does not already exist.
 
 Typical install location of the CEP extension:
 

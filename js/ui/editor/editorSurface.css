@@ -1,0 +1,17 @@
+/* Monaco-owned editor surface styles. */
+.monaco-editor .suggest-details-container,
+.monaco-editor .suggest-details,
+.monaco-editor .parameter-hints-widget {
+  box-sizing: border-box;
+  max-width: var(--momentum-editor-overlay-max-width, 430px) !important;
+}
+
+.monaco-editor .parameter-hints-widget > .phwrapper {
+  box-sizing: border-box;
+  max-width: var(--momentum-editor-overlay-max-width, 430px) !important;
+}
+
+.monaco-editor .parameter-hints-widget .signature,
+.monaco-editor .parameter-hints-widget .docs {
+  overflow-wrap: anywhere;
+}

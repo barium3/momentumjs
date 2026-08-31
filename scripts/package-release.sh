@@ -7,7 +7,7 @@ ROOT_DIR="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 export ROOT_DIR
 . "${SCRIPT_DIR}/lib/common.sh"
 
-DIST_DIR="${ROOT_DIR}/dist"
+DIST_DIR="${MOMENTUM_DIST_DIR:-${ROOT_DIR}/dist}"
 RELEASE_DIR="${DIST_DIR}/momentumjs"
 ARCHIVE_PATH="${DIST_DIR}/momentumjs.zip"
 

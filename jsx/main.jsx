@@ -24,4 +24,7 @@ $.evalFile(__momentumResolve("polyfills/json.jsx"));
 $.evalFile(__momentumResolve("plugin/payloadBuffer.jsx"));
 $.evalFile(__momentumResolve("plugin/runtimeFiles.jsx"));
 $.evalFile(__momentumResolve("plugin/bitmapApply.jsx"));
-$.evalFile(__momentumResolve("plugin/projectIO.jsx"));
+$.evalFile(__momentumResolve("plugin/codeSnapshot.jsx"));
+$.evalFile(__momentumResolve("plugin/projectFiles.jsx"));
+$.evalFile(__momentumResolve("plugin/debugTrace.jsx"));
+$.evalFile(__momentumResolve("plugin/fontCatalog.jsx"));

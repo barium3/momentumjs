@@ -71,14 +71,19 @@ window.momentumPluginBitmap = (function () {
       .then((writeBundleResultText) => {
         expectExtendScriptOk(writeBundleResultText, "writeMomentumBundle");
         return window.momentumPluginBridge.callExtendScript("applyMomentum", [encodedPayload]);
+      })
+      .then((applyResultText) => {
+        expectExtendScriptOk(
+          applyResultText,
+          "applyMomentum",
+        );
+        return applyResultText;
       });
   }
 
   return {
-    DEFAULT_COMP,
     RUNTIME_TARGET,
     applyRuntimeBundle,
-    expectExtendScriptOk,
     getCompConfig,
     parseApplyMomentumResult,
     reportApplyMomentumWarnings,

@@ -127,8 +127,9 @@ resolve_plugin_source() {
 
   for candidate in \
     "${ROOT_DIR}/Momentum.plugin" \
-    "${ROOT_DIR}/build-universal/Debug/Momentum.plugin" \
+    "${ROOT_DIR}/build/Momentum.plugin" \
     "${ROOT_DIR}/build/Debug/Momentum.plugin" \
+    "${ROOT_DIR}/build-universal/Debug/Momentum.plugin" \
     "${ROOT_DIR}/dist/Momentum.plugin"
   do
     if [ -d "${candidate}/Contents/MacOS" ]; then
@@ -182,6 +183,7 @@ copy_runtime_extension_tree() {
   ensure_dir "${dest_dir}"
 
   rsync -a --delete \
+    --exclude '/user/' \
     --exclude '.git' \
     --exclude '.github' \
     --exclude '.DS_Store' \
@@ -208,6 +210,48 @@ copy_runtime_extension_tree() {
     --exclude 'footage/showcase.png' \
     "${src_dir}/" \
     "${dest_dir}/"
+
+  seed_user_examples "${src_dir}" "${dest_dir}"
+}
+
+seed_user_examples() {
+  src_dir="$1"
+  dest_dir="$2"
+  source_examples_dir="${src_dir}/user/examples"
+  target_user_dir="${dest_dir}/user"
+  target_examples_dir="${target_user_dir}/examples"
+
+  ensure_dir "${target_user_dir}"
+  if [ ! -d "${source_examples_dir}" ]; then
+    return 0
+  fi
+
+  ensure_dir "${target_examples_dir}"
+  rsync -a --ignore-existing \
+    "${source_examples_dir}/" \
+    "${target_examples_dir}/"
+}
+
+remove_extension_preserving_user() {
+  target_dir="$1"
+
+  if [ ! -e "${target_dir}" ]; then
+    return 0
+  fi
+
+  if [ "${MOMENTUM_REMOVE_USER_DATA:-0}" = "1" ] || [ ! -d "${target_dir}/user" ]; then
+    rm -rf "${target_dir}"
+    echo "Removed: ${target_dir}"
+    return 0
+  fi
+
+  find "${target_dir}" \
+    -mindepth 1 \
+    -maxdepth 1 \
+    ! -name user \
+    -exec rm -rf {} \;
+  echo "Removed Momentum application files: ${target_dir}"
+  echo "Preserved user workspace: ${target_dir}/user"
 }
 
 copy_release_extension_tree() {

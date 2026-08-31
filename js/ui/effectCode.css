@@ -1,0 +1,289 @@
+#editor-container.effect-code-draft-dirty::after {
+  position: absolute;
+  inset: 0 8px 0 0;
+  z-index: 4;
+  box-sizing: border-box;
+  box-shadow: inset 0 0 12px var(--momentum-color-draft-glow);
+  content: "";
+  pointer-events: none;
+}
+
+#container.effect-code-active #file-list {
+  width: 0;
+  overflow: hidden;
+  border-right-color: transparent;
+  pointer-events: none;
+}
+
+#container.effect-code-active #file-list > * {
+  visibility: hidden;
+}
+
+.effect-code-action {
+  display: none;
+}
+
+#container.effect-code-active .effect-code-action {
+  display: flex;
+}
+
+.effect-code-exit-button,
+.effect-code-label-button {
+  width: auto;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 3px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.effect-code-exit-button {
+  min-width: 46px;
+  border: 1px solid var(--momentum-color-danger-border);
+  background-color: transparent;
+  color: var(--momentum-color-danger);
+}
+
+.effect-code-exit-button:not(:disabled):hover {
+  border-color: var(--momentum-color-danger-border-hover);
+  background-color: transparent;
+  color: var(--momentum-color-danger-hover);
+}
+
+.effect-code-exit-button:not(:disabled):active {
+  border-color: var(--momentum-color-danger-border-active);
+  background-color: transparent;
+  color: var(--momentum-color-danger-active);
+}
+
+.effect-code-exit-button:focus-visible {
+  box-shadow: 0 0 0 1px var(--momentum-color-focus);
+}
+
+.effect-code-label-button {
+  min-width: 66px;
+  border: 1px solid var(--momentum-color-border);
+  background-color: var(--momentum-color-surface);
+  color: var(--momentum-color-text);
+}
+
+.effect-code-label-button:not(:disabled):hover {
+  border-color: var(--momentum-color-border-hover);
+  background-color: var(--momentum-color-hover);
+}
+
+.effect-code-label-button:not(:disabled):active {
+  background-color: var(--momentum-color-active);
+}
+
+.effect-code-keyframe-button {
+  flex: 0 0 28px;
+}
+
+.effect-code-keyframe-diamond {
+  display: block;
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  border: 1px solid currentColor;
+  background-color: transparent;
+  transform: rotate(45deg);
+}
+
+.effect-code-keyframe-present .effect-code-keyframe-diamond {
+  background-color: currentColor;
+}
+
+.effect-code-button-label {
+  display: block;
+}
+
+#container.effect-code-active #toggleFileList,
+#container.effect-code-active #newFile,
+#container.effect-code-active #newFolder,
+#container.effect-code-active #renderModeSelect,
+#container.effect-code-active #runEditorScript {
+  display: none !important;
+}
+
+#container.effect-code-active .effect-code-action:disabled {
+  opacity: 1;
+}
+
+@media (max-width: 300px) {
+  .effect-code-exit-button {
+    min-width: 42px;
+    padding: 0 6px;
+  }
+
+  .effect-code-label-button {
+    min-width: 60px;
+    padding: 0 6px;
+  }
+}
+
+@keyframes momentum-diff-added-flash {
+  from {
+    background-color: var(--momentum-color-diff-added-flash);
+  }
+
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes momentum-diff-deleted-flash {
+  from {
+    background-color: var(--momentum-color-diff-deleted-flash);
+  }
+
+  to {
+    background-color: var(--momentum-color-diff-deleted-background);
+  }
+}
+
+.monaco-editor .effect-code-diff-green-line {
+  background-image: linear-gradient(
+    to bottom,
+    transparent calc(50% - 8px),
+    var(--momentum-color-diff-added-background) calc(50% - 8px),
+    var(--momentum-color-diff-added-background) calc(50% + 8px),
+    transparent calc(50% + 8px)
+  );
+}
+
+.monaco-editor .effect-code-diff-green-edge {
+  position: relative;
+}
+
+.monaco-editor .effect-code-diff-flash-added {
+  animation: momentum-diff-added-flash 180ms ease-out;
+}
+
+.monaco-editor .effect-code-diff-green-edge::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 3px;
+  height: 16px;
+  box-sizing: border-box;
+  background-color: var(--momentum-color-diff-added-edge);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.monaco-editor .effect-code-diff-green-tail::after {
+  display: inline-block;
+  width: 7px;
+  height: 16px;
+  background-color: var(--momentum-color-diff-added-background);
+  color: transparent;
+  content: "\00a0";
+  vertical-align: middle;
+}
+
+.effect-code-diff-deleted-zone {
+  position: relative;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: visible;
+  color: var(--momentum-color-diff-deleted-text);
+  font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  cursor: default;
+  pointer-events: auto;
+}
+
+.effect-code-diff-deleted-content {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  max-width: 100%;
+  height: 100%;
+  overflow: visible;
+  vertical-align: top;
+}
+
+.effect-code-diff-deleted-line {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  max-width: 100%;
+  height: 16px;
+  padding: 0 3px 0 0;
+  overflow: visible;
+  background-color: var(--momentum-color-diff-deleted-background);
+  line-height: 16px;
+  white-space: pre;
+  cursor: default;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.effect-code-diff-deleted-line::before {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 3px;
+  height: 16px;
+  background-color: var(--momentum-color-diff-deleted-edge);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.effect-code-diff-deleted-line.effect-code-diff-flash-deleted {
+  animation: momentum-diff-deleted-flash 180ms ease-out;
+}
+
+.effect-code-diff-restore-button {
+  display: flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #d39a95;
+  font: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: color 100ms ease, opacity 100ms ease;
+}
+
+.effect-code-diff-deleted-content:hover .effect-code-diff-restore-button:not(:disabled),
+.effect-code-diff-restore-button:focus-visible {
+  color: #f1b0aa;
+  opacity: 1;
+}
+
+.effect-code-diff-restore-button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--momentum-color-diff-deleted-edge);
+}
+
+.effect-code-diff-restore-icon {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.effect-code-diff-restore-button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .monaco-editor .effect-code-diff-flash-added,
+  .effect-code-diff-deleted-line.effect-code-diff-flash-deleted {
+    animation: none;
+  }
+}

@@ -1,13 +1,16 @@
 window.momentumPluginBridge = (function () {
   const ERROR_PREFIX = "ERROR:";
   const CEP_KEYBOARD_EVENT = "com.adobe.csxs.events.KeyboardEvent";
+  const CODE_EDITOR_OPEN_EVENT = "com.example.momentum.codeEditor.open";
 
   let csInterfaceInstance = null;
   let extendScriptReady = false;
   let extendScriptBootstrapCompleted = false;
   let extendScriptReadyCallbacks = [];
   let initialized = false;
-  let domReadyHookInstalled = false;
+  let codeEditorOpenQueue = Promise.resolve();
+  let codeEditorOpenDrainPromise = null;
+  const queuedCodeEditorOpenTokens = Object.create(null);
 
   function getCsInterface() {
     if (!csInterfaceInstance) {
@@ -42,6 +45,12 @@ window.momentumPluginBridge = (function () {
       return;
     }
     extendScriptReadyCallbacks.push(callback);
+  }
+
+  function revealInitialPanel() {
+    if (document.body && document.body.classList) {
+      document.body.classList.remove("panel-launch-pending");
+    }
   }
 
   function renderExtendScriptFailure(message) {
@@ -96,6 +105,102 @@ window.momentumPluginBridge = (function () {
     );
   }
 
+  function deliverEffectCodeSession(sessionToken) {
+    if (
+      !window.effectCodeManager ||
+      typeof window.effectCodeManager.open !== "function"
+    ) {
+      return Promise.reject(new Error("The shared Effect Code manager is unavailable."));
+    }
+    return Promise.resolve(window.effectCodeManager.open(sessionToken))
+      .then((opened) => {
+        if (!opened) {
+          return false;
+        }
+        return callExtendScript(
+          "momentumAcknowledgeCodeEditorOpenIntent",
+          [encodeURIComponent(sessionToken)],
+        ).then(() => {
+          setTimeout(drainPendingCodeEditorOpen, 0);
+          return true;
+        });
+      });
+  }
+
+  function queueEffectCodeSession(sessionToken) {
+    const token = String(sessionToken || "");
+    if (!token) {
+      return Promise.resolve(false);
+    }
+    if (queuedCodeEditorOpenTokens[token]) {
+      return queuedCodeEditorOpenTokens[token];
+    }
+    const delivery = new Promise((resolve) => {
+      onExtendScriptReady(() => {
+        const run = codeEditorOpenQueue
+          .then(() => deliverEffectCodeSession(token))
+          .catch((error) => {
+            console.warn("Failed to deliver Effect Code session:", error);
+            return false;
+          });
+        codeEditorOpenQueue = run.then(() => undefined);
+        run.then((opened) => {
+          delete queuedCodeEditorOpenTokens[token];
+          resolve(opened);
+        });
+      });
+    });
+    queuedCodeEditorOpenTokens[token] = delivery;
+    return delivery;
+  }
+
+  function drainPendingCodeEditorOpen() {
+    if (codeEditorOpenDrainPromise) {
+      return codeEditorOpenDrainPromise;
+    }
+    const drainPromise = callExtendScript(
+      "momentumPeekCodeEditorOpenIntent",
+      [],
+    )
+      .then((sessionToken) => {
+        return sessionToken
+          ? queueEffectCodeSession(sessionToken)
+          : false;
+      })
+      .catch((error) => {
+        console.warn("Failed to read Effect Code open intent:", error);
+        return false;
+      })
+      .finally(() => {
+        if (codeEditorOpenDrainPromise === drainPromise) {
+          codeEditorOpenDrainPromise = null;
+        }
+      });
+    codeEditorOpenDrainPromise = drainPromise;
+    return drainPromise;
+  }
+
+  function claimOpenEffectCodePanel(sessionToken) {
+    const token = String(sessionToken || "");
+    if (!token) {
+      return;
+    }
+    onExtendScriptReady(() => {
+      callExtendScript(
+        "momentumClaimCodeEditorPanel",
+        [encodeURIComponent(token)],
+      ).catch((error) => {
+        console.warn("Failed to claim the open Effect Code panel:", error);
+      });
+    });
+  }
+
+  function openEffectCodeSession(event) {
+    const sessionToken = String(event && event.data || "");
+    claimOpenEffectCodePanel(sessionToken);
+    queueEffectCodeSession(sessionToken);
+  }
+
   function ensurePersistentStorage() {
     if (window.persistentStorage) {
       return;
@@ -120,8 +225,8 @@ window.momentumPluginBridge = (function () {
        try {
          $.global.__momentumExtensionPath = "${escapeForEvalScript(extensionPath)}";
          $.evalFile("${escapeForEvalScript(extensionPath)}/jsx/main.jsx");
-         if (typeof getFileList !== "function") {
-           __momentumBootstrapResult = "missing:getFileList";
+         if (typeof projectFileCommand !== "function") {
+           __momentumBootstrapResult = "missing:projectFileCommand";
          }
        } catch (error) {
          __momentumBootstrapResult = "error:" + error.toString();
@@ -135,25 +240,27 @@ window.momentumPluginBridge = (function () {
         }
         window.__momentumExtendScriptBootstrapError = result || "unknown";
         console.error("ExtendScript bootstrap failed:", result);
+        renderExtendScriptFailure(window.__momentumExtendScriptBootstrapError);
+        revealInitialPanel();
       },
     );
   }
 
   function installDomReadyHook() {
-    if (domReadyHookInstalled) {
-      return;
-    }
-    domReadyHookInstalled = true;
-
     function onDomReady() {
       onExtendScriptReady(() => {
-        getCsInterface().evalScript("typeof getFileList === 'function'", (result) => {
-          if (result === "true") {
-            window.fileManager.loadFileList();
-          } else {
-            renderExtendScriptFailure(window.__momentumExtendScriptBootstrapError);
-          }
-        });
+        getCsInterface().evalScript(
+          "typeof projectFileCommand === 'function'",
+          (result) => {
+            if (result === "true") {
+              window.fileManager.loadFileList();
+            } else {
+              renderExtendScriptFailure(
+                window.__momentumExtendScriptBootstrapError,
+              );
+            }
+          },
+        );
       });
 
       let bootstrapPollCount = 0;
@@ -164,27 +271,31 @@ window.momentumPluginBridge = (function () {
           return;
         }
 
-        getCsInterface().evalScript("typeof getFileList === 'function'", (result) => {
-          if (result === "true") {
-            flushExtendScriptReady();
-            return;
-          }
+        getCsInterface().evalScript(
+          "typeof projectFileCommand === 'function'",
+          (result) => {
+            if (result === "true") {
+              flushExtendScriptReady();
+              return;
+            }
 
-          bootstrapPollCount += 1;
-          if (extendScriptReady) {
-            return;
-          }
+            bootstrapPollCount += 1;
+            if (extendScriptReady) {
+              return;
+            }
 
-          if (bootstrapPollCount >= bootstrapPollMax) {
-            const timeoutReason = extendScriptBootstrapCompleted
-              ? window.__momentumExtendScriptBootstrapError
-              : "timeout:bootstrap";
-            renderExtendScriptFailure(timeoutReason);
-            return;
-          }
+            if (bootstrapPollCount >= bootstrapPollMax) {
+              const timeoutReason = extendScriptBootstrapCompleted
+                ? window.__momentumExtendScriptBootstrapError
+                : "timeout:bootstrap";
+              renderExtendScriptFailure(timeoutReason);
+              revealInitialPanel();
+              return;
+            }
 
-          setTimeout(pollExtendScriptReady, 500);
-        });
+            setTimeout(pollExtendScriptReady, 500);
+          },
+        );
       }
 
       pollExtendScriptReady();
@@ -351,17 +462,17 @@ window.momentumPluginBridge = (function () {
     getCsInterface();
     registerMomentumShortcutInterest();
     getCsInterface().addEventListener(CEP_KEYBOARD_EVENT, forwardCepKeyboardEvent);
+    getCsInterface().addEventListener(CODE_EDITOR_OPEN_EVENT, openEffectCodeSession);
+    onExtendScriptReady(() => {
+      drainPendingCodeEditorOpen().finally(revealInitialPanel);
+    });
     bootstrapExtendScript();
     installDomReadyHook();
   }
 
   return {
     init,
-    onExtendScriptReady,
-    renderExtendScriptFailure,
     callExtendScript,
-    toExtendScriptStringExpr,
-    evalExtendScript,
     loadMomentumLibrary,
     sendPayload,
   };

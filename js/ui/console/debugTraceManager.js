@@ -1,16 +1,18 @@
 window.debugTraceManager = (function () {
-  const TRACE_FAST_POLL_MS = 250;
-  const TRACE_MEDIUM_POLL_MS = 500;
-  const TRACE_IDLE_POLL_MS = 1200;
-  const FRAME_POLL_MS = 180;
+  "use strict";
+
+  const TRACE_FAST_POLL_MS = 100;
+  const TRACE_MEDIUM_POLL_MS = 250;
+  const TRACE_IDLE_POLL_MS = 750;
+  const TIMELINE_POLL_MS = 180;
 
   let tracePollTimer = 0;
-  let framePollTimer = 0;
   let pollToken = 0;
   let activeSession = null;
   let pendingFragment = "";
   let initialized = false;
   let consecutiveIdleTracePolls = 0;
+  let externalTimelineSource = false;
 
   function init() {
     if (initialized) {
@@ -23,10 +25,13 @@ window.debugTraceManager = (function () {
         return;
       }
       clearScheduledTracePoll();
-      clearScheduledFramePoll();
-      if (!document.hidden) {
-        scheduleTracePoll(0);
-        scheduleFramePoll(0);
+      timelineClock.stop();
+      if (document.hidden) {
+        return;
+      }
+      scheduleTracePoll(0);
+      if (!externalTimelineSource) {
+        timelineClock.start();
       }
     });
   }
@@ -38,43 +43,44 @@ window.debugTraceManager = (function () {
     }
   }
 
-  function clearScheduledFramePoll() {
-    if (framePollTimer) {
-      window.clearTimeout(framePollTimer);
-      framePollTimer = 0;
-    }
-  }
-
   function stop() {
     pollToken += 1;
     clearScheduledTracePoll();
-    clearScheduledFramePoll();
+    timelineClock.stop();
     activeSession = null;
     pendingFragment = "";
     consecutiveIdleTracePolls = 0;
   }
 
+  function stopAndClear() {
+    stop();
+    window.consoleManager.clearConsole();
+  }
+
   function startSession(sessionInfo) {
     stop();
 
-    if (!sessionInfo || !sessionInfo.filePath) {
+    const compId = Number(sessionInfo && sessionInfo.compId);
+    if (!sessionInfo || !sessionInfo.filePath ||
+        !Number.isFinite(compId) || compId <= 0) {
       return;
     }
 
     activeSession = {
-      compName: sessionInfo.compName ? String(sessionInfo.compName) : "",
+      compId,
       currentFrame: 0,
       filePath: String(sessionInfo.filePath),
       frameLogs: Object.create(null),
       lastReplayedFrame: 0,
       lastReplayedSignature: "",
       offset: 0,
-      sessionId: sessionInfo.sessionId ? String(sessionInfo.sessionId) : "",
     };
 
     if (!document.hidden) {
       scheduleTracePoll(0);
-      scheduleFramePoll(0);
+      if (!externalTimelineSource) {
+        timelineClock.start();
+      }
     }
   }
 
@@ -84,14 +90,6 @@ window.debugTraceManager = (function () {
       return;
     }
     tracePollTimer = window.setTimeout(pollActiveSessionTrace, Math.max(0, delayMs || 0));
-  }
-
-  function scheduleFramePoll(delayMs) {
-    clearScheduledFramePoll();
-    if (!activeSession) {
-      return;
-    }
-    framePollTimer = window.setTimeout(pollActiveTimelineFrame, Math.max(0, delayMs || 0));
   }
 
   function pollActiveSessionTrace() {
@@ -105,113 +103,64 @@ window.debugTraceManager = (function () {
 
     const token = pollToken;
     const session = activeSession;
-
-    window.momentumPluginBridge
-      .callExtendScript("readFileSegment", [session.filePath, String(session.offset)])
-      .then((rawResult) => {
-        if (!isSessionCurrent(token, session)) {
-          return;
-        }
-
-        const result = parseJsonResult(rawResult);
-        if (!result || result.ok !== true) {
-          consecutiveIdleTracePolls += 1;
-          scheduleTracePoll(TRACE_IDLE_POLL_MS);
-          return;
-        }
-
-        if (result.exists !== true) {
-          consecutiveIdleTracePolls += 1;
-          scheduleTracePoll(TRACE_MEDIUM_POLL_MS);
-          return;
-        }
-
-        if (typeof result.startOffset === "number" && result.startOffset === 0 && session.offset > 0) {
-          pendingFragment = "";
-        }
-
-        const chunkText = typeof result.text === "string" ? result.text : "";
-        session.offset =
-          typeof result.nextOffset === "number"
-            ? result.nextOffset
-            : session.offset + chunkText.length;
-
-        const flushResult = flushChunk(session, chunkText);
-        consecutiveIdleTracePolls = flushResult.hadLines ? 0 : consecutiveIdleTracePolls + 1;
-
-        if (flushResult.hadLines) {
-          if (session.currentFrame <= 0 && flushResult.lastFrame > 0) {
-            session.currentFrame = flushResult.lastFrame;
-          }
-          scheduleTracePoll(TRACE_FAST_POLL_MS);
-          return;
-        }
-
-        scheduleTracePoll(consecutiveIdleTracePolls >= 4 ? TRACE_IDLE_POLL_MS : TRACE_MEDIUM_POLL_MS);
-      })
-      .catch(() => {
-        if (!isSessionCurrent(token, session)) {
-          return;
-        }
-        consecutiveIdleTracePolls += 1;
-        scheduleTracePoll(TRACE_IDLE_POLL_MS);
-      });
-  }
-
-  function pollActiveTimelineFrame() {
-    if (!activeSession) {
+    const fileText = readTraceFile(session.filePath);
+    if (!isSessionCurrent(token, session)) {
       return;
     }
-
-    if (document.hidden) {
+    if (fileText === null) {
+      consecutiveIdleTracePolls += 1;
+      scheduleTracePoll(TRACE_IDLE_POLL_MS);
       return;
     }
+    if (fileText.length < session.offset) {
+      session.offset = 0;
+      session.frameLogs = Object.create(null);
+      session.lastReplayedFrame = 0;
+      session.lastReplayedSignature = "";
+      pendingFragment = "";
+    }
 
-    const token = pollToken;
-    const session = activeSession;
+    const chunkText = fileText.slice(session.offset);
+    session.offset = fileText.length;
+    const flushResult = flushChunk(session, chunkText);
+    consecutiveIdleTracePolls = flushResult.hadLines
+      ? 0
+      : consecutiveIdleTracePolls + 1;
 
-    window.momentumPluginBridge
-      .callExtendScript("getActiveCompTimeInfo", [])
-      .then((rawResult) => {
-        if (!isSessionCurrent(token, session)) {
-          return;
-        }
-
-        const result = parseJsonResult(rawResult);
-        if (!result || result.ok !== true) {
-          scheduleFramePoll(FRAME_POLL_MS);
-          return;
-        }
-
-        if (result.active !== true) {
-          scheduleFramePoll(FRAME_POLL_MS);
-          return;
-        }
-
-        const compName = result.compName ? String(result.compName) : "";
-        if (session.compName && compName && session.compName !== compName) {
-          scheduleFramePoll(FRAME_POLL_MS);
-          return;
-        }
-
-        const currentFrame = normalizeFrameNumber(result.currentFrame);
-        if (currentFrame > 0 && currentFrame !== session.currentFrame) {
-          session.currentFrame = currentFrame;
-          replayFrameLogs(session, currentFrame);
-        }
-
-        scheduleFramePoll(FRAME_POLL_MS);
-      })
-      .catch(() => {
-        if (!isSessionCurrent(token, session)) {
-          return;
-        }
-        scheduleFramePoll(FRAME_POLL_MS);
-      });
+    if (flushResult.hadLines) {
+      if (session.currentFrame <= 0 && flushResult.lastFrame > 0) {
+        session.currentFrame = flushResult.lastFrame;
+      }
+      scheduleTracePoll(TRACE_FAST_POLL_MS);
+      return;
+    }
+    scheduleTracePoll(
+      consecutiveIdleTracePolls >= 4
+        ? TRACE_IDLE_POLL_MS
+        : TRACE_MEDIUM_POLL_MS,
+    );
   }
 
   function isSessionCurrent(token, session) {
     return token === pollToken && !!activeSession && activeSession.filePath === session.filePath;
+  }
+
+  function readTraceFile(filePath) {
+    if (
+      !window.cep ||
+      !window.cep.fs ||
+      typeof window.cep.fs.readFile !== "function"
+    ) {
+      return null;
+    }
+    try {
+      const result = window.cep.fs.readFile(String(filePath || ""));
+      return result && Number(result.err) === 0 && typeof result.data === "string"
+        ? result.data
+        : null;
+    } catch (_readTraceError) {
+      return null;
+    }
   }
 
   function parseJsonResult(rawResult) {
@@ -222,10 +171,119 @@ window.debugTraceManager = (function () {
     }
   }
 
+  function readHostTimelineSample() {
+    return window.momentumPluginBridge
+      .callExtendScript("getActiveCompTimeInfo", [])
+      .then(function (rawResult) {
+        const result = parseJsonResult(rawResult);
+        if (!result || result.ok !== true) {
+          throw new Error("The active composition time is unavailable.");
+        }
+        if (result.active !== true) {
+          return { active: false };
+        }
+        return {
+          active: true,
+          compId: Number(result.compId),
+          duration: Number(result.duration),
+          frameDuration: Number(result.frameDuration),
+          timeSeconds: Number(result.timeSeconds),
+          workAreaDuration: Number(result.workAreaDuration),
+          workAreaStart: Number(result.workAreaStart),
+        };
+      });
+  }
+
+  function applyTimelineSample(sample) {
+    const session = activeSession;
+    if (document.hidden || !session || !sample) {
+      return;
+    }
+    const sampleCompId = Number(sample.compId);
+    if (
+      !externalTimelineSource &&
+      (sample.active !== true || !Number.isFinite(sampleCompId) ||
+        sampleCompId !== session.compId)
+    ) {
+      stopAndClear();
+      return;
+    }
+    if (sample.active !== true || !Number.isFinite(sampleCompId) ||
+        sampleCompId !== session.compId) {
+      return;
+    }
+    const frameDuration = Number(sample.frameDuration);
+    if (!Number.isFinite(frameDuration) || frameDuration <= 0) {
+      return;
+    }
+    const currentFrame = normalizeFrameNumber(
+      Math.floor(Number(sample.timeSeconds) / frameDuration) + 1,
+    );
+    if (currentFrame > 0 && currentFrame !== session.currentFrame) {
+      session.currentFrame = currentFrame;
+      replayFrameLogs(session, currentFrame);
+    }
+  }
+
+  const timelineClock = window.momentumTimelineClock.createClock({
+    isActive: function () {
+      return !!activeSession && !externalTimelineSource && !document.hidden;
+    },
+    isPaused: function () {
+      return document.hidden;
+    },
+    onSample: applyTimelineSample,
+    readSample: readHostTimelineSample,
+    sampleDelayMs: TIMELINE_POLL_MS,
+  });
+
+  function resetReplayCursor() {
+    if (!activeSession) {
+      return;
+    }
+    activeSession.currentFrame = 0;
+    activeSession.lastReplayedFrame = 0;
+    activeSession.lastReplayedSignature = "";
+  }
+
+  function useExternalClock(enabled) {
+    const nextEnabled = enabled === true;
+    if (externalTimelineSource === nextEnabled) {
+      return;
+    }
+    externalTimelineSource = nextEnabled;
+    timelineClock.stop();
+    resetReplayCursor();
+    if (!externalTimelineSource && activeSession && !document.hidden) {
+      timelineClock.start();
+    }
+  }
+
+  function updateTimelineSample(sample) {
+    if (!externalTimelineSource) {
+      return;
+    }
+    applyTimelineSample(sample);
+  }
+
+  function ensureSession(sessionInfo) {
+    const compId = Number(sessionInfo && sessionInfo.compId);
+    if (!sessionInfo || !sessionInfo.filePath ||
+        !Number.isFinite(compId) || compId <= 0) {
+      return false;
+    }
+    const filePath = String(sessionInfo.filePath);
+    if (activeSession && activeSession.filePath === filePath &&
+        activeSession.compId === compId) {
+      return true;
+    }
+    startSession(sessionInfo);
+    return !!activeSession;
+  }
+
   function flushChunk(session, chunkText) {
     if (!chunkText) {
       return {
-        changedFrames: Object.create(null),
         hadLines: false,
         lastFrame: 0,
       };
@@ -237,7 +295,6 @@ window.debugTraceManager = (function () {
     const parts = normalized.split("\n");
     pendingFragment = endsWithNewline ? "" : parts.pop();
 
-    const changedFrames = Object.create(null);
     let hadLines = false;
     let lastFrame = 0;
 
@@ -247,17 +304,18 @@ window.debugTraceManager = (function () {
         continue;
       }
       const parsed = parseTraceLine(line);
+      if (!parsed) {
+        continue;
+      }
       storeTraceEntry(session, parsed);
       appendEntry(parsed);
       hadLines = true;
       if (parsed.frame > 0) {
-        changedFrames[String(parsed.frame)] = true;
         lastFrame = parsed.frame;
       }
     }
 
     return {
-      changedFrames,
       hadLines,
       lastFrame,
     };
@@ -269,11 +327,7 @@ window.debugTraceManager = (function () {
       /^frame=(\d+)\s+time=([^\s]+)\s+level=([^\s]+)(?:\s+session=([^\s]+))?\s+message=(.*)$/,
     );
     if (!match) {
-      return {
-        frame: 0,
-        level: "log",
-        text,
-      };
+      return null;
     }
 
     return {
@@ -351,28 +405,16 @@ window.debugTraceManager = (function () {
   }
 
   function appendExternalLine(text, level) {
-    if (
-      window.consoleManager &&
-      typeof window.consoleManager.appendExternalLine === "function"
-    ) {
-      window.consoleManager.appendExternalLine(text, level);
-      return;
-    }
-
-    const output = document.getElementById("console-output");
-    if (output) {
-      const line = document.createElement("div");
-      line.className = "console-line";
-      line.textContent = String(text == null ? "" : text);
-      output.appendChild(line);
-      output.scrollTop = output.scrollHeight;
-    }
+    window.consoleManager.appendExternalLine(text, level);
   }
 
-  init();
-
   return {
+    ensureSession,
+    init,
     startSession,
     stop,
+    stopAndClear,
+    updateTimelineSample,
+    useExternalClock,
   };
 })();

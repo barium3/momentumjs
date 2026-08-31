@@ -335,7 +335,6 @@ window.compilerCallValidationPass = (function () {
     }
 
   }
-
   function validateMemberCallExpression(node, scope, globals, diagnostics, reported) {
     var member = node.callee;
     if (!member || member.computed || !member.property || member.property.type !== "Identifier") {

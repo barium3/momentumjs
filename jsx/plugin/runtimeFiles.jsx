@@ -1,28 +1,28 @@
-var __momentumBitmapInstanceIdCounter =
-  $.global.__momentumBitmapInstanceIdCounter || 1000;
-$.global.__momentumBitmapInstanceIdCounter = __momentumBitmapInstanceIdCounter;
-var __momentumBitmapInstanceIdSeeded = false;
+var __momentumBitmapCreationTokenCounter =
+  $.global.__momentumBitmapCreationTokenCounter || 1000;
+$.global.__momentumBitmapCreationTokenCounter = __momentumBitmapCreationTokenCounter;
+var __momentumBitmapCreationTokenSeeded = false;
 
-function _momentumSeedBitmapInstanceIdCounter() {
-  if (__momentumBitmapInstanceIdSeeded) {
+function _momentumSeedBitmapCreationTokenCounter() {
+  if (__momentumBitmapCreationTokenSeeded) {
     return;
   }
-  __momentumBitmapInstanceIdSeeded = true;
+  __momentumBitmapCreationTokenSeeded = true;
 
   var runtimeFolder = _momentumGetRuntimeFolder();
-  var instancesFolder = runtimeFolder
-    ? new Folder(runtimeFolder.fsName + "/instances")
+  var creationTransportsFolder = runtimeFolder
+    ? new Folder(runtimeFolder.fsName + "/creation-transports")
     : null;
-  if (!instancesFolder || !instancesFolder.exists) {
+  if (!creationTransportsFolder || !creationTransportsFolder.exists) {
     return;
   }
 
   var entries = [];
   try {
-    entries = instancesFolder.getFiles(function (entry) {
+    entries = creationTransportsFolder.getFiles(function (entry) {
       return entry instanceof Folder;
     });
-  } catch (_instanceSeedListError) {
+  } catch (_creationTransportSeedListError) {
     entries = [];
   }
 
@@ -30,39 +30,39 @@ function _momentumSeedBitmapInstanceIdCounter() {
     var parsedId = Math.floor(Number(entries[index].name));
     if (
       isFinite(parsedId) &&
-      parsedId > __momentumBitmapInstanceIdCounter &&
+      parsedId > __momentumBitmapCreationTokenCounter &&
       parsedId < 2000000000
     ) {
-      __momentumBitmapInstanceIdCounter = parsedId;
+      __momentumBitmapCreationTokenCounter = parsedId;
     }
   }
-  $.global.__momentumBitmapInstanceIdCounter = __momentumBitmapInstanceIdCounter;
+  $.global.__momentumBitmapCreationTokenCounter = __momentumBitmapCreationTokenCounter;
 }
 
-function _momentumNextBitmapInstanceId() {
-  _momentumSeedBitmapInstanceIdCounter();
+function _momentumNextBitmapCreationToken() {
+  _momentumSeedBitmapCreationTokenCounter();
   var runtimeFolder = _momentumGetRuntimeFolder();
 
   for (var attempt = 0; attempt < 100000; attempt++) {
-    __momentumBitmapInstanceIdCounter += 1;
-    if (__momentumBitmapInstanceIdCounter > 2000000000) {
-      __momentumBitmapInstanceIdCounter = 1001;
+    __momentumBitmapCreationTokenCounter += 1;
+    if (__momentumBitmapCreationTokenCounter > 2000000000) {
+      __momentumBitmapCreationTokenCounter = 1001;
     }
 
     var candidateFolder = runtimeFolder
       ? new Folder(
           runtimeFolder.fsName +
-          "/instances/" +
-          String(__momentumBitmapInstanceIdCounter)
+          "/creation-transports/" +
+          String(__momentumBitmapCreationTokenCounter)
         )
       : null;
     if (!candidateFolder || !candidateFolder.exists) {
-      $.global.__momentumBitmapInstanceIdCounter = __momentumBitmapInstanceIdCounter;
-      return __momentumBitmapInstanceIdCounter;
+      $.global.__momentumBitmapCreationTokenCounter = __momentumBitmapCreationTokenCounter;
+      return __momentumBitmapCreationTokenCounter;
     }
   }
 
-  throw new Error("Unable to allocate a unique Momentum runtime instance id.");
+  throw new Error("Unable to allocate a unique Momentum runtime creation token.");
 }
 
 function _momentumGetRuntimeFolder() {
@@ -189,57 +189,21 @@ function _momentumWriteRuntimeFile(fileName, encodedContent) {
   });
 }
 
-function _momentumWritePendingRuntimeBundleRaw(bundleText) {
-  var runtimeFolder = _momentumGetRuntimeFolder();
-  if (!_momentumEnsureFolder(runtimeFolder)) {
-    return "Error: Cannot create Momentum runtime directory: " + runtimeFolder.fsName;
-  }
-
-  var pendingFile = new File(runtimeFolder.fsName + "/pending_sketch_bundle.json");
-  var writeError = _momentumWriteTextFileRaw(pendingFile, bundleText);
-  if (writeError) {
-    return writeError;
-  }
-
-  return "";
-}
-
-function _momentumClearPendingRuntimeBundle() {
-  var runtimeFolder = _momentumGetRuntimeFolder();
-  if (!runtimeFolder) {
-    return "Error: Cannot resolve Momentum runtime directory.";
-  }
-  var pendingFile = new File(runtimeFolder.fsName + "/pending_sketch_bundle.json");
-  if (!pendingFile.exists) {
-    return "";
-  }
-
-  try {
-    if (!pendingFile.remove() && pendingFile.exists) {
-      return "Error: Cannot remove file: " + pendingFile.fsName;
-    }
-  } catch (removeError) {
-    return "Error: Cannot remove file: " + pendingFile.fsName + " (" + removeError.toString() + ")";
-  }
-
-  return "";
-}
-
-function _momentumGetRuntimeInstanceFolder(instanceId) {
-  var safeInstanceId = Math.max(1, Math.floor(Number(instanceId) || 0));
+function _momentumGetCreationTransportFolder(creationToken) {
+  var safeCreationToken = Math.max(1, Math.floor(Number(creationToken) || 0));
   var runtimeFolder = _momentumGetRuntimeFolder();
   if (!runtimeFolder) {
     return null;
   }
-  return new Folder(runtimeFolder.fsName + "/instances/" + String(safeInstanceId));
+  return new Folder(runtimeFolder.fsName + "/creation-transports/" + String(safeCreationToken));
 }
 
-function _momentumGetRuntimeInstanceDebugTraceFile(instanceId) {
-  var instanceFolder = _momentumGetRuntimeInstanceFolder(instanceId);
-  if (!instanceFolder) {
+function _momentumGetCreationDebugTraceFile(creationToken) {
+  var creationFolder = _momentumGetCreationTransportFolder(creationToken);
+  if (!creationFolder) {
     return null;
   }
-  return new File(instanceFolder.fsName + "/debug_trace.log");
+  return new File(creationFolder.fsName + "/debug_trace.log");
 }
 
 function _momentumWriteTextFileRaw(targetFile, content) {
@@ -248,6 +212,7 @@ function _momentumWriteTextFileRaw(targetFile, content) {
   }
 
   targetFile.encoding = "UTF-8";
+  targetFile.lineFeed = "Unix";
   try {
     if (!targetFile.open("w")) {
       return "Error: Cannot open file for writing: " + targetFile.fsName;
@@ -264,21 +229,32 @@ function _momentumWriteTextFileRaw(targetFile, content) {
   return "";
 }
 
-function _momentumWriteRuntimeInstanceFilesRaw(instanceId, sourceText, bundleText) {
+function _momentumNormalizeCodeSourceText(sourceText) {
+  var source = String(sourceText == null ? "" : sourceText);
+  if (source.length > 0 && source.charCodeAt(0) === 0xFEFF) {
+    source = source.substring(1);
+  }
+  return source.replace(/\r\n?/g, "\n").replace(/\n+$/g, "");
+}
+
+function _momentumWriteCreationTransportFilesRaw(creationToken, sourceText, bundleText) {
   var runtimeFolder = _momentumGetRuntimeFolder();
   if (!_momentumEnsureFolder(runtimeFolder)) {
     return "Error: Cannot create Momentum runtime directory: " + runtimeFolder.fsName;
   }
 
-  var instanceFolder = _momentumGetRuntimeInstanceFolder(instanceId);
-  if (!_momentumEnsureFolder(instanceFolder)) {
-    return "Error: Cannot create Momentum instance runtime directory: " + (instanceFolder ? instanceFolder.fsName : "<unresolved>");
+  var creationFolder = _momentumGetCreationTransportFolder(creationToken);
+  if (!_momentumEnsureFolder(creationFolder)) {
+    return "Error: Cannot create Momentum creation transport directory: " + (creationFolder ? creationFolder.fsName : "<unresolved>");
   }
 
-  var sourceFile = new File(instanceFolder.fsName + "/sketch.js");
-  var bundleFile = new File(instanceFolder.fsName + "/sketch_bundle.json");
-  var debugTraceFile = _momentumGetRuntimeInstanceDebugTraceFile(instanceId);
-  var sourceWriteError = _momentumWriteTextFileRaw(sourceFile, sourceText);
+  var sourceFile = new File(creationFolder.fsName + "/sketch.js");
+  var bundleFile = new File(creationFolder.fsName + "/sketch_bundle.json");
+  var debugTraceFile = _momentumGetCreationDebugTraceFile(creationToken);
+  var sourceWriteError = _momentumWriteTextFileRaw(
+    sourceFile,
+    _momentumNormalizeCodeSourceText(sourceText)
+  );
   if (sourceWriteError) {
     return sourceWriteError;
   }

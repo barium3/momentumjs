@@ -1,0 +1,224 @@
+#file-list {
+  width: 200px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 0;
+  border-right: 1px solid var(--momentum-color-border);
+  background-color: transparent;
+  color: var(--momentum-color-text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+    Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  font-size: 12px;
+  user-select: none;
+}
+
+#main-content.file-list-collapsed #file-list {
+  width: 0;
+  overflow: hidden;
+  border-right-color: transparent;
+}
+
+#main-content.file-list-collapsed #file-list > * {
+  visibility: hidden;
+}
+
+.no-files-hint {
+  padding: 12px;
+  color: #888888;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.no-files-hint small {
+  color: #666666;
+}
+
+.file,
+.folder {
+  cursor: pointer;
+}
+
+.file-item-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  margin-right: 0;
+  padding-left: 0;
+  overflow: hidden;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file.dragging > .file-item-content,
+.folder.dragging > .file-item-content {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+.file-item-content.drop-before::after,
+.file-item-content.drop-after::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 3;
+  height: 1px;
+  background-color: #777775;
+  content: "";
+  pointer-events: none;
+}
+
+.file-item-content.drop-before::after {
+  top: 0;
+}
+
+.file-item-content.drop-after::after {
+  bottom: 0;
+}
+
+#file-list.external-drop-root,
+.children.external-drop-root {
+  background-color: #222221;
+  box-shadow: inset 0 0 0 1px #4c4c4a;
+}
+
+.file .file-item-content:hover,
+.folder .file-item-content:hover {
+  background-color: var(--momentum-color-row-hover);
+}
+
+.file.selected > .file-item-content,
+.folder.selected > .file-item-content {
+  background-color: var(--momentum-color-selected);
+}
+
+.file > .file-item-content.drop-into,
+.folder > .file-item-content.drop-into {
+  background-color: #30302f;
+  box-shadow: inset 0 0 0 1px var(--momentum-color-focus);
+}
+
+.file-item-content:focus {
+  outline: none;
+}
+
+.file-item-content:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--momentum-color-focus);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--momentum-color-text);
+  font-size: 9px;
+}
+
+.toggle.empty {
+  visibility: hidden;
+}
+
+.icon {
+  width: 16px;
+  margin-right: 4px;
+  color: var(--momentum-color-text);
+  text-align: center;
+}
+
+.icon i {
+  font-size: 12px;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delete-entry-button {
+  display: flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0 5px 0 auto;
+  padding: 0;
+  visibility: hidden;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: #747472;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: none;
+}
+
+.file .file-item-content:hover .delete-entry-button,
+.folder .file-item-content:hover .delete-entry-button,
+.delete-entry-button:focus {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.delete-entry-button:not(:disabled):hover {
+  background-color: #111110;
+  color: #aaaaaa;
+}
+
+.delete-entry-button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--momentum-color-focus);
+}
+
+.delete-entry-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.delete-entry-button i {
+  font-size: 10px;
+}
+
+.file-item-content.renaming .delete-entry-button {
+  display: none;
+}
+
+.new-item-input-container {
+  margin-bottom: 4px;
+}
+
+.file-name-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: 18px;
+  margin-right: 4px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 2px;
+  outline: none;
+  background-color: var(--momentum-color-background);
+  color: var(--momentum-color-text);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.file-name-input:focus {
+  border: none;
+}
+
+.file.pending .file-name-input {
+  opacity: 1;
+}
+
+.file-name-input::placeholder {
+  color: transparent;
+}

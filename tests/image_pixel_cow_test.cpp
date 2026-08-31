@@ -1,7 +1,7 @@
 #include <cassert>
 #include <vector>
 
-#include "../src/plugin/model/momentum_types.h"
+#include "scene/types.h"
 
 int main() {
   using namespace momentum;

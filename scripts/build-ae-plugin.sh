@@ -9,7 +9,7 @@ PLUGIN_BINARY="${PLUGIN_DIR}/Contents/MacOS/Momentum"
 FRAMEWORKS_DIR="${PLUGIN_DIR}/Contents/Frameworks"
 RESOURCE_DIR="${PLUGIN_DIR}/Contents/Resources"
 RESOURCE_FILE="${RESOURCE_DIR}/Momentum.rsrc"
-PIPL_FILE="${ROOT_DIR}/src/plugin/MomentumPiPL.r"
+PIPL_FILE="${ROOT_DIR}/src/plugin/host/resources/MomentumPiPL.r"
 SEEN_FILE=""
 
 cleanup() {
@@ -127,6 +127,7 @@ for dylib in "${FRAMEWORKS_DIR}"/*.dylib; do
 done
 
 xcrun Rez -useDF -d __MACH__ \
+  -i "${ROOT_DIR}/src/plugin/host" \
   -i "${AE_SDK_ROOT}/Examples/Headers" \
   -i "${AE_SDK_ROOT}/Examples/Util" \
   -i "${AE_SDK_ROOT}/Examples/Resources" \

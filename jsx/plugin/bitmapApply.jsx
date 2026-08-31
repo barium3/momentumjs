@@ -46,6 +46,42 @@ function _momentumReadNumber(value, fallbackValue) {
   return parsed;
 }
 
+function _momentumAppendBitmapApplyDiagnostic(creationToken, stage, detail) {
+  var traceFile =
+    typeof _momentumGetCreationDebugTraceFile === "function"
+      ? _momentumGetCreationDebugTraceFile(creationToken)
+      : null;
+  if (!traceFile) {
+    return;
+  }
+
+  traceFile.encoding = "UTF-8";
+  try {
+    if (!traceFile.open("a")) {
+      return;
+    }
+    var safeDetail = String(detail == null ? "" : detail)
+      .replace(/\r/g, " ")
+      .replace(/\n/g, " ");
+    traceFile.writeln(
+      "timeMs=" +
+        String(new Date().getTime()) +
+        " event=bitmap-apply" +
+        " creationToken=" +
+        String(creationToken) +
+        " stage=" +
+        String(stage || "unknown") +
+        " detail=" +
+        safeDetail
+    );
+    traceFile.close();
+  } catch (_bitmapApplyDiagnosticError) {
+    try {
+      traceFile.close();
+    } catch (_bitmapApplyDiagnosticCloseError) {}
+  }
+}
+
 function _momentumGetEffectParade(layer) {
   if (!layer) {
     return null;
@@ -158,9 +194,18 @@ function _momentumSelectLayerAndEffect(comp, layer, effect) {
 
 var _MOMENTUM_CONTROLLER_SLOT_COUNT = 16;
 var _MOMENTUM_NATIVE_CONTROLLER_PARAMS_PER_SLOT = 7;
+var _MOMENTUM_NATIVE_CODE_SNAPSHOT_PARAM_INDEX = 2;
+var _MOMENTUM_NATIVE_RESTART_CUE_PARAM_INDEX = 3;
+var _MOMENTUM_NATIVE_CONTROLLER_SLOT_BASE_INDEX = 4;
+var _MOMENTUM_NATIVE_CODE_COMMIT_PARAM_INDEX =
+  _MOMENTUM_NATIVE_CONTROLLER_SLOT_BASE_INDEX +
+  (_MOMENTUM_CONTROLLER_SLOT_COUNT * _MOMENTUM_NATIVE_CONTROLLER_PARAMS_PER_SLOT);
+var _MOMENTUM_NATIVE_DEFAULT_CODE_PARAM_INDEX =
+  _MOMENTUM_NATIVE_CODE_COMMIT_PARAM_INDEX + 1;
 
 function _momentumControllerSlotParamBaseIndex(slotIndex) {
-  return 3 + (slotIndex * _MOMENTUM_NATIVE_CONTROLLER_PARAMS_PER_SLOT);
+  return _MOMENTUM_NATIVE_CONTROLLER_SLOT_BASE_INDEX +
+    (slotIndex * _MOMENTUM_NATIVE_CONTROLLER_PARAMS_PER_SLOT);
 }
 
 function _momentumPointControllerParamIndex(slotIndex) {
@@ -447,7 +492,6 @@ function applyMomentum(encodedPayload) {
   var height = Math.max(1, Math.floor(_momentumReadNumber(compInfo.height, 100)));
   var frameRate = Math.max(1, _momentumReadNumber(compInfo.frameRate, 30));
   var duration = Math.max(0.1, _momentumReadNumber(compInfo.duration, 10));
-  var revision = Math.max(0, Math.floor(_momentumReadNumber(payload && payload.revision, 0)));
   var controllerConfig =
     payload && payload.controller && payload.controller.configs instanceof Array
       ? payload.controller.configs
@@ -473,22 +517,45 @@ function applyMomentum(encodedPayload) {
       return "Error: Failed to find or create Momentum bitmap layer.";
     }
 
-    if (typeof _momentumClearPendingRuntimeBundle === "function") {
-      _momentumClearPendingRuntimeBundle();
+    // Write the one-shot creation transport before adding the Effect. Once
+    // Creation Token is bound, native code promotes this document into AE-owned
+    // Code and Default Code parameter streams.
+    var creationToken = _momentumNextBitmapCreationToken();
+    var debugTracePath = "";
+    var debugSessionLabel = String(creationToken);
+    var debugTraceFile =
+      typeof _momentumGetCreationDebugTraceFile === "function"
+        ? _momentumGetCreationDebugTraceFile(creationToken)
+        : null;
+    if (debugTraceFile) {
+      debugTracePath = String(debugTraceFile.fsName || "").replace(/\\/g, "/");
     }
 
-    if (typeof _momentumWritePendingRuntimeBundleRaw === "function") {
-      var pendingBundle = JSON.parse(JSON.stringify(payload || {}));
-      try {
-        delete pendingBundle.runtimeSource;
-      } catch (_deletePendingRuntimeSourceError) {}
-      var pendingWriteError = _momentumWritePendingRuntimeBundleRaw(
-        JSON.stringify(pendingBundle, null, 2)
-      );
-      if (pendingWriteError) {
-        return String(pendingWriteError);
-      }
+    var creationBundle = JSON.parse(JSON.stringify(payload || {}));
+    try {
+      delete creationBundle.runtimeSource;
+    } catch (_deleteRuntimeSourceError) {}
+    creationBundle.sourcePath = "creation-transports/" + String(creationToken) + "/sketch.js";
+    creationBundle.debugTracePath = "creation-transports/" + String(creationToken) + "/debug_trace.log";
+    if (!runtimeSource || typeof _momentumWriteCreationTransportFilesRaw !== "function") {
+      return "Error: Momentum Bitmap runtime source transport is unavailable.";
     }
+    var creationWriteError = _momentumWriteCreationTransportFilesRaw(
+      creationToken,
+      runtimeSource,
+      JSON.stringify(creationBundle, null, 2)
+    );
+    if (creationWriteError) {
+      return String(creationWriteError);
+    }
+    _momentumAppendBitmapApplyDiagnostic(
+      creationToken,
+      "transport-written",
+      "sourceBytes=" +
+        String(runtimeSource.length) +
+        " bundleBytes=" +
+        String(JSON.stringify(creationBundle).length)
+    );
 
     try {
       layer.startTime = 0;
@@ -499,6 +566,11 @@ function applyMomentum(encodedPayload) {
 
     var effect = _momentumFindOrAddMomentumEffect(layer);
     if (!effect) {
+      _momentumAppendBitmapApplyDiagnostic(
+        creationToken,
+        "effect-add-failed",
+        String(_momentumFindOrAddMomentumEffect.lastError || "Unknown error.")
+      );
       try {
         $.writeln(
           "Momentum addProperty failed: " +
@@ -510,49 +582,68 @@ function applyMomentum(encodedPayload) {
         "After Effects recognized the effect, but the installed plugin failed to initialize."
       );
     }
+    _momentumAppendBitmapApplyDiagnostic(
+      creationToken,
+      "effect-added",
+      "numProperties=" + String(effect.numProperties)
+    );
 
-    var revisionProp = effect.property("Revision") || effect.property(1);
-    var instanceProp = effect.property("Instance ID") || effect.property(2);
-    if (!revisionProp || !instanceProp) {
-      return "Error: Momentum effect parameters are unavailable.";
-    }
-
-    // applyMomentum always creates a new composition/effect. Give that effect
-    // a fresh transport id instead of accepting sequence/plugin defaults that
-    // may have been copied or regenerated in another AE session.
-    var instanceId = _momentumNextBitmapInstanceId();
-
-    var debugTracePath = "";
-    var debugSessionId = String(instanceId);
-    var debugTraceFile =
-      typeof _momentumGetRuntimeInstanceDebugTraceFile === "function"
-        ? _momentumGetRuntimeInstanceDebugTraceFile(instanceId)
-        : null;
-    if (debugTraceFile) {
-      debugTracePath = String(debugTraceFile.fsName || "").replace(/\\/g, "/");
-    }
-
-    if (runtimeSource && typeof _momentumWriteRuntimeInstanceFilesRaw === "function") {
-      var instanceBundle = JSON.parse(JSON.stringify(payload || {}));
+    var creationTokenProp = effect.property("Creation Token") || effect.property(1);
+    var codeProp = effect.property("Code");
+    var restartCueProp = effect.property("Restart") ||
+      effect.property(_MOMENTUM_NATIVE_RESTART_CUE_PARAM_INDEX);
+    var codeCommitProp = effect.property("Code Edit Signal") ||
+      effect.property(_MOMENTUM_NATIVE_CODE_COMMIT_PARAM_INDEX);
+    var defaultCodeProp = effect.property("Default Code") ||
+      effect.property(_MOMENTUM_NATIVE_DEFAULT_CODE_PARAM_INDEX);
+    _momentumAppendBitmapApplyDiagnostic(
+      creationToken,
+      "params-resolved",
+      "creationToken=" +
+        String(creationTokenProp ? creationTokenProp.propertyIndex : 0) +
+        " code=" +
+        String(codeProp ? codeProp.propertyIndex : 0) +
+        " restart=" +
+        String(restartCueProp ? restartCueProp.propertyIndex : 0) +
+        " commit=" +
+        String(codeCommitProp ? codeCommitProp.propertyIndex : 0) +
+        " default=" +
+        String(defaultCodeProp ? defaultCodeProp.propertyIndex : 0)
+    );
+    if (!creationTokenProp || !codeProp || !restartCueProp ||
+        !codeCommitProp || !defaultCodeProp) {
       try {
-        delete instanceBundle.runtimeSource;
-      } catch (_deleteRuntimeSourceError) {}
-      instanceBundle.sourcePath = "instances/" + String(instanceId) + "/sketch.js";
-      instanceBundle.debugTracePath = "instances/" + String(instanceId) + "/debug_trace.log";
-      instanceBundle.debugSessionId = debugSessionId;
-      var instanceWriteError = _momentumWriteRuntimeInstanceFilesRaw(
-        instanceId,
-        runtimeSource,
-        JSON.stringify(instanceBundle, null, 2)
+        effect.remove();
+      } catch (_removeIncompatibleEffectError) {}
+      return (
+        "Error: The installed Momentum plugin is out of date. " +
+        "Install the current native plugin before applying this Bitmap sketch."
       );
-      if (instanceWriteError) {
-        return String(instanceWriteError);
-      }
+    }
+    if (
+      codeProp.propertyIndex !== _MOMENTUM_NATIVE_CODE_SNAPSHOT_PARAM_INDEX ||
+      restartCueProp.propertyIndex !== _MOMENTUM_NATIVE_RESTART_CUE_PARAM_INDEX
+    ) {
+      try {
+        effect.remove();
+      } catch (_removeInvalidLayoutEffectError) {}
+      return "Error: Momentum effect parameter layout is incompatible.";
     }
 
-    instanceProp.setValue(instanceId);
-    revisionProp.setValue(revision);
-
+    _momentumAppendBitmapApplyDiagnostic(
+      creationToken,
+      "creation-token-write-enter",
+      "before=" + String(creationTokenProp.value)
+    );
+    creationTokenProp.setValue(creationToken);
+    _momentumAppendBitmapApplyDiagnostic(
+      creationToken,
+      "creation-token-write-exit",
+      "requested=" +
+        String(creationToken) +
+        " readback=" +
+        String(creationTokenProp.value)
+    );
     _momentumBindControllerParams(effect, controllerConfig, {
       skipDeferred: true
     });
@@ -563,26 +654,26 @@ function applyMomentum(encodedPayload) {
     _momentumBindControllerParams(effect, controllerConfig, {
       deferredOnly: true
     });
+    _momentumAppendBitmapApplyDiagnostic(
+      creationToken,
+      "complete",
+      "comp=" + String(comp.name) + " controllers=" + String(controllerConfig.length)
+    );
 
     return JSON.stringify({
       ok: true,
       warnings: warnings,
+      compId: Number(comp.id),
       comp: comp.name,
       layer: layer.name,
       controllers: controllerConfig.length,
-      revision: revision,
-      instanceId: instanceId,
-      debugSessionId: debugSessionId,
+      creationToken: creationToken,
+      debugSessionLabel: debugSessionLabel,
       debugTracePath: debugTracePath
     });
   } catch (applyError) {
     return "Error: Failed to apply Momentum bitmap effect: " + applyError.toString();
   } finally {
-    try {
-      if (typeof _momentumClearPendingRuntimeBundle === "function") {
-        _momentumClearPendingRuntimeBundle();
-      }
-    } catch (_clearPendingBundleFinallyError) {}
     app.endUndoGroup();
   }
 }

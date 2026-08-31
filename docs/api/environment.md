@@ -2,6 +2,14 @@
 
 Environment APIs control sketch-level configuration and expose global runtime values such as canvas size and frame state.
 
+`createCanvas()`, `frameRate()`, and `duration()` define the After Effects
+composition contract. Momentum accepts these calls wherever normal code can
+run, but Bitmap Code keyframes must retain the same calls and values. Change
+them from the main Momentum editor instead.
+
+The setter form of `pixelDensity(value)` remains a bitmap runtime setting and
+is not part of that Code keyframe restriction.
+
 If you need bitmap-only features such as `pixelDensity()`, switch the sketch to Bitmap mode.
 
 Loop-control APIs such as `isLooping()`, `loop()`, `noLoop()`, and `redraw()` are currently not supported in Bitmap mode. Bitmap rendering is driven by the After Effects effect host, so p5-style loop control is not available there yet.

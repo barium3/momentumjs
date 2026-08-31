@@ -1,0 +1,20 @@
+.momentum-tooltip {
+  position: fixed;
+  z-index: 10000;
+  box-sizing: border-box;
+  max-width: calc(100vw - 12px);
+  padding: 1px 5px;
+  overflow: hidden;
+  border: 1px solid #ffffff4d;
+  border-radius: 2px;
+  background-color: #efefed;
+  box-shadow: 0 2px 7px #00000080;
+  color: #1a1a19;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
