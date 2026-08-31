@@ -37,8 +37,11 @@ constexpr PF_OutFlags2 kMomentumBaseOutFlags2 =
   PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT |
   PF_OutFlag2_I_MIX_GUID_DEPENDENCIES |
   PF_OutFlag2_SUPPORTS_GET_FLATTENED_SEQUENCE_DATA |
-  PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-  PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+  PF_OutFlag2_SUPPORTS_THREADED_RENDERING
+#if defined(__APPLE__)
+  | PF_OutFlag2_SUPPORTS_GPU_RENDER_F32
+#endif
+  ;
 
 static_assert(
   kMomentumBaseOutFlags ==

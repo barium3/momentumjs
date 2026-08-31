@@ -5,11 +5,11 @@
       "name": "windows-vs2022",
       "displayName": "Windows x64 (Visual Studio 2022)",
       "generator": "Visual Studio 17 2022",
-      "binaryDir": "${sourceDir}/build-windows-static-md",
+      "binaryDir": "${sourceDir}/build-windows-static",
       "architecture": "x64",
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
-        "VCPKG_TARGET_TRIPLET": "momentum-x64-windows-static-md",
+        "VCPKG_TARGET_TRIPLET": "momentum-x64-windows-static",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets"
       },
       "condition": {

@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.21)
 
 project(momentum_ae_plugin LANGUAGES C CXX)
 
+if(MSVC)
+  # AE 2022 can preload an older MSVCP140.dll into the host process. Keep the
+  # plugin's C++ runtime (including std::mutex internals) private to the .aex so
+  # its ABI cannot be resolved against the host's runtime copy.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY
+    "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+  )
+endif()
+
 if(APPLE)
   enable_language(OBJCXX)
 endif()

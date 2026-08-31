@@ -38,5 +38,6 @@ build-arm64/
 build-universal/
 build-windows/
 build-windows-static-md/
+build-windows-static/
 vcpkg_installed/
 dist/

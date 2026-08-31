@@ -66,6 +66,33 @@ const codeExecutor = read("js/ui/editor/codeExecutor.js");
 const debugTraceManager = read("js/ui/console/debugTraceManager.js");
 const debugTraceHost = read("jsx/plugin/debugTrace.jsx");
 const installerCommon = read("scripts/lib/common.sh");
+const cmakeProject = read("CMakeLists.txt");
+const cmakePresets = read("CMakePresets.json");
+const windowsTriplet = read(
+  "cmake/triplets/momentum-x64-windows-static.cmake",
+);
+const windowsInstaller = read("scripts/install-windows.ps1");
+
+assert.match(
+  cmakeProject,
+  /if\(MSVC\)[\s\S]*CMAKE_MSVC_RUNTIME_LIBRARY[\s\S]*MultiThreaded\$<\$<CONFIG:Debug>:Debug>/,
+  "Windows targets must statically link the MSVC runtime instead of consuming AE's process-wide MSVCP140",
+);
+assert.match(
+  windowsTriplet,
+  /VCPKG_CRT_LINKAGE static[\s\S]*VCPKG_LIBRARY_LINKAGE static/,
+  "Windows dependencies must use the same static CRT as the plugin",
+);
+assert.match(
+  cmakePresets,
+  /build-windows-static[\s\S]*momentum-x64-windows-static/,
+  "the Windows preset must use the isolated static-CRT build tree",
+);
+assert.match(
+  windowsInstaller,
+  /build-windows-static\\\$Configuration/,
+  "the Windows installer must select the static-CRT artifact",
+);
 
 assert.match(
   editorSurface,
@@ -548,8 +575,19 @@ assert.match(
   "Smart Render must not reload mutable DocumentStore state after PreRender"
 );
 assert.match(effectContract, /MOMENTUM_EFFECT_OUT_FLAGS 0x06008416/);
-assert.match(effectContract, /MOMENTUM_EFFECT_OUT_FLAGS2 0x0AA21401/);
+assert.match(effectContract, /MOMENTUM_EFFECT_OUT_FLAGS2_CPU 0x08A21401/);
+assert.match(effectContract, /MOMENTUM_EFFECT_OUT_FLAGS2_GPU 0x0AA21401/);
+assert.match(
+  effectContract,
+  /defined\(AE_OS_WIN\)[\s\S]*defined\(_WIN32\)[\s\S]*MOMENTUM_EFFECT_OUT_FLAGS2_CPU/,
+  "Windows must not advertise the unavailable bitmap GPU backend"
+);
 assert.match(effectMain, /PF_OutFlag2_SUPPORTS_THREADED_RENDERING/);
+assert.match(
+  effectMain,
+  /defined\(__APPLE__\)[\s\S]*PF_OutFlag2_SUPPORTS_GPU_RENDER_F32/,
+  "only the implemented Metal build may advertise GPU rendering"
+);
 assert.match(pipl, /AE_Effect_Version \{\s*MOMENTUM_VERSION_PIPL\s*\}/);
 assert.match(
   effectMain,

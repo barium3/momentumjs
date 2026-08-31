@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 
 $rootDirectory = Split-Path -Parent $PSScriptRoot
 $artifactDirectory = Join-Path `
-  $rootDirectory "build-windows-static-md\$Configuration"
+  $rootDirectory "build-windows-static\$Configuration"
 $pluginSource = Join-Path $artifactDirectory 'Momentum.aex'
 $runtimeDirectory = Join-Path $env:LOCALAPPDATA 'Momentum\runtime'
 
