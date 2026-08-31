@@ -173,6 +173,7 @@ if(WIN32)
   target_link_libraries(${MOMENTUM_PLUGIN_NAME} PRIVATE
     windowscodecs
     ole32
+    shell32
   )
 endif()
 

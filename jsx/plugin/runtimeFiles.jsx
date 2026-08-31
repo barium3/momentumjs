@@ -76,6 +76,16 @@ function _momentumGetRuntimeFolder() {
     return new Folder(overridePath);
   }
 
+  if (_momentumIsWindows()) {
+    var localAppData = "";
+    try {
+      localAppData = $.getenv("LOCALAPPDATA") || "";
+    } catch (_momentumLocalAppDataReadError) {}
+    if (localAppData) {
+      return new Folder(localAppData + "/Momentum/runtime");
+    }
+  }
+
   var pluginInstallFolder = _momentumFindInstalledPluginFolder();
   if (pluginInstallFolder) {
     return new Folder(pluginInstallFolder.fsName + "/runtime");
@@ -85,13 +95,8 @@ function _momentumGetRuntimeFolder() {
 }
 
 function _momentumFindInstalledPluginFolder() {
-  var osName = "";
-  try {
-    osName = String($.os || "").toLowerCase();
-  } catch (_momentumOsReadError) {}
-
   var commonPluginsFolder = null;
-  if (osName.indexOf("windows") >= 0) {
+  if (_momentumIsWindows()) {
     var programFiles = "";
     try {
       programFiles =
@@ -144,6 +149,14 @@ function _momentumFindInstalledPluginFolder() {
   }
 
   return null;
+}
+
+function _momentumIsWindows() {
+  try {
+    return String($.os || "").toLowerCase().indexOf("windows") >= 0;
+  } catch (_momentumOsReadError) {
+    return false;
+  }
 }
 
 function _momentumHasNativePlugin(folder) {

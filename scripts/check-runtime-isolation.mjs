@@ -626,8 +626,13 @@ assert.match(
 );
 assert.match(
   runtimeFiles,
+  /LOCALAPPDATA[\s\S]*Momentum\/runtime/,
+  "Windows runtime transports must use the writable LocalAppData directory"
+);
+assert.match(
+  runtimeFiles,
   /ProgramW6432[\s\S]*Momentum\.aex/,
-  "Windows runtime discovery must follow the installed Momentum.aex"
+  "Windows native plugin discovery must follow the installed Momentum.aex"
 );
 assert.match(
   runtimeFiles,

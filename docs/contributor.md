@@ -45,6 +45,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install-windows.ps1 `
 
 The final switch enables the unsigned development panel for AE 2022/CEP 11.
 Omit `-EnableCepDebugMode` when installing a signed CEP package.
+Windows runtime transports are written under
+`%LOCALAPPDATA%\Momentum\runtime`, outside the protected plugin directory.
 
 ## Daily Update
 

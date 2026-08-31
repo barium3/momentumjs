@@ -19,8 +19,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $rootDirectory = Split-Path -Parent $PSScriptRoot
-$artifactDirectory = Join-Path $rootDirectory "build-windows\$Configuration"
+$artifactDirectory = Join-Path `
+  $rootDirectory "build-windows-static-md\$Configuration"
 $pluginSource = Join-Path $artifactDirectory 'Momentum.aex'
+$runtimeDirectory = Join-Path $env:LOCALAPPDATA 'Momentum\runtime'
 
 if (Get-Process AfterFX -ErrorAction SilentlyContinue) {
   throw 'After Effects is running. Close it before installing Momentum.'
@@ -48,11 +50,20 @@ function Copy-DirectoryContents {
 }
 
 New-Item -ItemType Directory -Force -Path $PluginDirectory | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $PluginDirectory 'runtime') |
-  Out-Null
+New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
 Copy-Item -Force $pluginSource (Join-Path $PluginDirectory 'Momentum.aex')
-Get-ChildItem $artifactDirectory -File -Filter '*.dll' | ForEach-Object {
+$artifactDlls = @(
+  Get-ChildItem $artifactDirectory -File -Filter '*.dll'
+)
+$artifactDllNames = @($artifactDlls | ForEach-Object { $_.Name })
+$artifactDlls | ForEach-Object {
   Copy-Item -Force $_.FullName (Join-Path $PluginDirectory $_.Name)
+}
+Get-ChildItem $PluginDirectory -File -Filter '*.dll' | Where-Object {
+  $artifactDllNames -notcontains $_.Name
+} | ForEach-Object {
+  Write-Host "Removing stale plugin dependency: $($_.Name)"
+  Remove-Item -Force $_.FullName
 }
 
 New-Item -ItemType Directory -Force -Path $CepDirectory | Out-Null
@@ -95,7 +106,7 @@ if ($EnableCepDebugMode) {
 
 Write-Host 'Momentum for Windows installed.'
 Write-Host "Plugin: $PluginDirectory\Momentum.aex"
-Write-Host "Runtime: $PluginDirectory\runtime"
+Write-Host "Runtime: $runtimeDirectory"
 Write-Host "CEP extension: $CepDirectory"
 if (!$EnableCepDebugMode) {
   Write-Host 'CEP debug mode was not changed.'
