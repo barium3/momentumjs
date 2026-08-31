@@ -75,7 +75,7 @@ Tradeoffs:
 
 - the result is a plugin-rendered bitmap layer, not a tree of editable AE shape groups
 - some p5 loop-control APIs such as `isLooping()`, `loop()`, `noLoop()`, and `redraw()` are not currently supported in Bitmap mode because rendering is driven by the AE effect host
-- Bitmap support is currently more mature on macOS. Windows compatibility is still weaker.
+- Bitmap mode uses Metal acceleration on macOS and the CPU renderer on Windows.
 
 ---
 

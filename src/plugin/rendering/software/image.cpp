@@ -3,12 +3,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
 #if defined(__APPLE__)
 #include <ApplicationServices/ApplicationServices.h>
 #include <ImageIO/ImageIO.h>
+#elif defined(_WIN32)
+#include <objbase.h>
+#include <windows.h>
+#include <wincodec.h>
 #endif
 
 namespace momentum {
@@ -366,6 +371,183 @@ bool DecodeImageFileApple(const std::string& path, RuntimeImageAsset* outAsset) 
   outAsset->loadError.clear();
   return true;
 }
+#elif defined(_WIN32)
+template <typename T>
+class ScopedComPtr {
+ public:
+  ScopedComPtr() = default;
+  ~ScopedComPtr() {
+    if (value_) {
+      value_->Release();
+    }
+  }
+
+  ScopedComPtr(const ScopedComPtr&) = delete;
+  ScopedComPtr& operator=(const ScopedComPtr&) = delete;
+
+  T* operator->() const { return value_; }
+  T** Receive() { return &value_; }
+
+ private:
+  T* value_ = nullptr;
+};
+
+class ScopedComInitialization {
+ public:
+  ScopedComInitialization()
+    : result_(CoInitializeEx(NULL, COINIT_MULTITHREADED)),
+      shouldUninitialize_(SUCCEEDED(result_)) {}
+
+  ~ScopedComInitialization() {
+    if (shouldUninitialize_) {
+      CoUninitialize();
+    }
+  }
+
+  bool IsUsable() const {
+    return SUCCEEDED(result_) || result_ == RPC_E_CHANGED_MODE;
+  }
+
+ private:
+  HRESULT result_;
+  bool shouldUninitialize_;
+};
+
+std::wstring Utf8PathToWide(const std::string& path) {
+  if (path.empty()) {
+    return std::wstring();
+  }
+  const int length = MultiByteToWideChar(
+    CP_UTF8,
+    MB_ERR_INVALID_CHARS,
+    path.c_str(),
+    static_cast<int>(path.size()),
+    NULL,
+    0
+  );
+  if (length <= 0) {
+    return std::wstring();
+  }
+  std::wstring widePath(static_cast<std::size_t>(length), L'\0');
+  if (MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        path.c_str(),
+        static_cast<int>(path.size()),
+        widePath.data(),
+        length
+      ) != length) {
+    return std::wstring();
+  }
+  return widePath;
+}
+
+bool DecodeImageFileWindows(
+  const std::string& path,
+  RuntimeImageAsset* outAsset
+) {
+  if (!outAsset) {
+    return false;
+  }
+  const std::wstring widePath = Utf8PathToWide(path);
+  if (widePath.empty()) {
+    return false;
+  }
+
+  ScopedComInitialization com;
+  if (!com.IsUsable()) {
+    return false;
+  }
+
+  ScopedComPtr<IWICImagingFactory> factory;
+  HRESULT result = CoCreateInstance(
+    CLSID_WICImagingFactory,
+    NULL,
+    CLSCTX_INPROC_SERVER,
+    IID_IWICImagingFactory,
+    reinterpret_cast<void**>(factory.Receive())
+  );
+  if (FAILED(result)) {
+    return false;
+  }
+
+  ScopedComPtr<IWICBitmapDecoder> decoder;
+  result = factory->CreateDecoderFromFilename(
+    widePath.c_str(),
+    NULL,
+    GENERIC_READ,
+    WICDecodeMetadataCacheOnLoad,
+    decoder.Receive()
+  );
+  if (FAILED(result)) {
+    return false;
+  }
+
+  ScopedComPtr<IWICBitmapFrameDecode> frame;
+  result = decoder->GetFrame(0, frame.Receive());
+  if (FAILED(result)) {
+    return false;
+  }
+
+  UINT width = 0;
+  UINT height = 0;
+  result = frame->GetSize(&width, &height);
+  if (FAILED(result) || width == 0 || height == 0 ||
+      width > static_cast<UINT>(std::numeric_limits<int>::max()) ||
+      height > static_cast<UINT>(std::numeric_limits<int>::max())) {
+    return false;
+  }
+
+  ScopedComPtr<IWICFormatConverter> converter;
+  result = factory->CreateFormatConverter(converter.Receive());
+  if (FAILED(result)) {
+    return false;
+  }
+  result = converter->Initialize(
+    frame.operator->(),
+    GUID_WICPixelFormat32bppRGBA,
+    WICBitmapDitherTypeNone,
+    NULL,
+    0.0,
+    WICBitmapPaletteTypeCustom
+  );
+  if (FAILED(result)) {
+    return false;
+  }
+
+  const std::uint64_t stride64 = static_cast<std::uint64_t>(width) * 4U;
+  const std::uint64_t byteCount64 = stride64 * height;
+  if (stride64 > std::numeric_limits<UINT>::max() ||
+      byteCount64 > std::numeric_limits<UINT>::max()) {
+    return false;
+  }
+  const UINT stride = static_cast<UINT>(stride64);
+  const UINT byteCount = static_cast<UINT>(byteCount64);
+  std::vector<unsigned char> rgba(byteCount);
+  result = converter->CopyPixels(NULL, stride, byteCount, rgba.data());
+  if (FAILED(result)) {
+    return false;
+  }
+
+  std::vector<PF_Pixel> decodedPixels(
+    static_cast<std::size_t>(width) * height
+  );
+  for (std::size_t index = 0; index < decodedPixels.size(); ++index) {
+    decodedPixels[index] = PF_Pixel{
+      rgba[index * 4U + 3U],
+      rgba[index * 4U + 0U],
+      rgba[index * 4U + 1U],
+      rgba[index * 4U + 2U]
+    };
+  }
+
+  outAsset->width = static_cast<int>(width);
+  outAsset->height = static_cast<int>(height);
+  ReplaceImagePixels(outAsset, std::move(decodedPixels));
+  outAsset->loaded = true;
+  outAsset->loadError.clear();
+  return true;
+}
 #endif
 
 }  // namespace
@@ -387,6 +569,10 @@ bool LoadImageAssetFromFile(const std::string& path, int id, RuntimeImageAsset* 
 
 #if defined(__APPLE__)
   if (DecodeImageFileApple(path, outAsset)) {
+    return true;
+  }
+#elif defined(_WIN32)
+  if (DecodeImageFileWindows(path, outAsset)) {
     return true;
   }
 #endif

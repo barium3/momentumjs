@@ -625,6 +625,16 @@ assert.match(
   "creation-token allocation must be seeded from existing transport folders"
 );
 assert.match(
+  runtimeFiles,
+  /ProgramW6432[\s\S]*Momentum\.aex/,
+  "Windows runtime discovery must follow the installed Momentum.aex"
+);
+assert.match(
+  runtimeFiles,
+  /Momentum\.plugin/,
+  "macOS runtime discovery must follow the installed Momentum.plugin"
+);
+assert.match(
   bitmapApply,
   /var creationToken = _momentumNextBitmapCreationToken\(\)/,
   "each newly-created bitmap effect must receive a fresh one-shot creation token"

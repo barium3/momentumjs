@@ -34,7 +34,7 @@ constexpr PF_ParamUIFlags kCodeControlUiFlags = PF_PUI_CONTROL;
 constexpr A_short kRestartControlUiSize = 1;
 constexpr double kStaticSliderValidMin = -1000000.0;
 constexpr double kStaticSliderValidMax = 1000000.0;
-constexpr PF_Precision kControllerSliderPrecision =
+constexpr A_short kControllerSliderPrecision =
   PF_Precision_HUNDREDTHS;
 constexpr int kStaticSelectControllerChoiceCount = 32;
 

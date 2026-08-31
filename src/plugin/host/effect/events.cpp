@@ -1,5 +1,6 @@
 #include "host/effect/events.h"
 
+#include "common/math_constants.h"
 #include "controllers/schema.h"
 #include "host/effect/code_editor.h"
 #include "host/effect/parameters.h"
@@ -562,7 +563,7 @@ bool TryComputePointerDegrees(
     return false;
   }
   *degrees = WrapAngleDegrees(
-    (std::atan2(dy, dx) * (180.0 / M_PI)) + 90.0
+    (std::atan2(dy, dx) * (180.0 / kPi)) + 90.0
   );
   return true;
 }
@@ -769,7 +770,7 @@ PF_Err DrawAngleControllerUi(
   const std::string degreesDisplayText =
     FormatSignedAngleDegrees(cycleDegrees);
   const double wrappedDegrees = WrapAngleDegrees(degrees);
-  const double radians = (wrappedDegrees - 90.0) * (M_PI / 180.0);
+  const double radians = (wrappedDegrees - 90.0) * (kPi / 180.0);
   const float indicatorRadius =
     std::max(0.0f, layout.knobRadius -
       (kAngleControlRingStrokeWidth * 0.5f));

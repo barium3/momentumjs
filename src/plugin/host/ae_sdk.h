@@ -14,3 +14,29 @@
 #include "Param_Utils.h"
 #include "String_Utils.h"
 #include "AEFX_SuiteHelper.h"
+
+// Keep the host-facing code source-compatible with both the AE 2022 SDK and
+// newer SDKs. Momentum only uses calls already present in these older suites.
+#ifndef kAEGPEffectSuiteVersion5
+typedef AEGP_EffectSuite4 AEGP_EffectSuite5;
+#define kAEGPEffectSuiteVersion5 kAEGPEffectSuiteVersion4
+#endif
+
+#ifdef kAEGPStreamSuiteVersion6
+#define MOMENTUM_AE_HAS_UNIQUE_STREAM_ID 1
+#else
+#define MOMENTUM_AE_HAS_UNIQUE_STREAM_ID 0
+typedef AEGP_StreamSuite5 AEGP_StreamSuite6;
+#define kAEGPStreamSuiteVersion6 kAEGPStreamSuiteVersion5
+#endif
+
+#ifndef kAEGPKeyframeSuiteVersion5
+typedef AEGP_KeyframeSuite4 AEGP_KeyframeSuite5;
+#define kAEGPKeyframeSuiteVersion5 kAEGPKeyframeSuiteVersion4
+#endif
+
+// AE 2023+ renamed this field at preprocessing time. AE 2022 exposes the same
+// fixed-size field as `name`.
+#ifndef PF_DEF_NAME
+#define PF_DEF_NAME name
+#endif

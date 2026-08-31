@@ -55,16 +55,21 @@ Then restart After Effects.
 
 #### Windows
 
-Windows currently supports the CEP panel and `Vector` mode installation path only. `Bitmap` mode is not currently supported on Windows.
+Windows supports both `Vector` and CPU-rendered `Bitmap` mode. A Windows
+release build installs the CEP panel, `Momentum.aex`, and its runtime DLLs.
 
-1. Download and unzip the release package.
-2. Copy the unpacked `momentumjs` folder into:
+For a source build, configure the AE SDK and vcpkg, then run:
 
-```text
-C:\Users\YourUsername\AppData\Roaming\Adobe\CEP\extensions\momentumjs
+```powershell
+cmake --preset windows-vs2022
+cmake --build --preset windows-release
+powershell -ExecutionPolicy Bypass -File scripts/install-windows.ps1 `
+  -Configuration Release -EnableCepDebugMode
 ```
 
-3. Restart After Effects.
+The installer preserves the existing `user` workspace and installs the native
+plugin under Adobe's shared `MediaCore\Momentum` directory. Restart After
+Effects after installation.
 
 ### Uninstall
 
@@ -100,13 +105,13 @@ Momentum currently has two runtime modes:
 - `Vector`
   Sketch output is converted into native AE vector shapes, text objects, image layers, and controller layers.
 - `Bitmap`
-  Sketch output is rendered by the native `Momentum.plugin` effect, which unlocks a more complete API surface, GPU rendering, and larger renderable object counts.
+  Sketch output is rendered by the native `Momentum.plugin`/`Momentum.aex` effect, which unlocks a more complete API surface, platform GPU rendering where available, and larger renderable object counts.
 
 Use `Vector` when you want AE-native vector graphics and text objects that remain easy to adjust after generation.
 
 Use `Bitmap` when you need fuller rendering APIs such as `createGraphics()`, `loadPixels()`, `updatePixels()`, `filter()`, `blend()`, `loadFont()`, or `Font.textToPoints()`, and when you want the plugin's GPU-backed rendering path.
 
-Bitmap mode is currently much more mature on macOS. Windows bitmap compatibility is still weaker.
+Bitmap mode uses Metal acceleration on macOS and the CPU renderer on Windows.
 
 ## Contribution
 

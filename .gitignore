@@ -36,4 +36,6 @@ user/logoType.js
 build/
 build-arm64/
 build-universal/
+build-windows/
+vcpkg_installed/
 dist/

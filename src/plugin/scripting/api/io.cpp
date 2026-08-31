@@ -667,6 +667,8 @@ function __momentumParseXMLString(sourceText) {
   return root;
 }
 
+)MOMENTUM_BOOT"
+R"MOMENTUM_BOOT(
 function __momentumSerializeXMLNode(node) {
   if (!node) return "";
   var attrs = "";

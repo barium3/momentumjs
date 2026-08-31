@@ -413,6 +413,7 @@ PF_Err DispatchEffectCommand(
 }  // namespace momentum
 
 extern "C" DllExport
+#ifdef PF_REGISTER_EFFECT_EXT2
 PF_Err PluginDataEntryFunction2(
   PF_PluginDataPtr input,
   PF_PluginDataCB2 registerEffect,
@@ -437,6 +438,30 @@ PF_Err PluginDataEntryFunction2(
   );
   return result;
 }
+#else
+PF_Err PluginDataEntryFunction(
+  PF_PluginDataPtr input,
+  PF_PluginDataCB registerEffect,
+  SPBasicSuite* suites,
+  const char* hostName,
+  const char* hostVersion
+) {
+  (void)suites;
+  (void)hostName;
+  (void)hostVersion;
+
+  PF_Err result = PF_Err_INVALID_CALLBACK;
+  PF_REGISTER_EFFECT(
+    input,
+    registerEffect,
+    "Momentum",
+    "Momentum",
+    "Momentum",
+    AE_RESERVED_INFO
+  );
+  return result;
+}
+#endif
 
 extern "C" DllExport
 PF_Err EffectMain(

@@ -980,13 +980,17 @@ A_Err DispatchCodeEditorCepEvent(
 
 A_Err ResolveCodeStreamUniqueId(
   PF_InData* input,
-  int32_t* uniqueId
+  std::uint64_t* uniqueId
 ) {
   if (!input || !uniqueId ||
       EnsureRegisteredWithAEGP(input) != A_Err_NONE) {
     return A_Err_GENERIC;
   }
   *uniqueId = 0;
+#if !MOMENTUM_AE_HAS_UNIQUE_STREAM_ID
+  *uniqueId = ResolveLiveEffectSessionId(input);
+  return *uniqueId ? A_Err_NONE : A_Err_GENERIC;
+#else
   AEFX_SuiteScoper<AEGP_PFInterfaceSuite1> interfaceSuite(
     input,
     kAEGPPFInterfaceSuite,
@@ -1025,7 +1029,11 @@ A_Err ResolveCodeStreamUniqueId(
     );
   }
   if (error == A_Err_NONE && streamH) {
-    error = streamSuite->AEGP_GetUniqueStreamID(streamH, uniqueId);
+    int32_t sdkUniqueId = 0;
+    error = streamSuite->AEGP_GetUniqueStreamID(streamH, &sdkUniqueId);
+    if (error == A_Err_NONE) {
+      *uniqueId = static_cast<std::uint32_t>(sdkUniqueId);
+    }
   }
   if (streamH) {
     (void)streamSuite->AEGP_DisposeStream(streamH);
@@ -1034,6 +1042,7 @@ A_Err ResolveCodeStreamUniqueId(
     (void)effectSuite->AEGP_DisposeEffect(effectH);
   }
   return error;
+#endif
 }
 
 bool WriteCodeEditTextFileAtomically(
@@ -1350,7 +1359,7 @@ PF_Err OpenCodeEditorWindow(
     targetTime,
     &editsExistingCue
   );
-  int32_t codeStreamUniqueId = 0;
+  std::uint64_t codeStreamUniqueId = 0;
   if (ResolveCodeStreamUniqueId(input, &codeStreamUniqueId) !=
       A_Err_NONE) {
     return PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -2141,7 +2150,7 @@ PF_Err HandleCodeEditorSignal(
     }
     NativeCodeEditSession session;
     if (ReadCodeEditSession(*closeToken, &session)) {
-      int32_t currentCodeStreamUniqueId = 0;
+      std::uint64_t currentCodeStreamUniqueId = 0;
       if (ResolveCodeStreamUniqueId(
             input,
             &currentCodeStreamUniqueId
@@ -2265,7 +2274,7 @@ PF_Err HandleCodeEditorSignal(
     );
     return PF_Err_BAD_CALLBACK_PARAM;
   }
-  int32_t currentCodeStreamUniqueId = 0;
+  std::uint64_t currentCodeStreamUniqueId = 0;
   const A_Err streamIdentityError = ResolveCodeStreamUniqueId(
     input,
     &currentCodeStreamUniqueId

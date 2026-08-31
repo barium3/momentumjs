@@ -85,16 +85,37 @@ function _momentumGetRuntimeFolder() {
 }
 
 function _momentumFindInstalledPluginFolder() {
-  var homeFolder = Folder("~");
-  var commonPluginsFolder = new Folder(
-    homeFolder.fsName + "/Library/Application Support/Adobe/Common/Plug-ins"
-  );
+  var osName = "";
+  try {
+    osName = String($.os || "").toLowerCase();
+  } catch (_momentumOsReadError) {}
+
+  var commonPluginsFolder = null;
+  if (osName.indexOf("windows") >= 0) {
+    var programFiles = "";
+    try {
+      programFiles =
+        $.getenv("ProgramW6432") || $.getenv("ProgramFiles") || "";
+    } catch (_momentumProgramFilesReadError) {}
+    if (!programFiles) {
+      programFiles = "C:/Program Files";
+    }
+    commonPluginsFolder = new Folder(
+      programFiles + "/Adobe/Common/Plug-ins"
+    );
+  } else {
+    var homeFolder = Folder("~");
+    commonPluginsFolder = new Folder(
+      homeFolder.fsName +
+      "/Library/Application Support/Adobe/Common/Plug-ins"
+    );
+  }
   if (!commonPluginsFolder.exists) {
     return null;
   }
 
   var directMomentumFolder = new Folder(commonPluginsFolder.fsName + "/Momentum");
-  if (new Folder(directMomentumFolder.fsName + "/Momentum.plugin").exists) {
+  if (_momentumHasNativePlugin(directMomentumFolder)) {
     return directMomentumFolder;
   }
 
@@ -117,12 +138,22 @@ function _momentumFindInstalledPluginFolder() {
       continue;
     }
     var momentumFolder = new Folder(mediaCoreFolder.fsName + "/Momentum");
-    if (new Folder(momentumFolder.fsName + "/Momentum.plugin").exists) {
+    if (_momentumHasNativePlugin(momentumFolder)) {
       return momentumFolder;
     }
   }
 
   return null;
+}
+
+function _momentumHasNativePlugin(folder) {
+  if (!folder) {
+    return false;
+  }
+  return (
+    new Folder(folder.fsName + "/Momentum.plugin").exists ||
+    new File(folder.fsName + "/Momentum.aex").exists
+  );
 }
 
 function _momentumEnsureFolder(folder) {

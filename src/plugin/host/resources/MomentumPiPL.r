@@ -18,7 +18,9 @@ resource 'PiPL' (16000) {
     Category {
       "Momentum"
     },
-#if defined(AE_OS_MAC)
+#if defined(AE_OS_WIN) && defined(AE_PROC_INTELx64)
+    CodeWin64X86 {"EffectMain"},
+#elif defined(AE_OS_MAC)
     CodeMacIntel64 {"EffectMain"},
     CodeMacARM64 {"EffectMain"},
 #endif
@@ -47,9 +49,12 @@ resource 'PiPL' (16000) {
     },
     AE_Reserved_Info {
       0
-    },
+    }
+#if PF_PLUG_IN_SUBVERS >= 29
+    ,
     AE_Effect_Support_URL {
       "https://github.com/barium3/momentum"
     }
+#endif
   }
 };

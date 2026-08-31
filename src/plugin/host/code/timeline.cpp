@@ -8,6 +8,10 @@
 #include <sstream>
 #include <unordered_map>
 
+#if defined(_MSC_VER)
+#include <boost/multiprecision/cpp_int.hpp>
+#endif
+
 namespace momentum {
 
 namespace {
@@ -128,7 +132,11 @@ CodeRestartTimelineSelection ResolveCodeRestartTimelineSelection(
 
 namespace {
 
+#if defined(_MSC_VER)
+using WideInteger = boost::multiprecision::int128_t;
+#else
 using WideInteger = __int128_t;
+#endif
 
 WideInteger DivideDown(WideInteger numerator, WideInteger denominator) {
   if (denominator <= 0) {

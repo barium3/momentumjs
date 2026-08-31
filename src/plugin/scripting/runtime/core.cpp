@@ -1217,6 +1217,9 @@ bool InitializeCachedSketchState(
   cache->valid = true;
   cache->frameScenes[0] = cache->latestScene;
   StoreFrameSnapshot(cache, 0, cache->latestScene);
+#if defined(_WIN32)
+  JSGarbageCollect(cache->context);
+#endif
   return true;
 }
 
@@ -1430,6 +1433,9 @@ bool AdvanceCachedSketchState(
     }
   }
 
+#if defined(_WIN32)
+  JSGarbageCollect(cache->context);
+#endif
   return true;
 }
 

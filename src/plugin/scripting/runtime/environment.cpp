@@ -15,6 +15,8 @@
 
 #if defined(__APPLE__)
 #include <dlfcn.h>
+#elif defined(_WIN32)
+#include <windows.h>
 #endif
 
 namespace momentum::runtime_internal {
@@ -752,6 +754,44 @@ std::string GetInstalledPluginRuntimeDirectoryPath() {
   }
 
   return (pluginInstallDir / "runtime").string();
+#elif defined(_WIN32)
+  HMODULE module = NULL;
+  if (!GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(
+          &GetInstalledPluginRuntimeDirectoryPath
+        ),
+        &module
+      ) || !module) {
+    return std::string();
+  }
+
+  std::vector<wchar_t> modulePath(32768, L'\0');
+  const DWORD length = GetModuleFileNameW(
+    module,
+    modulePath.data(),
+    static_cast<DWORD>(modulePath.size())
+  );
+  if (length == 0 || length >= modulePath.size()) {
+    return std::string();
+  }
+
+  std::filesystem::path binaryPath(
+    std::wstring(modulePath.data(), length)
+  );
+  std::error_code ec;
+  const std::filesystem::path canonicalBinaryPath =
+    std::filesystem::weakly_canonical(binaryPath, ec);
+  if (!ec) {
+    binaryPath = canonicalBinaryPath;
+  }
+  const std::filesystem::path pluginInstallDir =
+    binaryPath.parent_path();
+  if (pluginInstallDir.empty()) {
+    return std::string();
+  }
+  return (pluginInstallDir / "runtime").u8string();
 #else
   return std::string();
 #endif

@@ -868,6 +868,8 @@ function __momentumColorToString(colorValue, format) {
   }
 }
 
+)MOMENTUM_BOOT"
+R"MOMENTUM_BOOT(
 function __momentumColorChannelRange(colorValue, channelName) {
   if (channelName === "alpha") {
     return colorValue._colorData.maxes[3];
@@ -1307,6 +1309,8 @@ function __momentumSyncImageInstance(imageValue, descriptor) {
   return imageValue;
 }
 
+)MOMENTUM_BOOT"
+R"MOMENTUM_BOOT(
 function __momentumInvalidateImagePixels(imageValue) {
   if (!imageValue) return imageValue;
   imageValue._pixels = [];
@@ -1767,6 +1771,8 @@ p5.Image.prototype.mask = function(imageValue) {
   __momentumInvalidateImagePixels(this);
 };
 
+)MOMENTUM_BOOT"
+R"MOMENTUM_BOOT(
 p5.Image.prototype.copy = function() {
   var args = Array.prototype.slice.call(arguments);
   var sourceValue = this._imageData;

@@ -21,7 +21,7 @@ struct NativeCodeEditSession {
   std::string token;
   std::uint64_t liveEffectSessionId = 0;
   A_long compId = 0;
-  int32_t codeStreamUniqueId = 0;
+  std::uint64_t codeStreamUniqueId = 0;
   A_Time targetTime = {0, 1};
   bool editsExistingCue = false;
   std::string baseSourceHash;

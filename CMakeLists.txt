@@ -8,9 +8,34 @@ endif()
 
 set(MOMENTUM_PLUGIN_NAME Momentum)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(FREETYPE2 REQUIRED IMPORTED_TARGET freetype2)
-pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+if(WIN32)
+  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+  if(MSVC)
+    add_compile_options(/utf-8)
+  endif()
+
+  find_package(boost_multiprecision CONFIG REQUIRED)
+  find_package(Freetype REQUIRED)
+  find_package(harfbuzz CONFIG REQUIRED)
+  find_package(qjs CONFIG REQUIRED)
+  set(MOMENTUM_TEXT_LIBRARIES
+    Freetype::Freetype
+    harfbuzz::harfbuzz
+  )
+  set(MOMENTUM_WIDE_INTEGER_LIBRARIES Boost::multiprecision)
+  set(MOMENTUM_SCRIPTING_LIBRARIES qjs)
+  set(MOMENTUM_PLATFORM_INCLUDE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/platform/windows"
+  )
+else()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(FREETYPE2 REQUIRED IMPORTED_TARGET freetype2)
+  pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+  set(MOMENTUM_TEXT_LIBRARIES
+    PkgConfig::FREETYPE2
+    PkgConfig::HARFBUZZ
+  )
+endif()
 
 if(NOT DEFINED ENV{AE_SDK_ROOT})
   message(FATAL_ERROR "AE_SDK_ROOT must point to the Adobe After Effects SDK root.")
@@ -75,6 +100,45 @@ add_library(${MOMENTUM_PLUGIN_NAME} MODULE
   ${MOMENTUM_SCRIPTING_SOURCES}
 )
 
+if(WIN32)
+  target_sources(${MOMENTUM_PLUGIN_NAME} PRIVATE
+    src/plugin/platform/windows/javascriptcore_compat.cpp
+  )
+
+  set(MOMENTUM_WINDOWS_PIPL_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/pipl"
+  )
+  set(MOMENTUM_WINDOWS_PIPL_RC
+    "${MOMENTUM_WINDOWS_PIPL_DIR}/MomentumPiPL.rc"
+  )
+  add_custom_command(
+    OUTPUT "${MOMENTUM_WINDOWS_PIPL_RC}"
+    COMMAND "${CMAKE_COMMAND}"
+      "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DPIPL_TOOL=${AE_SDK_ROOT}/Examples/Resources/PiPLtool.exe"
+      "-DPIPL_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/host/resources/MomentumPiPL.r"
+      "-DPLUGIN_HOST_INCLUDE=${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/host"
+      "-DAE_HEADERS_INCLUDE=${AE_SDK_ROOT}/Examples/Headers"
+      "-DOUTPUT_DIR=${MOMENTUM_WINDOWS_PIPL_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildWindowsPiPL.cmake"
+    DEPENDS
+      src/plugin/host/resources/MomentumPiPL.r
+      src/plugin/host/effect_contract.h
+      src/plugin/host/version.h
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildWindowsPiPL.cmake"
+    COMMENT "Compiling the Windows PiPL resource"
+    VERBATIM
+  )
+  target_sources(${MOMENTUM_PLUGIN_NAME} PRIVATE
+    "${MOMENTUM_WINDOWS_PIPL_RC}"
+  )
+  set_target_properties(${MOMENTUM_PLUGIN_NAME} PROPERTIES
+    OUTPUT_NAME "${MOMENTUM_PLUGIN_NAME}"
+    PREFIX ""
+    SUFFIX ".aex"
+  )
+endif()
+
 if(APPLE)
   target_sources(${MOMENTUM_PLUGIN_NAME} PRIVATE
     src/plugin/rendering/bitmap/backends/metal/shaders.cpp
@@ -92,13 +156,25 @@ target_include_directories(${MOMENTUM_PLUGIN_NAME} PRIVATE
   "${AE_SDK_ROOT}/Examples/Headers/SP"
   "${AE_SDK_ROOT}/Examples/Util"
   "${AE_SDK_ROOT}/Examples/Resources"
-  ${FREETYPE2_INCLUDE_DIRS}
-  ${HARFBUZZ_INCLUDE_DIRS}
+  ${MOMENTUM_PLATFORM_INCLUDE_DIRS}
 )
 
 target_compile_definitions(${MOMENTUM_PLUGIN_NAME} PRIVATE
   DYNAMIC_LINK=1
 )
+
+target_link_libraries(${MOMENTUM_PLUGIN_NAME} PRIVATE
+  ${MOMENTUM_TEXT_LIBRARIES}
+  ${MOMENTUM_WIDE_INTEGER_LIBRARIES}
+  ${MOMENTUM_SCRIPTING_LIBRARIES}
+)
+
+if(WIN32)
+  target_link_libraries(${MOMENTUM_PLUGIN_NAME} PRIVATE
+    windowscodecs
+    ole32
+  )
+endif()
 
 if(APPLE)
   find_library(JAVASCRIPTCORE_FRAMEWORK JavaScriptCore REQUIRED)
@@ -116,8 +192,6 @@ if(APPLE)
       "${IMAGEIO_FRAMEWORK}"
       "${FOUNDATION_FRAMEWORK}"
       "${METAL_FRAMEWORK}"
-      PkgConfig::FREETYPE2
-      PkgConfig::HARFBUZZ
   )
 
   set_target_properties(${MOMENTUM_PLUGIN_NAME} PROPERTIES
@@ -172,21 +246,23 @@ if(BUILD_TESTING)
     "${AE_SDK_ROOT}/Examples/Headers/SP"
     "${AE_SDK_ROOT}/Examples/Util"
     "${AE_SDK_ROOT}/Examples/Resources"
-    ${FREETYPE2_INCLUDE_DIRS}
-    ${HARFBUZZ_INCLUDE_DIRS}
   )
   target_compile_definitions(momentum_canvas_surface_contract_test PRIVATE
     DYNAMIC_LINK=1
   )
   target_link_libraries(momentum_canvas_surface_contract_test PRIVATE
-    PkgConfig::FREETYPE2
-    PkgConfig::HARFBUZZ
+    ${MOMENTUM_TEXT_LIBRARIES}
   )
   if(APPLE)
     target_link_libraries(momentum_canvas_surface_contract_test PRIVATE
       "${COREFOUNDATION_FRAMEWORK}"
       "${COREGRAPHICS_FRAMEWORK}"
       "${IMAGEIO_FRAMEWORK}"
+    )
+  elseif(WIN32)
+    target_link_libraries(momentum_canvas_surface_contract_test PRIVATE
+      windowscodecs
+      ole32
     )
   endif()
   add_test(
@@ -224,6 +300,9 @@ if(BUILD_TESTING)
   target_compile_definitions(momentum_code_timeline_time_test PRIVATE
     DYNAMIC_LINK=1
   )
+  target_link_libraries(momentum_code_timeline_time_test PRIVATE
+    ${MOMENTUM_WIDE_INTEGER_LIBRARIES}
+  )
   add_test(
     NAME momentum_code_timeline_time
     COMMAND momentum_code_timeline_time_test
@@ -249,6 +328,37 @@ if(BUILD_TESTING)
     NAME momentum_image_pixel_cow
     COMMAND momentum_image_pixel_cow_test
   )
+
+  if(WIN32)
+    add_executable(momentum_windows_image_decode_test
+      tests/windows_image_decode_test.cpp
+      src/plugin/rendering/software/image.cpp
+    )
+    target_compile_features(momentum_windows_image_decode_test PRIVATE
+      cxx_std_17
+    )
+    target_include_directories(momentum_windows_image_decode_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin"
+      "${AE_SDK_ROOT}"
+      "${AE_SDK_ROOT}/Examples"
+      "${AE_SDK_ROOT}/Examples/Headers"
+      "${AE_SDK_ROOT}/Examples/Headers/SP"
+      "${AE_SDK_ROOT}/Examples/Util"
+      "${AE_SDK_ROOT}/Examples/Resources"
+    )
+    target_compile_definitions(momentum_windows_image_decode_test PRIVATE
+      DYNAMIC_LINK=1
+    )
+    target_link_libraries(momentum_windows_image_decode_test PRIVATE
+      windowscodecs
+      ole32
+    )
+    add_test(
+      NAME momentum_windows_image_decode
+      COMMAND momentum_windows_image_decode_test
+        "${CMAKE_CURRENT_SOURCE_DIR}/footage/showcase.png"
+    )
+  endif()
 
   add_executable(momentum_angle_math_test
     tests/angle_math_test.cpp
@@ -284,6 +394,7 @@ if(BUILD_TESTING)
     "${AE_SDK_ROOT}/Examples/Headers/SP"
     "${AE_SDK_ROOT}/Examples/Util"
     "${AE_SDK_ROOT}/Examples/Resources"
+    ${MOMENTUM_PLATFORM_INCLUDE_DIRS}
   )
   target_compile_definitions(momentum_code_editor_state_test PRIVATE
     DYNAMIC_LINK=1
@@ -294,4 +405,20 @@ if(BUILD_TESTING)
     NAME momentum_code_editor_state
     COMMAND momentum_code_editor_state_test
   )
+
+  if(WIN32)
+    add_executable(momentum_javascript_compat_test
+      tests/javascript_compat_test.cpp
+      src/plugin/platform/windows/javascriptcore_compat.cpp
+    )
+    target_compile_features(momentum_javascript_compat_test PRIVATE cxx_std_17)
+    target_include_directories(momentum_javascript_compat_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/platform/windows"
+    )
+    target_link_libraries(momentum_javascript_compat_test PRIVATE qjs)
+    add_test(
+      NAME momentum_javascript_compat
+      COMMAND momentum_javascript_compat_test
+    )
+  endif()
 endif()

@@ -1,4 +1,5 @@
 #include "scripting/api/common.h"
+#include "common/math_constants.h"
 
 #include <algorithm>
 #include <cctype>
@@ -943,28 +944,28 @@ PathSubpath BuildRoundedRectSubpath(
   subpath.segments.push_back(MakeMoveToSegment(x + tl, y));
   subpath.segments.push_back(MakeLineToSegment(x + width - tr, y));
   if (tr > 0.0) {
-    AppendCubicArcSegment(&subpath, x + width - tr, y + tr, tr, tr, -M_PI * 0.5, 0.0);
+    AppendCubicArcSegment(&subpath, x + width - tr, y + tr, tr, tr, -kPi * 0.5, 0.0);
   } else {
     subpath.segments.push_back(MakeLineToSegment(x + width, y));
   }
 
   subpath.segments.push_back(MakeLineToSegment(x + width, y + height - br));
   if (br > 0.0) {
-    AppendCubicArcSegment(&subpath, x + width - br, y + height - br, br, br, 0.0, M_PI * 0.5);
+    AppendCubicArcSegment(&subpath, x + width - br, y + height - br, br, br, 0.0, kPi * 0.5);
   } else {
     subpath.segments.push_back(MakeLineToSegment(x + width, y + height));
   }
 
   subpath.segments.push_back(MakeLineToSegment(x + bl, y + height));
   if (bl > 0.0) {
-    AppendCubicArcSegment(&subpath, x + bl, y + height - bl, bl, bl, M_PI * 0.5, M_PI);
+    AppendCubicArcSegment(&subpath, x + bl, y + height - bl, bl, bl, kPi * 0.5, kPi);
   } else {
     subpath.segments.push_back(MakeLineToSegment(x, y + height));
   }
 
   subpath.segments.push_back(MakeLineToSegment(x, y + tl));
   if (tl > 0.0) {
-    AppendCubicArcSegment(&subpath, x + tl, y + tl, tl, tl, M_PI, M_PI * 1.5);
+    AppendCubicArcSegment(&subpath, x + tl, y + tl, tl, tl, kPi, kPi * 1.5);
   } else {
     subpath.segments.push_back(MakeLineToSegment(x, y));
   }
@@ -991,10 +992,10 @@ PathSubpath BuildEllipseSubpath(double cx, double cy, double width, double heigh
   }
 
   subpath.segments.push_back(MakeMoveToSegment(cx + rx, cy));
-  AppendCubicArcSegment(&subpath, cx, cy, rx, ry, 0.0, M_PI * 0.5);
-  AppendCubicArcSegment(&subpath, cx, cy, rx, ry, M_PI * 0.5, M_PI);
-  AppendCubicArcSegment(&subpath, cx, cy, rx, ry, M_PI, M_PI * 1.5);
-  AppendCubicArcSegment(&subpath, cx, cy, rx, ry, M_PI * 1.5, M_PI * 2.0);
+  AppendCubicArcSegment(&subpath, cx, cy, rx, ry, 0.0, kPi * 0.5);
+  AppendCubicArcSegment(&subpath, cx, cy, rx, ry, kPi * 0.5, kPi);
+  AppendCubicArcSegment(&subpath, cx, cy, rx, ry, kPi, kPi * 1.5);
+  AppendCubicArcSegment(&subpath, cx, cy, rx, ry, kPi * 1.5, kPi * 2.0);
   subpath.segments.push_back(MakeCloseSegment());
   return subpath;
 }

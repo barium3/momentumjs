@@ -1,4 +1,5 @@
 #include "rendering/software/rasterizer.h"
+#include "common/math_constants.h"
 #include "rendering/software/internal.h"
 #include "rendering/software/image.h"
 #include "rendering/software/text.h"
@@ -841,11 +842,11 @@ double PolygonCoverageAt(double px, double py, const std::vector<std::pair<doubl
 double NormalizeAngleDelta(double delta, bool positive) {
   if (positive) {
     while (delta <= 0.0) {
-      delta += M_PI * 2.0;
+      delta += kPi * 2.0;
     }
   } else {
     while (delta >= 0.0) {
-      delta -= M_PI * 2.0;
+      delta -= kPi * 2.0;
     }
   }
   return delta;
@@ -863,7 +864,7 @@ void AppendArcPoints(
     return;
   }
 
-  const int steps = std::max(8, static_cast<int>(std::ceil(std::fabs(delta) / (M_PI / 16.0))));
+  const int steps = std::max(8, static_cast<int>(std::ceil(std::fabs(delta) / (kPi / 16.0))));
   for (int index = includeFirst ? 0 : 1; index <= steps; ++index) {
     const double t = static_cast<double>(index) / static_cast<double>(steps);
     const double angle = startAngle + delta * t;
@@ -1010,7 +1011,7 @@ std::vector<std::pair<double, double>> BuildOpenStrokeOutlineInternal(
 
   if (strokeCap == STROKE_CAP_ROUND) {
     const double startAngle = std::atan2(lastNormal.second, lastNormal.first);
-    AppendArcPoints(&outline, endBase, halfWidth, startAngle, -M_PI, false);
+    AppendArcPoints(&outline, endBase, halfWidth, startAngle, -kPi, false);
   } else {
     outline.push_back(rightEnd);
   }
@@ -1024,7 +1025,7 @@ std::vector<std::pair<double, double>> BuildOpenStrokeOutlineInternal(
 
   if (strokeCap == STROKE_CAP_ROUND) {
     const double startAngle = std::atan2(-firstNormal.second, -firstNormal.first);
-    AppendArcPoints(&outline, startBase, halfWidth, startAngle, -M_PI, false);
+    AppendArcPoints(&outline, startBase, halfWidth, startAngle, -kPi, false);
   }
 
   return outline;
@@ -1156,14 +1157,14 @@ double JoinCoverageAt(
     double delta = endAngle - startAngle;
     if (side > 0.0) {
       while (delta <= 0.0) {
-        delta += M_PI * 2.0;
+        delta += kPi * 2.0;
       }
     } else {
       while (delta >= 0.0) {
-        delta -= M_PI * 2.0;
+        delta -= kPi * 2.0;
       }
     }
-    const int steps = std::max(8, static_cast<int>(std::ceil(std::fabs(delta) / (M_PI / 16.0))));
+    const int steps = std::max(8, static_cast<int>(std::ceil(std::fabs(delta) / (kPi / 16.0))));
     for (int index = 0; index <= steps; ++index) {
       const double t = static_cast<double>(index) / static_cast<double>(steps);
       const double angle = startAngle + delta * t;

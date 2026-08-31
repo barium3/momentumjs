@@ -1,0 +1,11 @@
+{
+  "name": "momentum-ae-plugin",
+  "version-string": "1.1.0",
+  "builtin-baseline": "efebd56bc79f61b9bdaeb7c2370ad97fb947bb4b",
+  "dependencies": [
+    "boost-multiprecision",
+    "freetype",
+    "harfbuzz",
+    "quickjs-ng"
+  ]
+}

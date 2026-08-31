@@ -355,6 +355,8 @@ function __momentumCreateAngleController(data) {
   };
 }
 
+)MOMENTUM_BOOT"
+R"MOMENTUM_BOOT(
 function __momentumCreateColorController(data) {
   data = __momentumCloneControllerData(data || {});
   data.value = __momentumNormalizeColorValue(data.value, [1, 1, 1, 1]);
