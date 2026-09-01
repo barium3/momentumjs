@@ -7,6 +7,10 @@ namespace bitmap {
 namespace gpu {
 
 struct Target {
+  PF_InData* inData = NULL;
+  PF_OutData* outData = NULL;
+  const PF_GPUDeviceSuite1* deviceSuite = NULL;
+  A_u_long deviceIndex = 0;
   PF_EffectWorld* outputWorld = NULL;
   PF_PixelFormat pixelFormat = PF_PixelFormat_INVALID;
   void* outputWorldData = NULL;
@@ -19,7 +23,7 @@ struct Target {
   PF_GPUDeviceInfo deviceInfo;
 };
 
-bool Available();
+bool Available(PF_GPU_Framework framework);
 
 PF_Err CreateContext(
   PF_InData* in_data,
@@ -27,7 +31,8 @@ PF_Err CreateContext(
   PF_GPU_Framework framework,
   A_u_long deviceIndex,
   void** outGpuData,
-  std::string* errorMessage
+  std::string* errorMessage,
+  std::string* diagnosticDetail
 );
 
 void DestroyContext(

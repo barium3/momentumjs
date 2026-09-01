@@ -15,6 +15,7 @@ const stylePaths = [
 ];
 const styles = stylePaths.map(read).join("\n");
 const bootstrapSource = read("js/ui/bootstrap.js");
+const errorProtocolSource = read("js/ui/console/errorProtocol.js");
 const consoleSource = read("js/ui/console/consoleManager.js");
 const workspaceSource = read("js/ui/workspace.js");
 const debugTraceSource = read("js/ui/console/debugTraceManager.js");
@@ -906,6 +907,9 @@ const consoleContext = {
 };
 consoleContext.window = consoleContext;
 consoleContext.globalThis = consoleContext;
+vm.runInNewContext(errorProtocolSource, consoleContext, {
+  filename: "error-protocol.js",
+});
 vm.runInNewContext(consoleSource, consoleContext, {
   filename: "console-manager.js",
 });
@@ -937,6 +941,19 @@ assert.match(
   /<button type="button" class="console-details-header"[^>]*aria-controls=/,
   "Console object details must render a real disclosure button",
 );
+consoleContext.console.error({
+  code: "IMAGE_LOAD_FAILED",
+  message: "Could not decode asset.png",
+  path: "C:/workspace/asset.png",
+  type: "error",
+});
+const normalizedErrorLine = consoleLines[2].innerHTML;
+assert.match(normalizedErrorLine, /\[IMAGE_LOAD_FAILED\] Could not decode asset\.png/);
+assert.doesNotMatch(
+  normalizedErrorLine,
+  /console-expandable-ref[^>]*>Object<\/span>/,
+  "error-like objects must expose their message instead of a red Object label",
+);
 const workspaceConsoleLines = consoleLines.slice();
 
 consoleContext.consoleManager.activateChannel("effect-code");
@@ -955,7 +972,7 @@ assert.deepEqual(consoleLines, [effectConsoleLine]);
 consoleContext.consoleManager.clearConsole();
 assert.equal(consoleLines.length, 0);
 consoleContext.consoleManager.activateChannel("workspace");
-assert.equal(consoleLines.length, 2, "clearing Effect Code must not clear workspace logs");
+assert.equal(consoleLines.length, 3, "clearing Effect Code must not clear workspace logs");
 
 function createWorkspaceElement(hidden = false) {
   const classes = new Set();

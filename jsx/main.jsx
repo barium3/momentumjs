@@ -28,3 +28,4 @@ $.evalFile(__momentumResolve("plugin/codeSnapshot.jsx"));
 $.evalFile(__momentumResolve("plugin/projectFiles.jsx"));
 $.evalFile(__momentumResolve("plugin/debugTrace.jsx"));
 $.evalFile(__momentumResolve("plugin/fontCatalog.jsx"));
+$.evalFile(__momentumResolve("plugin/hostSession.jsx"));

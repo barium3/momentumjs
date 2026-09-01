@@ -2,6 +2,11 @@
 
 #include <new>
 
+#if defined(_WIN32)
+  #include "rendering/bitmap/backends/cuda/renderer.h"
+  #include "rendering/bitmap/backends/opencl/renderer.h"
+#endif
+
 namespace momentum {
 namespace bitmap {
 namespace metal {
@@ -24,18 +29,36 @@ namespace {
 struct DeviceContext {
   A_u_long deviceIndex = 0;
   PF_GPU_Framework framework = PF_GPU_Framework_NONE;
+  void* backendData = nullptr;
 };
 
 struct ContextHandle {
   DeviceContext* context = nullptr;
 };
 
+void DestroyBackend(PF_GPU_Framework framework, void* backendData) {
+#if defined(_WIN32)
+  if (framework == PF_GPU_Framework_CUDA) {
+    cuda::DestroyContext(backendData);
+  } else if (framework == PF_GPU_Framework_OPENCL) {
+    opencl::DestroyContext(backendData);
+  }
+#else
+  (void)framework;
+  (void)backendData;
+#endif
+}
+
 }  // namespace
 
-bool Available() {
+bool Available(PF_GPU_Framework framework) {
 #if defined(__APPLE__)
-  return true;
+  return framework == PF_GPU_Framework_METAL;
+#elif defined(_WIN32)
+  return framework == PF_GPU_Framework_CUDA ||
+    framework == PF_GPU_Framework_OPENCL;
 #else
+  (void)framework;
   return false;
 #endif
 }
@@ -46,13 +69,18 @@ PF_Err CreateContext(
   PF_GPU_Framework framework,
   A_u_long deviceIndex,
   void** outGpuData,
-  std::string* errorMessage
+  std::string* errorMessage,
+  std::string* diagnosticDetail
 ) {
   if (!outGpuData) {
     if (errorMessage) {
       *errorMessage = "Bitmap GPU context output pointer is null.";
     }
     return PF_Err_BAD_CALLBACK_PARAM;
+  }
+  *outGpuData = nullptr;
+  if (diagnosticDetail) {
+    diagnosticDetail->clear();
   }
 
   if (!in_data || !out_data) {
@@ -61,6 +89,56 @@ PF_Err CreateContext(
     }
     return PF_Err_BAD_CALLBACK_PARAM;
   }
+
+  if (!Available(framework)) {
+    if (errorMessage) {
+      *errorMessage = "Bitmap GPU renderer does not support the requested framework.";
+    }
+    return PF_Err_NONE;
+  }
+
+  AEFX_SuiteScoper<PF_GPUDeviceSuite1> gpuSuite =
+    AEFX_SuiteScoper<PF_GPUDeviceSuite1>(
+      in_data,
+      kPFGPUDeviceSuite,
+      kPFGPUDeviceSuiteVersion1,
+      out_data
+    );
+  PF_GPUDeviceInfo deviceInfo{};
+  PF_Err setupError = gpuSuite->GetDeviceInfo(
+    in_data->effect_ref,
+    deviceIndex,
+    &deviceInfo
+  );
+  if (setupError != PF_Err_NONE) {
+    if (errorMessage) {
+      *errorMessage = "Failed to fetch AE GPU device info during setup.";
+    }
+    return setupError;
+  }
+  if (!deviceInfo.compatibleB) {
+    if (errorMessage) {
+      *errorMessage = "AE marked this GPU device as incompatible.";
+    }
+    return PF_Err_NONE;
+  }
+
+  void* backendData = nullptr;
+#if defined(_WIN32)
+  if (framework == PF_GPU_Framework_CUDA) {
+    setupError = cuda::CreateContext(
+      deviceInfo,
+      &backendData,
+      errorMessage,
+      diagnosticDetail
+    );
+  } else if (framework == PF_GPU_Framework_OPENCL) {
+    setupError = opencl::CreateContext(deviceInfo, &backendData, errorMessage);
+  }
+  if (setupError != PF_Err_NONE || !backendData) {
+    return setupError;
+  }
+#endif
 
   AEFX_SuiteScoper<PF_HandleSuite1> handleSuite =
     AEFX_SuiteScoper<PF_HandleSuite1>(
@@ -72,6 +150,7 @@ PF_Err CreateContext(
 
   PF_Handle handle = handleSuite->host_new_handle(sizeof(ContextHandle));
   if (!handle) {
+    DestroyBackend(framework, backendData);
     if (errorMessage) {
       *errorMessage = "Failed to allocate AE host handle for bitmap GPU context.";
     }
@@ -80,6 +159,7 @@ PF_Err CreateContext(
 
   auto* handleData = reinterpret_cast<ContextHandle*>(handleSuite->host_lock_handle(handle));
   if (!handleData) {
+    DestroyBackend(framework, backendData);
     handleSuite->host_dispose_handle(handle);
     if (errorMessage) {
       *errorMessage = "Failed to lock AE host handle for bitmap GPU context.";
@@ -89,6 +169,7 @@ PF_Err CreateContext(
 
   auto* context = new (std::nothrow) DeviceContext();
   if (!context) {
+    DestroyBackend(framework, backendData);
     handleSuite->host_unlock_handle(handle);
     handleSuite->host_dispose_handle(handle);
     if (errorMessage) {
@@ -98,6 +179,7 @@ PF_Err CreateContext(
   }
   context->deviceIndex = deviceIndex;
   context->framework = framework;
+  context->backendData = backendData;
   handleData->context = context;
   handleSuite->host_unlock_handle(handle);
 
@@ -126,6 +208,12 @@ void DestroyContext(
   auto* handleData =
     reinterpret_cast<ContextHandle*>(handleSuite->host_lock_handle(handle));
   if (handleData) {
+    if (handleData->context) {
+      DestroyBackend(
+        handleData->context->framework,
+        handleData->context->backendData
+      );
+    }
     delete handleData->context;
     handleData->context = nullptr;
     handleSuite->host_unlock_handle(handle);
@@ -226,6 +314,10 @@ PF_Err Render(
   }
 
   Target target;
+  target.inData = in_data;
+  target.outData = out_data;
+  target.deviceSuite = gpuSuite.operator->();
+  target.deviceIndex = context->deviceIndex;
   target.outputWorld = outputWorld;
   target.pixelFormat = pixelFormat;
   target.outputWorldData = outputWorldData;
@@ -240,6 +332,12 @@ PF_Err Render(
 #if defined(__APPLE__)
   if (context->framework == PF_GPU_Framework_METAL) {
     renderErr = metal::Render(target, plan, errorMessage);
+  } else
+#elif defined(_WIN32)
+  if (context->framework == PF_GPU_Framework_CUDA) {
+    renderErr = cuda::Render(context->backendData, target, plan, errorMessage);
+  } else if (context->framework == PF_GPU_Framework_OPENCL) {
+    renderErr = opencl::Render(context->backendData, target, plan, errorMessage);
   } else
 #endif
   {

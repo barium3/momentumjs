@@ -329,6 +329,88 @@ window.momentumBitmapControllerBootstrap = (function () {
         return hex;
       }
 
+      function callResourceSuccess(callback, value) {
+        if (typeof callback === "function") {
+          callback(value);
+        }
+        return value;
+      }
+
+      function findResourceSuccessCallback(argsLike) {
+        const args = Array.prototype.slice.call(argsLike || []);
+        for (let index = 1; index < args.length; index += 1) {
+          if (typeof args[index] === "function") {
+            return args[index];
+          }
+        }
+        return null;
+      }
+
+      function createImagePlaceholder(path) {
+        const source = String(path == null ? "" : path);
+        const imageValue = {
+          __momentumType: "Image",
+          _momentumPath: source,
+          _momentumFullPath: source,
+          width: 1,
+          height: 1,
+          pixels: [0, 0, 0, 255],
+          get() {
+            return arguments.length >= 2 ? [0, 0, 0, 255] : imageValue;
+          },
+          set() {},
+          loadPixels() {
+            return imageValue.pixels;
+          },
+          updatePixels() {},
+          resize(width, height) {
+            imageValue.width = Math.max(1, Math.floor(Number(width) || 1));
+            imageValue.height = Math.max(1, Math.floor(Number(height) || 1));
+            return imageValue;
+          },
+          copy() {
+            return imageValue;
+          },
+          mask() {
+            return imageValue;
+          },
+          filter() {
+            return imageValue;
+          },
+        };
+        return imageValue;
+      }
+
+      function createTablePlaceholder() {
+        return {
+          columns: [],
+          rows: [],
+          get() { return null; },
+          getArray() { return []; },
+          getColumn() { return []; },
+          getColumnCount() { return 0; },
+          getRow() { return null; },
+          getRowCount() { return 0; },
+          findRows() { return []; },
+          matchRows() { return []; },
+        };
+      }
+
+      function createXmlPlaceholder() {
+        return {
+          getChild() { return null; },
+          getChildren() { return []; },
+          getContent() { return ""; },
+          getName() { return ""; },
+          getNum(_name, defaultValue) {
+            return Number(defaultValue) || 0;
+          },
+          getString(_name, defaultValue) {
+            return defaultValue == null ? "" : String(defaultValue);
+          },
+        };
+      }
+
       session.setValue("duration", function () {});
       session.setValue("createSlider", function (min, max, value, step) {
         const callInfo = extractControllerBootstrapArgs(arguments);
@@ -512,9 +594,47 @@ window.momentumBitmapControllerBootstrap = (function () {
         };
       });
 
+      // Controller discovery must never perform real asset I/O. p5 loadImage()
+      // is asynchronous and can otherwise complete after this temporary runtime
+      // has been destroyed, leaking a late ErrorEvent into the panel Console.
+      session.setValue("loadImage", function (path) {
+        return callResourceSuccess(
+          findResourceSuccessCallback(arguments),
+          createImagePlaceholder(path),
+        );
+      });
+      session.setValue("image", function () {});
+      session.setValue("background", function () {});
+      session.setValue("tint", function () {});
+      session.setValue("noTint", function () {});
+      session.setValue("loadJSON", function () {
+        return callResourceSuccess(findResourceSuccessCallback(arguments), {});
+      });
+      session.setValue("loadStrings", function () {
+        return callResourceSuccess(findResourceSuccessCallback(arguments), []);
+      });
+      session.setValue("loadBytes", function () {
+        return callResourceSuccess(
+          findResourceSuccessCallback(arguments),
+          { bytes: [] },
+        );
+      });
+      session.setValue("loadTable", function () {
+        return callResourceSuccess(
+          findResourceSuccessCallback(arguments),
+          createTablePlaceholder(),
+        );
+      });
+      session.setValue("loadXML", function () {
+        return callResourceSuccess(
+          findResourceSuccessCallback(arguments),
+          createXmlPlaceholder(),
+        );
+      });
+
       session.setValue("loadFont", function (path) {
         const source = String(path == null ? "" : path);
-        return {
+        const fontValue = {
           __momentumType: "Font",
           _fontData: {
             source: source,
@@ -537,6 +657,10 @@ window.momentumBitmapControllerBootstrap = (function () {
             return [];
           },
         };
+        return callResourceSuccess(
+          findResourceSuccessCallback(arguments),
+          fontValue,
+        );
       });
     }
 

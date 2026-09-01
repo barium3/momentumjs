@@ -48,6 +48,30 @@ const bitmapMetalRenderer =
   read("src/plugin/rendering/bitmap/backends/metal/renderer.mm") +
   read("src/plugin/rendering/bitmap/backends/metal/shaders.cpp");
 const bitmapRenderer = read("src/plugin/rendering/bitmap/backends/gpu/renderer.cpp");
+const bitmapComputeExecutor = read(
+  "src/plugin/rendering/bitmap/backends/compute/executor.cpp",
+);
+const bitmapComputeKernels = read(
+  "src/plugin/rendering/bitmap/backends/compute/kernels_common.inc",
+);
+const bitmapCudaRenderer = read(
+  "src/plugin/rendering/bitmap/backends/cuda/renderer.cpp",
+);
+const bitmapCudaContextScope = read(
+  "src/plugin/rendering/bitmap/backends/cuda/context_scope.h",
+);
+const bitmapCudaCompatibility = read(
+  "src/plugin/rendering/bitmap/backends/cuda/compatibility.h",
+);
+const bitmapCudaKernels = read(
+  "src/plugin/rendering/bitmap/backends/cuda/kernels.cu",
+);
+const bitmapOpenClRenderer = read(
+  "src/plugin/rendering/bitmap/backends/opencl/renderer.cpp",
+);
+const bitmapOpenClKernels = read(
+  "src/plugin/rendering/bitmap/backends/opencl/kernels.cl",
+);
 const bitmapCpuRenderer = read("src/plugin/rendering/bitmap/backends/cpu/renderer.cpp");
 const bitmapPlan =
   read("src/plugin/rendering/bitmap/planning/plan.h") +
@@ -579,14 +603,152 @@ assert.match(effectContract, /MOMENTUM_EFFECT_OUT_FLAGS2_CPU 0x08A21401/);
 assert.match(effectContract, /MOMENTUM_EFFECT_OUT_FLAGS2_GPU 0x0AA21401/);
 assert.match(
   effectContract,
-  /defined\(AE_OS_WIN\)[\s\S]*defined\(_WIN32\)[\s\S]*MOMENTUM_EFFECT_OUT_FLAGS2_CPU/,
-  "Windows must not advertise the unavailable bitmap GPU backend"
+  /#define MOMENTUM_EFFECT_OUT_FLAGS2 MOMENTUM_EFFECT_OUT_FLAGS2_GPU/,
+  "Mac and Windows must advertise the implemented Bitmap GPU backends"
 );
 assert.match(effectMain, /PF_OutFlag2_SUPPORTS_THREADED_RENDERING/);
 assert.match(
   effectMain,
-  /defined\(__APPLE__\)[\s\S]*PF_OutFlag2_SUPPORTS_GPU_RENDER_F32/,
-  "only the implemented Metal build may advertise GPU rendering"
+  /defined\(__APPLE__\) \|\| defined\(_WIN32\)[\s\S]*PF_OutFlag2_SUPPORTS_GPU_RENDER_F32/,
+  "the implemented Metal and Windows compute builds must advertise GPU rendering"
+);
+assert.match(
+  bitmapRenderer,
+  /PF_GPU_Framework_CUDA[\s\S]*PF_GPU_Framework_OPENCL[\s\S]*cuda::Render[\s\S]*opencl::Render/,
+  "Windows Bitmap GPU dispatch must support both CUDA and OpenCL"
+);
+assert.match(
+  bitmapComputeExecutor,
+  /FreeDeviceMemory[\s\S]*AllocateDeviceMemory[\s\S]*fallbackSurfaceStart[\s\S]*CopyToOutput/,
+  "the shared Windows executor must use AE-owned memory and a correctness-complete fallback"
+);
+assert.match(
+  bitmapCudaRenderer,
+  /LoadLibraryW\(L"nvcuda\.dll"\)[\s\S]*cuModuleLoadDataEx[\s\S]*compute::Execute/,
+  "CUDA must load the display-driver API dynamically and share the compute executor"
+);
+assert.match(
+  bitmapOpenClRenderer,
+  /LoadLibraryW\(L"OpenCL\.dll"\)[\s\S]*clCreateProgramWithSource[\s\S]*compute::Execute/,
+  "OpenCL must compile inside AE's context and share the compute executor"
+);
+const cudaCreateContextBody = bitmapCudaRenderer.match(
+  /PF_Err CreateContext\([\s\S]*?\n\}\n\nvoid DestroyContext/,
+)?.[0] ?? "";
+assert.match(
+  cudaCreateContextBody,
+  /deviceInfo\.device_framework != PF_GPU_Framework_CUDA[\s\S]*!deviceInfo\.contextPV/,
+  "CUDA setup must require AE's CUDA framework and context",
+);
+assert.doesNotMatch(
+  cudaCreateContextBody,
+  /!deviceInfo\.devicePV/,
+  "CUDA device zero is valid and must not be rejected as a null pointer",
+);
+assert.match(
+  cudaCreateContextBody,
+  /!LoadDriverApi[\s\S]*PF_Err_INTERNAL_STRUCT_DAMAGED[\s\S]*!InitializeContext[\s\S]*PF_Err_INTERNAL_STRUCT_DAMAGED/,
+  "selected CUDA initialization failures must reach AE's GPU-to-CPU fallback",
+);
+assert.match(
+  bitmapCudaContextScope,
+  /ctxGetCurrent[\s\S]*ctxPushCurrent[\s\S]*ctxPopCurrent/,
+  "CUDA context borrowing must preserve and restore the calling thread state",
+);
+assert.match(
+  bitmapCudaRenderer,
+  /InitializeContext[\s\S]*CurrentContextScope[\s\S]*ReadDeviceMetadata[\s\S]*LoadModule/,
+  "CUDA setup must bind AE's context before querying the device and loading PTX",
+);
+const cudaDestroyContextBody = bitmapCudaRenderer.match(
+  /void DestroyContext\([\s\S]*?\n\}\n\nPF_Err Render/,
+)?.[0] ?? "";
+assert.match(
+  cudaDestroyContextBody,
+  /CurrentContextScope[\s\S]*moduleUnload/,
+  "CUDA setdown must bind the module's owning AE context before unloading",
+);
+const cudaRenderBody = bitmapCudaRenderer.match(
+  /PF_Err Render\([\s\S]*?\n\}\n\n\}  \/\/ namespace cuda/,
+)?.[0] ?? "";
+assert.match(
+  cudaRenderBody,
+  /renderContext != context->aeContext[\s\S]*CurrentContextScope[\s\S]*compute::Execute[\s\S]*scope\.Release/,
+  "CUDA render must reject cross-context reuse and keep AE's context current through synchronization",
+);
+assert.match(
+  bitmapCudaCompatibility + bitmapCudaRenderer,
+  /MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY[\s\S]*IsComputeCapabilitySupported[\s\S]*cuDriverGetVersion[\s\S]*cuDeviceComputeCapability[\s\S]*cuDeviceGetName/,
+  "CUDA setup must expose driver and device compatibility diagnostics",
+);
+assert.match(
+  cmakeProject,
+  /MOMENTUM_CUDA_PTX_ARCHITECTURE "compute_52"[\s\S]*--gpu-architecture=\$\{MOMENTUM_CUDA_PTX_ARCHITECTURE\}[\s\S]*MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY=/,
+  "the CUDA PTX target and runtime capability gate must share one build contract",
+);
+const openClCreateContextBody = bitmapOpenClRenderer.match(
+  /PF_Err CreateContext\([\s\S]*?\n\}\n\nvoid DestroyContext/,
+)?.[0] ?? "";
+assert.match(
+  openClCreateContextBody,
+  /!output \|\| !deviceInfo\.devicePV \|\| !deviceInfo\.contextPV/,
+  "OpenCL setup must retain its pointer-based device and context validation",
+);
+assert.match(
+  openClCreateContextBody,
+  /!LoadApi[\s\S]*PF_Err_INTERNAL_STRUCT_DAMAGED[\s\S]*buildProgram[\s\S]*PF_Err_INTERNAL_STRUCT_DAMAGED/,
+  "selected OpenCL initialization failures must reach AE's GPU-to-CPU fallback",
+);
+assert.match(
+  renderContext,
+  /gpu-device-setup-skipped[\s\S]*gpu-device-setup-failed[\s\S]*gpu-device-setup-complete/,
+  "GPU setup diagnostics must distinguish CPU fallback, failure, and success",
+);
+const gpuDeviceSetupBody = renderContext.match(
+  /PF_Err GPUDeviceSetup\([\s\S]*?\n\}\n\nPF_Err GPUDeviceSetdown/,
+)?.[0] ?? "";
+assert.match(
+  gpuDeviceSetupBody,
+  /AppendEffectHostDiagnostic/,
+  "GPU setup diagnostics must use the sequence-independent host path",
+);
+assert.doesNotMatch(
+  gpuDeviceSetupBody,
+  /AppendEffectRuntimeDiagnostic/,
+  "GPU setup must not resolve sequence data through the render diagnostic path",
+);
+const effectReferenceDiagnosticBody = environment.match(
+  /void AppendEffectReferenceDiagnostic\([\s\S]*?\n\}\n\n\}  \/\/ namespace/,
+)?.[0] ?? "";
+assert.match(
+  effectReferenceDiagnosticBody,
+  /effectRef=/,
+  "host diagnostics must retain a callback-local effect identifier",
+);
+assert.doesNotMatch(
+  effectReferenceDiagnosticBody,
+  /ResolveEffectSequenceDataHandle|ResolveEffectRuntimeKey|ReadLiveEffectSessionId|PF_GetConstSequenceData/,
+  "host diagnostics must remain independent of AE sequence data",
+);
+assert.match(
+  environment,
+  /gpu-device-setup-complete[\s\S]*gpu-device-setup-skipped/,
+  "one-time GPU setup decisions must remain visible without per-frame verbose logging",
+);
+assert.match(
+  bitmapCudaKernels,
+  /#include "\.\.\/compute\/kernels_common\.inc"/,
+  "CUDA must consume the shared kernel algorithm source"
+);
+assert.match(
+  cmakeProject,
+  /kernels\.cl\|\$\{CMAKE_CURRENT_SOURCE_DIR\}\/src\/plugin\/rendering\/bitmap\/backends\/compute\/kernels_common\.inc/,
+  "OpenCL embedding must append the same shared kernel algorithm source"
+);
+assert.match(
+  bitmapComputeKernels + bitmapOpenClKernels,
+  /MOMENTUM_KERNEL\(momentum_fill\)[\s\S]*MOMENTUM_KERNEL\(momentum_copy_output\)/,
+  "the shared Windows kernels must cover drawing and AE output conversion"
 );
 assert.match(pipl, /AE_Effect_Version \{\s*MOMENTUM_VERSION_PIPL\s*\}/);
 assert.match(
@@ -998,8 +1160,17 @@ class MockCSInterface {
     cepEventListeners.set(name, listener);
   }
   evalScript(script, callback) {
-    if (script.indexOf("__momentumBootstrapResult") >= 0) {
-      callback("ok");
+    if (script.indexOf("__momentumHostBootstrapMarker") >= 0) {
+      callback(JSON.stringify({
+        ok: true,
+        protocolVersion: "2",
+        hostSessionId: "mock-host-session",
+        clientSessionId: "mock-client-session",
+        platform: "test",
+        extensionRoot: "/mock/extension",
+        userRoot: "/mock/extension/user",
+        runtimeRoot: "/mock/runtime",
+      }));
       return;
     }
     if (script.indexOf("momentumPeekCodeEditorOpenIntent") === 0) {
@@ -1026,6 +1197,7 @@ const bridgeSandbox = {
   Promise,
   console,
   encodeURIComponent,
+  clearTimeout,
   setTimeout,
   document: {
     readyState: "loading",
@@ -1119,6 +1291,7 @@ const normalBridgeSandbox = {
   Promise,
   console,
   encodeURIComponent,
+  clearTimeout,
   setTimeout,
   document: {
     readyState: "loading",

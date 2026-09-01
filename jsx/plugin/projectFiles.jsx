@@ -45,11 +45,13 @@ function _momentumCommandSuccess(data) {
   });
 }
 
-function _momentumCommandFailure(errorMessage, data) {
+function _momentumCommandFailure(errorMessage, data, errorCode, stage) {
   return JSON.stringify({
     ok: false,
     data: data === undefined ? null : data,
-    error: String(errorMessage || "After Effects file operation failed.")
+    error: String(errorMessage || "After Effects file operation failed."),
+    code: String(errorCode || "PROJECT_FILE_OPERATION_FAILED"),
+    stage: String(stage || "project-file")
   });
 }
 
@@ -166,9 +168,19 @@ function projectFileCommand(encodedAction, encodedPayload) {
       return _momentumCommandSuccess(_momentumReadTextFileData(payload.path));
     }
 
-    return _momentumCommandFailure("Unknown project file command: " + action);
+    return _momentumCommandFailure(
+      "Unknown project file command: " + action,
+      null,
+      "PROJECT_FILE_COMMAND_UNKNOWN",
+      action
+    );
   } catch (error) {
-    return _momentumCommandFailure(error.toString(), error.data);
+    return _momentumCommandFailure(
+      error.toString(),
+      error.data,
+      "PROJECT_FILE_OPERATION_FAILED",
+      typeof action === "string" ? action : "project-file"
+    );
   }
 }
 

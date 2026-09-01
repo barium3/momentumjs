@@ -55,8 +55,11 @@ Then restart After Effects.
 
 #### Windows
 
-Windows supports both `Vector` and CPU-rendered `Bitmap` mode. A Windows
-release build installs the CEP panel, `Momentum.aex`, and its runtime DLLs.
+Windows supports both `Vector` and `Bitmap` mode. Bitmap rendering follows the
+GPU framework selected by After Effects: CUDA on compatible NVIDIA devices or
+OpenCL when AE supplies an OpenCL context, with automatic CPU fallback. A
+Windows release build installs the CEP panel and `Momentum.aex`; end users do
+not need the CUDA toolkit.
 
 For a source build, configure the AE SDK and vcpkg, then run:
 
@@ -111,7 +114,9 @@ Use `Vector` when you want AE-native vector graphics and text objects that remai
 
 Use `Bitmap` when you need fuller rendering APIs such as `createGraphics()`, `loadPixels()`, `updatePixels()`, `filter()`, `blend()`, `loadFont()`, or `Font.textToPoints()`, and when you want the plugin's GPU-backed rendering path.
 
-Bitmap mode uses Metal acceleration on macOS and the CPU renderer on Windows.
+Bitmap mode uses Metal acceleration on macOS. On Windows it uses CUDA or
+OpenCL when supplied by After Effects, with CPU fallback when GPU setup is not
+available.
 
 ## Contribution
 

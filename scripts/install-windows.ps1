@@ -66,6 +66,20 @@ Get-ChildItem $PluginDirectory -File -Filter '*.dll' | Where-Object {
   Remove-Item -Force $_.FullName
 }
 
+$legacyPluginRuntime = Join-Path $PluginDirectory 'runtime'
+if (Test-Path $legacyPluginRuntime) {
+  $legacyRuntimeEntries = @(Get-ChildItem -Force $legacyPluginRuntime)
+  if ($legacyRuntimeEntries.Count -eq 0) {
+    Remove-Item -Force $legacyPluginRuntime
+    Write-Host "Removed empty legacy runtime directory: $legacyPluginRuntime"
+  } else {
+    Write-Warning (
+      "Legacy plugin runtime was preserved because it is not empty: " +
+      $legacyPluginRuntime
+    )
+  }
+}
+
 New-Item -ItemType Directory -Force -Path $CepDirectory | Out-Null
 foreach ($directoryName in @('bundle', 'CSXS', 'footage', 'js', 'jsx')) {
   Copy-DirectoryContents `

@@ -40,6 +40,11 @@ void AppendEffectRuntimeDiagnostic(
   long frame,
   const std::string& detail
 );
+void AppendEffectHostDiagnostic(
+  PF_InData* in_data,
+  const char* eventName,
+  const std::string& detail
+);
 void AppendEffectUiDiagnostic(
   PF_InData* in_data,
   const char* eventName,

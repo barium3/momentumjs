@@ -109,10 +109,27 @@ The repository now uses `scripts/` as the single CLI entrypoint layer:
 - `scripts/package-installer.sh` assembles a macOS `.pkg` installer for the signed panel and native plugin.
 - `scripts/lib/common.sh` is the shared path and packaging helper layer used by the install and packaging scripts.
 
+## CEP And Host Startup Contract
+
+- `CSXS/manifest.xml` owns the CEP HTML entrypoint only. Do not add a JSX
+  `ScriptPath`; `js/plugin/bridge.js` is the single owner of loading
+  `jsx/main.jsx`.
+- `jsx/plugin/hostSession.jsx` owns the versioned handshake and reports the
+  canonical extension, user, and runtime roots. Host calls should go through
+  `momentumPluginBridge.evaluateHostScript()` so they wait for readiness and
+  participate in reconnect handling.
+- `js/ui/console/errorProtocol.js` owns structured errors crossing CEP,
+  ExtendScript, and native-runtime boundaries. Preserve `code`, `stage`,
+  `path`, and `retryable` when adding a new producer.
+- `js/ui/editor/bitmapControllerBootstrap.js` discovers controllers in a
+  no-I/O sandbox. Asset loaders in this pass must return deterministic
+  placeholders; real asset loading belongs to the execution/analyzer pass.
+
 ## Notes
 
 - Bitmap mode depends on `Momentum.plugin` on macOS or `Momentum.aex` on
   Windows; building the CEP panel alone is not enough.
-- The Windows bitmap renderer currently uses the CPU path; Metal acceleration
-  remains macOS-only.
+- The Windows bitmap renderer accepts the framework supplied by After Effects:
+  CUDA on compatible NVIDIA devices and OpenCL when AE supplies an OpenCL
+  context, with CPU fallback. Metal remains the macOS GPU backend.
 - The release install flow in the main [README](../README.md) is for end users. This page is for local development.

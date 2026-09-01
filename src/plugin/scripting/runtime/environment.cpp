@@ -41,6 +41,8 @@ bool ShouldWriteRenderDiagnostic(const char* eventName) {
   const std::string event = eventName ? eventName : "unknown";
   return event.find("failed") != std::string::npos ||
     event.find("error") != std::string::npos ||
+    event == "gpu-device-setup-complete" ||
+    event == "gpu-device-setup-skipped" ||
     event == "runtime-cache-rebuild" ||
     event == "controller-history-dirty" ||
     event == "controller-render-superseded";
@@ -934,6 +936,43 @@ std::uint64_t ReadLiveEffectSessionId(
   return sequenceData->liveEffectSessionId;
 }
 
+void AppendEffectReferenceDiagnostic(
+  PF_InData* in_data,
+  const char* eventName,
+  const char* fallbackEventName,
+  const std::string& detail
+) {
+  const std::string runtimeDirectory = GetRuntimeDirectoryPath();
+  if (runtimeDirectory.empty()) {
+    return;
+  }
+  const std::string logPath = runtimeDirectory + "/effect_runtime.log";
+  const std::lock_guard<std::mutex> lock(gEffectRuntimeDiagnosticMutex);
+
+  RotateLogFileIfNeeded(logPath, 1024U * 1024U);
+  std::ofstream stream(logPath.c_str(), std::ios::out | std::ios::app);
+  if (!stream.is_open()) {
+    return;
+  }
+
+  std::string safeDetail = detail;
+  std::replace(safeDetail.begin(), safeDetail.end(), '\n', ' ');
+  std::replace(safeDetail.begin(), safeDetail.end(), '\r', ' ');
+  const auto now = std::chrono::system_clock::now().time_since_epoch();
+  const auto milliseconds =
+    std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+  stream
+    << "timeMs=" << milliseconds
+    << " event=" << (eventName ? eventName : fallbackEventName)
+    << " effectRef=" << reinterpret_cast<std::uintptr_t>(
+         in_data ? in_data->effect_ref : NULL
+       );
+  if (!safeDetail.empty()) {
+    stream << " detail=" << safeDetail;
+  }
+  stream << '\n';
+}
+
 }  // namespace
 
 EffectRuntimeKey ResolveEffectRuntimeKey(PF_InData* in_data) {
@@ -1012,40 +1051,37 @@ void AppendEffectRuntimeDiagnostic(
   stream << '\n';
 }
 
+void AppendEffectHostDiagnostic(
+  PF_InData* in_data,
+  const char* eventName,
+  const std::string& detail
+) {
+  if (!ShouldWriteRenderDiagnostic(eventName)) {
+    return;
+  }
+
+  // GPU device setup and other host lifecycle selectors can run without a
+  // valid Effect Sequence Data Suite. Keep this path deliberately limited to
+  // callback-local fields so diagnostics cannot enter AE's sequence machinery.
+  AppendEffectReferenceDiagnostic(
+    in_data,
+    eventName,
+    "host-unknown",
+    detail
+  );
+}
+
 void AppendEffectUiDiagnostic(
   PF_InData* in_data,
   const char* eventName,
   const std::string& detail
 ) {
-  const std::string runtimeDirectory = GetRuntimeDirectoryPath();
-  if (runtimeDirectory.empty()) {
-    return;
-  }
-  const std::string logPath = runtimeDirectory + "/effect_runtime.log";
-  const std::lock_guard<std::mutex> lock(gEffectRuntimeDiagnosticMutex);
-
-  RotateLogFileIfNeeded(logPath, 1024U * 1024U);
-  std::ofstream stream(logPath.c_str(), std::ios::out | std::ios::app);
-  if (!stream.is_open()) {
-    return;
-  }
-
-  std::string safeDetail = detail;
-  std::replace(safeDetail.begin(), safeDetail.end(), '\n', ' ');
-  std::replace(safeDetail.begin(), safeDetail.end(), '\r', ' ');
-  const auto now = std::chrono::system_clock::now().time_since_epoch();
-  const auto milliseconds =
-    std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-  stream
-    << "timeMs=" << milliseconds
-    << " event=" << (eventName ? eventName : "ui-unknown")
-    << " effectRef=" << reinterpret_cast<std::uintptr_t>(
-         in_data ? in_data->effect_ref : NULL
-       );
-  if (!safeDetail.empty()) {
-    stream << " detail=" << safeDetail;
-  }
-  stream << '\n';
+  AppendEffectReferenceDiagnostic(
+    in_data,
+    eventName,
+    "ui-unknown",
+    detail
+  );
 }
 
 std::optional<std::string> ReadTextFile(const std::string& path) {

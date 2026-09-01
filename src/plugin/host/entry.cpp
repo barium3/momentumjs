@@ -38,7 +38,7 @@ constexpr PF_OutFlags2 kMomentumBaseOutFlags2 =
   PF_OutFlag2_I_MIX_GUID_DEPENDENCIES |
   PF_OutFlag2_SUPPORTS_GET_FLATTENED_SEQUENCE_DATA |
   PF_OutFlag2_SUPPORTS_THREADED_RENDERING
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
   | PF_OutFlag2_SUPPORTS_GPU_RENDER_F32
 #endif
   ;

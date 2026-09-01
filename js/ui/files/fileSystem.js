@@ -1,9 +1,26 @@
 // Promise-based bridge for project file-system operations in After Effects.
 window.fileSystem = (function () {
   const DEFAULT_RETRY_DELAY_MS = 250;
+  const IDEMPOTENT_READ_RETRY_LIMIT = 3;
 
   function createHostError(message, action, response, retryable) {
-    const error = new Error(message || "After Effects file operation failed.");
+    const errorCode = response && typeof response.code === "string"
+      ? response.code
+      : "PROJECT_FILE_OPERATION_FAILED";
+    const error = window.momentumErrors
+      ? window.momentumErrors.create(
+          errorCode,
+          message || "After Effects file operation failed.",
+          {
+            stage: action || "project-file",
+            path: response && response.data && response.data.path
+              ? response.data.path
+              : "",
+            retryable: retryable === true,
+            details: response || null,
+          },
+        )
+      : new Error(message || "After Effects file operation failed.");
     error.action = action;
     error.response = response || null;
     error.retryable = retryable === true;
@@ -44,23 +61,29 @@ window.fileSystem = (function () {
   }
 
   function callOnce(action, payload) {
+    const encodedAction = encodeURIComponent(String(action || ""));
+    const encodedPayload = encodeURIComponent(JSON.stringify(payload || {}));
+    const script =
+      'projectFileCommand("' +
+        encodedAction +
+        '", "' +
+        encodedPayload +
+        '")';
+    const bridge = window.momentumPluginBridge;
+    if (bridge && typeof bridge.evaluateHostScript === "function") {
+      return bridge.evaluateHostScript(script).then(function (result) {
+        return parseResponse(result, action);
+      });
+    }
+
     return new Promise(function (resolve, reject) {
-      const encodedAction = encodeURIComponent(String(action || ""));
-      const encodedPayload = encodeURIComponent(JSON.stringify(payload || {}));
-      csInterface.evalScript(
-        'projectFileCommand("' +
-          encodedAction +
-          '", "' +
-          encodedPayload +
-          '")',
-        function (result) {
-          try {
-            resolve(parseResponse(result, action));
-          } catch (error) {
-            reject(error);
-          }
-        },
-      );
+      csInterface.evalScript(script, function (result) {
+        try {
+          resolve(parseResponse(result, action));
+        } catch (error) {
+          reject(error);
+        }
+      });
     });
   }
 
@@ -223,7 +246,10 @@ window.fileSystem = (function () {
       });
     },
     readTextFile: function (filePath) {
-      return call("readTextFile", { path: filePath }).then(function (data) {
+      return call("readTextFile", { path: filePath }, {
+        retries: IDEMPOTENT_READ_RETRY_LIMIT,
+        retryDelayMs: DEFAULT_RETRY_DELAY_MS,
+      }).then(function (data) {
         const response = requireObject(data, "readTextFile");
         if (typeof response.content !== "string") {
           throw createHostError(

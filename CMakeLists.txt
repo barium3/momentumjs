@@ -74,6 +74,8 @@ set(MOMENTUM_RENDERING_SOURCES
   src/plugin/rendering/bitmap/planning/geometry.cpp
   src/plugin/rendering/bitmap/resources/cache.cpp
   src/plugin/rendering/bitmap/backends/cpu/renderer.cpp
+  src/plugin/rendering/bitmap/backends/compute/executor.cpp
+  src/plugin/rendering/bitmap/backends/compute/geometry.cpp
   src/plugin/rendering/bitmap/backends/gpu/renderer.cpp
   src/plugin/rendering/software/rasterizer.cpp
   src/plugin/rendering/software/image.cpp
@@ -110,8 +112,88 @@ add_library(${MOMENTUM_PLUGIN_NAME} MODULE
 )
 
 if(WIN32)
+  set(MOMENTUM_CUDA_PTX_ARCHITECTURE "compute_52")
+  set(MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY 52)
+  find_program(MOMENTUM_NVCC_EXECUTABLE
+    NAMES nvcc nvcc.exe
+    HINTS
+      "$ENV{CUDA_PATH}/bin"
+      "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.0/bin"
+    REQUIRED
+  )
+
+  set(MOMENTUM_WINDOWS_KERNEL_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/kernels"
+  )
+  set(MOMENTUM_CUDA_PTX
+    "${MOMENTUM_WINDOWS_KERNEL_DIR}/momentum_bitmap.ptx"
+  )
+  set(MOMENTUM_CUDA_PTX_CPP
+    "${MOMENTUM_WINDOWS_KERNEL_DIR}/cuda_kernels_ptx.cpp"
+  )
+  set(MOMENTUM_OPENCL_SOURCE_CPP
+    "${MOMENTUM_WINDOWS_KERNEL_DIR}/opencl_kernels_source.cpp"
+  )
+
+  add_custom_command(
+    OUTPUT "${MOMENTUM_CUDA_PTX_CPP}"
+    BYPRODUCTS "${MOMENTUM_CUDA_PTX}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${MOMENTUM_WINDOWS_KERNEL_DIR}"
+    COMMAND "${MOMENTUM_NVCC_EXECUTABLE}"
+      --ptx
+      --std=c++14
+      --use_fast_math
+      # CUDA 12.0 predates recent VS 2022 point releases. This target emits
+      # device-only PTX and does not compile/link MSVC host objects, so the
+      # forward-compatible compiler gate is safe here.
+      --allow-unsupported-compiler
+      -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH
+      "--gpu-architecture=${MOMENTUM_CUDA_PTX_ARCHITECTURE}"
+      "-I${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/rendering/bitmap/backends/cuda"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/rendering/bitmap/backends/cuda/kernels.cu"
+      -o "${MOMENTUM_CUDA_PTX}"
+    COMMAND "${CMAKE_COMMAND}"
+      "-DINPUTS=${MOMENTUM_CUDA_PTX}"
+      "-DOUTPUT=${MOMENTUM_CUDA_PTX_CPP}"
+      "-DHEADER=rendering/bitmap/backends/cuda/kernels.h"
+      "-DNAMESPACE_NAME=cuda"
+      "-DFUNCTION_NAME=KernelPtx"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedKernelText.cmake"
+    DEPENDS
+      src/plugin/rendering/bitmap/backends/cuda/kernels.cu
+      src/plugin/rendering/bitmap/backends/compute/kernels_common.inc
+      cmake/EmbedKernelText.cmake
+    COMMENT "Compiling and embedding Momentum CUDA kernels"
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT "${MOMENTUM_OPENCL_SOURCE_CPP}"
+    COMMAND "${CMAKE_COMMAND}"
+      "-DINPUTS=${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/rendering/bitmap/backends/opencl/kernels.cl|${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/rendering/bitmap/backends/compute/kernels_common.inc"
+      "-DOUTPUT=${MOMENTUM_OPENCL_SOURCE_CPP}"
+      "-DHEADER=rendering/bitmap/backends/opencl/kernels.h"
+      "-DNAMESPACE_NAME=opencl"
+      "-DFUNCTION_NAME=KernelSource"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedKernelText.cmake"
+    DEPENDS
+      src/plugin/rendering/bitmap/backends/opencl/kernels.cl
+      src/plugin/rendering/bitmap/backends/compute/kernels_common.inc
+      cmake/EmbedKernelText.cmake
+    COMMENT "Embedding Momentum OpenCL kernels"
+    VERBATIM
+  )
+
   target_sources(${MOMENTUM_PLUGIN_NAME} PRIVATE
     src/plugin/platform/windows/javascriptcore_compat.cpp
+    src/plugin/rendering/bitmap/backends/cuda/renderer.cpp
+    src/plugin/rendering/bitmap/backends/opencl/renderer.cpp
+    "${MOMENTUM_CUDA_PTX_CPP}"
+    "${MOMENTUM_OPENCL_SOURCE_CPP}"
+  )
+  target_compile_definitions(${MOMENTUM_PLUGIN_NAME} PRIVATE
+    MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY=${MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY}
+    MOMENTUM_CUDA_PTX_ARCHITECTURE="${MOMENTUM_CUDA_PTX_ARCHITECTURE}"
   )
 
   set(MOMENTUM_WINDOWS_PIPL_DIR
@@ -339,6 +421,24 @@ if(BUILD_TESTING)
     COMMAND momentum_image_pixel_cow_test
   )
 
+  add_executable(momentum_cuda_context_scope_test
+    tests/cuda_context_scope_test.cpp
+  )
+  target_compile_features(momentum_cuda_context_scope_test PRIVATE cxx_std_17)
+  target_include_directories(momentum_cuda_context_scope_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin"
+  )
+  if(WIN32)
+    target_compile_definitions(momentum_cuda_context_scope_test PRIVATE
+      MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY=${MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY}
+      MOMENTUM_CUDA_PTX_ARCHITECTURE="${MOMENTUM_CUDA_PTX_ARCHITECTURE}"
+    )
+  endif()
+  add_test(
+    NAME momentum_cuda_context_scope
+    COMMAND momentum_cuda_context_scope_test
+  )
+
   if(WIN32)
     add_executable(momentum_windows_image_decode_test
       tests/windows_image_decode_test.cpp
@@ -367,6 +467,40 @@ if(BUILD_TESTING)
       NAME momentum_windows_image_decode
       COMMAND momentum_windows_image_decode_test
         "${CMAKE_CURRENT_SOURCE_DIR}/footage/showcase.png"
+    )
+
+    add_executable(momentum_windows_cuda_kernel_load_test
+      tests/windows_cuda_kernel_load_test.cpp
+      "${MOMENTUM_CUDA_PTX_CPP}"
+    )
+    target_compile_features(momentum_windows_cuda_kernel_load_test PRIVATE
+      cxx_std_17
+    )
+    target_include_directories(momentum_windows_cuda_kernel_load_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin"
+    )
+    target_compile_definitions(momentum_windows_cuda_kernel_load_test PRIVATE
+      MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY=${MOMENTUM_CUDA_MIN_COMPUTE_CAPABILITY}
+      MOMENTUM_CUDA_PTX_ARCHITECTURE="${MOMENTUM_CUDA_PTX_ARCHITECTURE}"
+    )
+    add_test(
+      NAME momentum_windows_cuda_kernel_load
+      COMMAND momentum_windows_cuda_kernel_load_test
+    )
+
+    add_executable(momentum_windows_opencl_kernel_compile_test
+      tests/windows_opencl_kernel_compile_test.cpp
+      "${MOMENTUM_OPENCL_SOURCE_CPP}"
+    )
+    target_compile_features(momentum_windows_opencl_kernel_compile_test PRIVATE
+      cxx_std_17
+    )
+    target_include_directories(momentum_windows_opencl_kernel_compile_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin"
+    )
+    add_test(
+      NAME momentum_windows_opencl_kernel_compile
+      COMMAND momentum_windows_opencl_kernel_compile_test
     )
   endif()
 

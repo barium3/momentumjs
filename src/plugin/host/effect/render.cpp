@@ -72,6 +72,21 @@ struct OutputCopyOriginInfo {
   const char* mode = "zero";
 };
 
+const char* GPUFrameworkName(PF_GPU_Framework framework) {
+  switch (framework) {
+    case PF_GPU_Framework_CUDA:
+      return "cuda";
+    case PF_GPU_Framework_OPENCL:
+      return "opencl";
+    case PF_GPU_Framework_METAL:
+      return "metal";
+    case PF_GPU_Framework_NONE:
+      return "none";
+    default:
+      return "unknown";
+  }
+}
+
 double ElapsedMilliseconds(std::chrono::steady_clock::time_point start);
 std::uintptr_t NextRenderInvocationRuntimeKey();
 
@@ -371,7 +386,8 @@ PF_Err PreRender(
   extra->output->delete_pre_render_data_func =
     DisposeRenderInvocationInfo;
 
-  if (bitmap::gpu::Available()) {
+  const bool gpuAvailable = bitmap::gpu::Available(extra->input->what_gpu);
+  if (gpuAvailable) {
     extra->output->flags |=
       PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
   }
@@ -400,7 +416,7 @@ PF_Err PreRender(
     << info->downsampleScaleY
     << " tile=" << info->tileLeft << ',' << info->tileTop
     << '-' << info->tileRight << ',' << info->tileBottom
-    << " gpuPossible=" << (bitmap::gpu::Available() ? 1 : 0);
+    << " gpuPossible=" << (gpuAvailable ? 1 : 0);
   runtime_internal::AppendEffectRuntimeDiagnostic(
     input,
     "prerender-complete",
@@ -761,25 +777,92 @@ PF_Err GPUDeviceSetup(
     return PF_Err_BAD_CALLBACK_PARAM;
   }
 
+  const PF_GPU_Framework framework = extra->input->what_gpu;
+  const A_u_long deviceIndex = extra->input->device_index;
+  extra->output->gpu_data = nullptr;
+  if (output) {
+    output->out_flags2 = static_cast<PF_OutFlags2>(0);
+  }
+  if (!bitmap::gpu::Available(framework)) {
+    std::ostringstream detail;
+    detail
+      << "framework=" << GPUFrameworkName(framework)
+      << " frameworkValue=" << static_cast<long>(framework)
+      << " deviceIndex=" << deviceIndex
+      << " result=unsupported-framework";
+    runtime_internal::AppendEffectHostDiagnostic(
+      input,
+      "gpu-device-setup-skipped",
+      detail.str()
+    );
+    return PF_Err_NONE;
+  }
+
   std::string errorMessage;
+  std::string diagnosticDetail;
   const PF_Err error = bitmap::gpu::CreateContext(
     input,
     output,
-    extra->input->what_gpu,
-    extra->input->device_index,
+    framework,
+    deviceIndex,
     &extra->output->gpu_data,
-    &errorMessage
+    &errorMessage,
+    &diagnosticDetail
   );
   if (error != PF_Err_NONE) {
+    std::ostringstream detail;
+    detail
+      << "framework=" << GPUFrameworkName(framework)
+      << " frameworkValue=" << static_cast<long>(framework)
+      << " deviceIndex=" << deviceIndex
+      << " err=" << static_cast<long>(error)
+      << " reason="
+      << (errorMessage.empty() ? "unknown GPU setup failure" : errorMessage);
+    if (!diagnosticDetail.empty()) {
+      detail << ' ' << diagnosticDetail;
+    }
+    runtime_internal::AppendEffectHostDiagnostic(
+      input,
+      "gpu-device-setup-failed",
+      detail.str()
+    );
     return error;
   }
 
-  if (output) {
-    output->out_flags =
-      static_cast<PF_OutFlags>(MOMENTUM_EFFECT_OUT_FLAGS);
-    output->out_flags2 =
-      static_cast<PF_OutFlags2>(MOMENTUM_EFFECT_OUT_FLAGS2);
+  if (!extra->output->gpu_data) {
+    std::ostringstream detail;
+    detail
+      << "framework=" << GPUFrameworkName(framework)
+      << " frameworkValue=" << static_cast<long>(framework)
+      << " deviceIndex=" << deviceIndex
+      << " result=cpu-fallback"
+      << " reason="
+      << (errorMessage.empty() ? "GPU device unavailable" : errorMessage);
+    runtime_internal::AppendEffectHostDiagnostic(
+      input,
+      "gpu-device-setup-skipped",
+      detail.str()
+    );
+    return PF_Err_NONE;
   }
+
+  if (output) {
+    output->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+  }
+  std::ostringstream detail;
+  detail
+    << "framework=" << GPUFrameworkName(framework)
+    << " frameworkValue=" << static_cast<long>(framework)
+    << " deviceIndex=" << deviceIndex
+    << " result=gpu-enabled";
+  if (!diagnosticDetail.empty()) {
+    detail << ' ' << diagnosticDetail;
+  }
+  runtime_internal::AppendEffectHostDiagnostic(
+    input,
+    "gpu-device-setup-complete",
+    detail.str()
+  );
   return PF_Err_NONE;
 }
 
@@ -1495,7 +1578,7 @@ PF_Err SmartRender(
     << "stage=smart-render backend=gpu"
     << " totalMs=" << ElapsedMilliseconds(started)
     << " planMs=" << planMs
-    << " metalAndCopyMs=" << gpuMs
+      << " gpuAndCopyMs=" << gpuMs
     << " operations=" << framePlan.operations.size()
     << " renderCache=" << info->renderCacheKey;
   runtime_internal::AppendEffectRuntimeDiagnostic(

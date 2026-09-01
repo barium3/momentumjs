@@ -20,7 +20,6 @@
             <DispatchInfo>
                 <Resources>
                     <MainPath>./index.html</MainPath>
-                    <ScriptPath>./jsx/main.jsx</ScriptPath>
                 </Resources>
                 <Lifecycle>
                     <AutoVisible>true</AutoVisible>

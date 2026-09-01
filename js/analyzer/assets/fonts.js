@@ -144,6 +144,24 @@ class FontAnalyzer {
     return typeof window !== "undefined" ? window.csInterface || null : null;
   }
 
+  _evaluateHostScript(script) {
+    if (
+      typeof window !== "undefined" &&
+      window.momentumPluginBridge &&
+      typeof window.momentumPluginBridge.evaluateHostScript === "function"
+    ) {
+      return window.momentumPluginBridge.evaluateHostScript(script);
+    }
+
+    const cep = this._getCepInterface();
+    if (!cep || typeof cep.evalScript !== "function") {
+      return Promise.reject(new Error("CEP bridge is unavailable."));
+    }
+    return new Promise((resolve) => {
+      cep.evalScript(script, resolve);
+    });
+  }
+
   _parseFontEntries(result) {
     try {
       const entries = JSON.parse(result || "[]");
@@ -271,9 +289,7 @@ class FontAnalyzer {
   }
 
   loadFontCatalogFromAE() {
-    return new Promise((resolve) => {
-      const cep = this._getCepInterface();
-      const fallbackScript = `
+    const fallbackScript = `
         (function() {
           try {
             if (!app.fonts || !app.fonts.allFonts) {
@@ -339,25 +355,16 @@ class FontAnalyzer {
         })();
       `;
 
-      if (cep && typeof cep.evalScript === "function") {
-        cep.evalScript(
-          "typeof getAvailableFontCatalog === 'function' ? getAvailableFontCatalog() : '[]'",
-          (result) => {
-            const entries = this._parseFontEntries(result);
-            if (entries.length > 0) {
-              resolve(entries);
-              return;
-            }
-
-            cep.evalScript(fallbackScript, (fallbackResult) => {
-              resolve(this._parseFontEntries(fallbackResult));
-            });
-          },
-        );
-      } else {
-        resolve([]);
-      }
-    });
+    return this._evaluateHostScript(
+      "typeof getAvailableFontCatalog === 'function' ? getAvailableFontCatalog() : '[]'",
+    ).then((result) => {
+      const entries = this._parseFontEntries(result);
+      return entries.length > 0
+        ? entries
+        : this._evaluateHostScript(fallbackScript).then((fallbackResult) => {
+            return this._parseFontEntries(fallbackResult);
+          });
+    }).catch(() => []);
   }
 
   loadFontMapFromAE() {
@@ -403,11 +410,9 @@ class FontAnalyzer {
   }
 
   querySingleFont(displayName) {
-    return new Promise((resolve) => {
-      const cep = this._getCepInterface();
-      const escapedName = displayName.replace(/"/g, '\\"');
+    const escapedName = displayName.replace(/"/g, '\\"');
 
-      const script = `
+    const script = `
         (function() {
           try {
             if (!app.fonts || !app.fonts.getFontsByFamilyNameAndStyleName) {
@@ -450,18 +455,9 @@ class FontAnalyzer {
         })();
       `;
 
-      if (cep && typeof cep.evalScript === "function") {
-        cep.evalScript(script, (result) => {
-          try {
-            resolve(result && result !== "null" ? result : null);
-          } catch (e) {
-            resolve(null);
-          }
-        });
-      } else {
-        resolve(null);
-      }
-    });
+    return this._evaluateHostScript(script)
+      .then((result) => result && result !== "null" ? result : null)
+      .catch(() => null);
   }
 
   getDisplayName(postScriptName) {

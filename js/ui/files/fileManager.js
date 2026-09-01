@@ -14,6 +14,7 @@ window.fileManager = (function () {
   let pendingNewItemType = null;
   let fileListRequestGeneration = 0;
   let activeSessionResolutionPromise = null;
+  let fileListRecoveryPending = false;
   let startupSessionInitialized = false;
   let initialized = false;
   const FILE_LIST_RETRY_LIMIT = 6;
@@ -390,6 +391,24 @@ window.fileManager = (function () {
       },
       function (error) {
         if (requestGeneration !== fileListRequestGeneration) {
+          return false;
+        }
+        const bridge = window.momentumPluginBridge;
+        if (
+          error &&
+          error.retryable === true &&
+          bridge &&
+          typeof bridge.reportHostUnavailable === "function" &&
+          typeof bridge.whenReady === "function"
+        ) {
+          if (!fileListRecoveryPending) {
+            fileListRecoveryPending = true;
+            bridge.reportHostUnavailable(error.message);
+            bridge.whenReady().then(function () {
+              fileListRecoveryPending = false;
+              return loadFileList(loadOptions);
+            });
+          }
           return false;
         }
         console.error("Failed to get file list:", error);

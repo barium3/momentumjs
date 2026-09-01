@@ -223,9 +223,20 @@ window.consoleManager = (function () {
       }
 
       if (isObject(arg) || Array.isArray(arg)) {
-        const typeLabel = Array.isArray(arg) ? `Array(${arg.length})` : "Object";
-        mainContent += `<span class="console-expandable-ref" data-message="${messageId}" data-index="${index}">${typeLabel}</span>`;
-        detailsHtml += createObjectDetails(arg, messageId, index);
+        const normalizedError = isError && window.momentumErrors
+          ? window.momentumErrors.normalize(arg, {
+              code: "CONSOLE_ERROR",
+              message: "Object reported as an error",
+            })
+          : null;
+        const displayValue = normalizedError || arg;
+        const typeLabel = normalizedError
+          ? window.momentumErrors.format(normalizedError)
+          : Array.isArray(arg)
+            ? `Array(${arg.length})`
+            : "Object";
+        mainContent += `<span class="console-expandable-ref" data-message="${messageId}" data-index="${index}">${escapeHtml(typeLabel)}</span>`;
+        detailsHtml += createObjectDetails(displayValue, messageId, index);
       } else {
         mainContent += formatValue(arg);
       }
