@@ -97,6 +97,15 @@ bool IsUsableObject(JSObjectRef object) {
   return object && JS_IsObject(object->value);
 }
 
+void PrepareQuickJsExecution(MomentumJSContext* context) {
+  if (context && context->runtime) {
+    // After Effects may move a persistent effect instance between MFR worker
+    // threads. QuickJS records a thread-local stack top for overflow checks,
+    // so refresh it at every outer host-to-JavaScript execution boundary.
+    JS_UpdateStackTop(context->runtime);
+  }
+}
+
 JSValue NativeCallbackBridge(
   JSContext* quickContext,
   JSValueConst thisValue,
@@ -616,6 +625,7 @@ JSValueRef JSObjectCallAsFunction(
       ? arguments[index]->value
       : JS_UNDEFINED);
   }
+  PrepareQuickJsExecution(context);
   JSValue result = JS_Call(
     context->context,
     object->value,
@@ -647,6 +657,7 @@ JSValueRef JSEvaluateScript(
     return nullptr;
   }
   const std::string& sourceName = StringValue(sourceURL);
+  PrepareQuickJsExecution(context);
   JSValue result = JS_Eval(
     context->context,
     script->value.data(),
