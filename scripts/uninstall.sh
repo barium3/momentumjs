@@ -34,4 +34,5 @@ if [ "${MOMENTUM_REMOVE_USER_DATA:-0}" = "1" ]; then
 else
   echo "Momentum uninstall completed. User workspaces were preserved."
 fi
+remove_if_exists "${MOMENTUM_UNINSTALL_DIR}"
 echo "Unsigned CEP mode was left unchanged because other extensions may use it."

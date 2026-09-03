@@ -35,65 +35,59 @@ Browse the full API reference here:
 
 ## Install
 
-#### Requirements
+Momentum requires Adobe After Effects. After Effects 2025 is recommended.
 
-- Adobe After Effects installed on the machine
+### macOS
 
-#### macOS
-
-Run:
+Close After Effects, paste this block into Terminal, and then restart After
+Effects when it finishes:
 
 ```bash
-curl -L https://github.com/barium3/momentumjs/releases/latest/download/momentumjs-installer.pkg -o momentumjs-installer.pkg
-open momentumjs-installer.pkg
+momentum_install_dir="$(mktemp -d)" && \
+curl -fL https://github.com/barium3/momentumjs/releases/latest/download/momentumjs.zip \
+  -o "$momentum_install_dir/momentumjs.zip" && \
+ditto -x -k "$momentum_install_dir/momentumjs.zip" "$momentum_install_dir" && \
+sh "$momentum_install_dir/momentumjs/install.command"
 ```
 
-Or manually download: [latest release](https://github.com/barium3/momentumjs/releases/latest) / `momentumjs-installer.pkg`
+### Windows
 
-Then restart After Effects.
-
-
-#### Windows
-
-Windows supports both `Vector` and `Bitmap` mode. Bitmap rendering follows the
-GPU framework selected by After Effects: CUDA on compatible NVIDIA devices or
-OpenCL when AE supplies an OpenCL context, with automatic CPU fallback. A
-Windows release build installs the CEP panel and `Momentum.aex`; end users do
-not need the CUDA toolkit.
-
-For a source build, configure the AE SDK and vcpkg, then run:
+Close After Effects, paste this block into PowerShell, and accept the Windows
+administrator prompt:
 
 ```powershell
-cmake --preset windows-vs2022
-cmake --build --preset windows-release
-powershell -ExecutionPolicy Bypass -File scripts/install-windows.ps1 `
-  -Configuration Release -EnableCepDebugMode
+$ErrorActionPreference = 'Stop'
+$momentumInstallDir = Join-Path `
+  ([IO.Path]::GetTempPath()) `
+  ('momentumjs-' + [guid]::NewGuid())
+$momentumZip = Join-Path $momentumInstallDir 'momentumjs.zip'
+New-Item -ItemType Directory -Path $momentumInstallDir | Out-Null
+Invoke-WebRequest `
+  -UseBasicParsing `
+  -Uri 'https://github.com/barium3/momentumjs/releases/latest/download/momentumjs.zip' `
+  -OutFile $momentumZip
+Expand-Archive `
+  -LiteralPath $momentumZip `
+  -DestinationPath $momentumInstallDir
+& (Join-Path $momentumInstallDir 'momentumjs\install.cmd')
 ```
 
-The installer preserves the existing `user` workspace and installs the native
-plugin under Adobe's shared `MediaCore\Momentum` directory. Restart After
-Effects after installation.
+## Uninstall
 
-### Uninstall
+### macOS
 
-#### macOS
-
-From an unpacked Momentum release or repository, run:
+Close After Effects and paste this block into Terminal:
 
 ```bash
-sh scripts/uninstall.sh
+sh "$HOME/Library/Application Support/Momentum/uninstall/uninstall.command"
 ```
 
-The uninstaller removes Momentum while preserving the CEP extension's `user/`
-workspace. To remove the workspace too, run it with
-`MOMENTUM_REMOVE_USER_DATA=1`.
+### Windows
 
-#### Windows
+Close After Effects and paste this block into PowerShell:
 
-Back up the extension's `user` folder, then remove:
-
-```text
-C:\Users\YourUsername\AppData\Roaming\Adobe\CEP\extensions\momentumjs
+```powershell
+& "$env:LOCALAPPDATA\Momentum\uninstall\uninstall.cmd"
 ```
 
 ## Open in After Effects

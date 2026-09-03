@@ -12,7 +12,10 @@ is not part of that Code keyframe restriction.
 
 If you need bitmap-only features such as `pixelDensity()`, switch the sketch to Bitmap mode.
 
-Loop-control APIs such as `isLooping()`, `loop()`, `noLoop()`, and `redraw()` are currently not supported in Bitmap mode. Bitmap rendering is driven by the After Effects effect host, so p5-style loop control is not available there yet.
+Loop-control APIs follow the p5.js 1.9 lifecycle in both render modes. In
+Bitmap mode, `noLoop()` pauses JavaScript state progression while After Effects
+continues requesting frames; the last rendered bitmap remains frozen until the
+loop resumes or an external callback requests `redraw()`.
 
 ---
 
@@ -29,7 +32,7 @@ Bitmap-only environment APIs:
 
 - `pixelDensity([value])`
 
-Vector-only environment APIs:
+Common loop-control APIs:
 
 - `isLooping()`
 - `loop()`
@@ -204,7 +207,8 @@ circle(50, height / 2, 20);
 
 Mode: Vector, Bitmap
 
-Current frame index of the sketch.
+Number of user `draw()` calls made by the sketch. The first call observes
+`frameCount === 1`.
 
 ### Example
 
@@ -215,14 +219,15 @@ circle(x, 50, 10);
 
 ### Notes
 
-- `frameCount` changes as the sketch advances.
+- `frameCount` increments only when the user's `draw()` actually runs. A paused
+  AE timeline frame does not increment it.
 - Use it for frame-based animation logic.
 
 ---
 
 ## `isLooping()`
 
-Mode: Vector
+Mode: Vector, Bitmap
 
 Returns whether the sketch is currently looping.
 
@@ -240,16 +245,14 @@ if (!isLooping()) {
 }
 ```
 
-### Notes
-
-- Bitmap mode does not support this yet.
-- Because bitmap rendering is driven by the After Effects plugin host, loop state is not exposed in the same p5-style way.
+In Bitmap mode this reports the replayable loop state owned by the effect's
+JavaScript evaluator, not whether After Effects itself is requesting frames.
 
 ---
 
 ## `loop()`
 
-Mode: Vector
+Mode: Vector, Bitmap
 
 Enables sketch looping.
 
@@ -265,16 +268,15 @@ loop()
 loop();
 ```
 
-### Notes
-
-- Bitmap mode does not support this yet.
-- Due to the After Effects plugin runtime model, bitmap rendering cannot currently opt into p5-style loop control.
+Momentum resumes `draw()` on the current or next host evaluation. This is the
+After Effects equivalent of p5.js scheduling another animation update; it does
+not start a separate browser animation loop.
 
 ---
 
 ## `noLoop()`
 
-Mode: Vector
+Mode: Vector, Bitmap
 
 Disables continuous sketch looping.
 
@@ -290,36 +292,61 @@ noLoop()
 noLoop();
 ```
 
-### Notes
-
-- Bitmap mode does not support this yet.
-- Due to the After Effects plugin runtime model, bitmap rendering is evaluated by the host instead of being paused with p5-style loop control.
+The current `draw()` completes before later timeline frames freeze. Calling
+`noLoop()` from `setup()` still allows the mandatory first `draw()`, matching
+p5.js.
 
 ---
 
 ## `redraw()`
 
-Mode: Vector
+Mode: Vector, Bitmap
 
-Requests another update when looping is disabled.
+Requests one or more explicit `draw()` calls.
 
 ### Signature
 
 ```js
-redraw()
+redraw([n])
 ```
 
 ### Example
 
+Bitmap controller-event example:
+
 ```js
-noLoop();
-redraw();
+let sizeCtrl;
+
+function setup() {
+  sizeCtrl = createSlider(10, 200, 60, 1);
+  noLoop();
+  sizeCtrl.changed(function () {
+    redraw();
+  });
+}
+
+function draw() {
+  background(30);
+  circle(width / 2, height / 2, sizeCtrl.value());
+}
 ```
+
+### Parameters
+
+- `n` (optional): Number of `draw()` calls. It is parsed as an integer;
+  omitted, invalid, or values below `1` default to `1`.
 
 ### Notes
 
-- Bitmap mode does not support this yet.
-- Due to the After Effects plugin runtime model, there is currently no direct equivalent to p5-style manual redraw requests.
+- Like p5.js 1.9, calls made before `setup()` completes or from inside the
+  user's `draw()` are ignored. Calling it at the end of `setup()` therefore
+  does not create a second first frame.
+- `redraw()` is valid whether looping is enabled or disabled.
+- Bitmap controller `.changed()` callbacks provide the external event phase
+  needed for interactive redraws. They execute before that host frame's normal
+  draw decision.
+- To keep an AE render request bounded, Momentum limits a single queued batch
+  to `1000` draw calls.
 
 ---
 

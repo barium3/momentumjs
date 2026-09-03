@@ -54,10 +54,12 @@ if [ "${PLUGIN_SOURCE_ABS}" != "${PLUGIN_TARGET_ABS}" ]; then
 fi
 
 ensure_dir "${RUNTIME_TARGET_DIR}"
+install_macos_uninstaller
 remove_quarantine "${CEP_TARGET_DIR}" "${PLUGIN_CONTAINER_DIR}"
 
 echo "Momentum installed."
 echo "CEP extension (user): ${CEP_TARGET_DIR}"
 echo "Plugin bundle: ${PLUGIN_TARGET_DIR}"
 echo "Runtime dir: ${RUNTIME_TARGET_DIR}"
+echo "Uninstaller: ${MOMENTUM_UNINSTALL_DIR}/uninstall.command"
 echo "Restart After Effects before testing."

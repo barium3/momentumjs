@@ -9,6 +9,9 @@ param(
   [string]$RuntimeDirectory =
     (Join-Path $env:LOCALAPPDATA 'Momentum\runtime'),
 
+  [string]$UninstallerDirectory =
+    (Join-Path $env:LOCALAPPDATA 'Momentum\uninstall'),
+
   [switch]$RemoveUserData,
 
   [Parameter(DontShow = $true)]
@@ -74,6 +77,11 @@ if (Test-Path $CepDirectory) {
     } | Remove-Item -Recurse -Force
     Write-Host "Preserved user workspace: $userDirectory"
   }
+}
+
+if (Test-Path $UninstallerDirectory) {
+  Remove-Item -Recurse -Force $UninstallerDirectory
+  Write-Host "Removed: $UninstallerDirectory"
 }
 
 if (Test-Path $PluginDirectory) {

@@ -8,6 +8,12 @@ In bitmap mode, controllers are plugin controls on the bitmap effect layer.
 
 In both cases, sketch code reads the host-side control values back into the runtime.
 
+Bitmap controller objects also expose `changed(callback)`. The callback runs
+only when the value checked out from After Effects actually changes, which
+provides an event phase for `redraw()` or `loop()` while a sketch is paused.
+This method is Bitmap-only because Vector mode uses AE expressions rather than
+a persistent JavaScript event runtime.
+
 ---
 
 ## Overview
@@ -52,6 +58,7 @@ createSlider(min, max, value, step)
 A controller object with:
 
 - `value()`
+- `changed(callback)` (Bitmap only)
 
 ### Example
 
@@ -92,6 +99,7 @@ A controller object with:
 - `value()`
 - `degrees()`
 - `radians()`
+- `changed(callback)` (Bitmap only)
 
 ### Example
 
@@ -125,6 +133,7 @@ A controller object with:
 
 - `color()`
 - `value()`
+- `changed(callback)` (Bitmap only)
 
 ### Behavior
 
@@ -167,6 +176,7 @@ A controller object with:
 
 - `value()`
 - `checked()`
+- `changed(callback)` (Bitmap only)
 
 ### Example
 
@@ -201,6 +211,7 @@ A controller object with:
 - `value()`
 - `selected()`
 - `selected(v)`
+- `changed(callback)` (Bitmap only)
 
 ### Example
 
@@ -243,6 +254,7 @@ A controller object with:
 - `value()`
 - `x()`
 - `y()`
+- `changed(callback)` (Bitmap only)
 
 ### Example
 
@@ -273,6 +285,28 @@ function draw() {
   circle(50, 50, sizeCtrl.value());
 }
 ```
+
+### Paused Bitmap Pattern
+
+```js
+let sizeCtrl;
+
+function setup() {
+  sizeCtrl = createSlider(10, 100, 40, 1);
+  noLoop();
+  sizeCtrl.changed(function () {
+    redraw();
+  });
+}
+
+function draw() {
+  background(20);
+  circle(50, 50, sizeCtrl.value());
+}
+```
+
+`changed()` returns the same controller object, so it can also be chained from
+the corresponding `create...()` call.
 
 ---
 

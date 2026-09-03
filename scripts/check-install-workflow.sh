@@ -50,6 +50,7 @@ FULL_SOURCE_DIR="${TEST_ROOT}/full-install/source"
 FULL_PLUGIN_DIR="${TEST_ROOT}/full-install/Momentum.plugin"
 FULL_APP_SUPPORT_DIR="${TEST_ROOT}/full-install/user/Adobe"
 FULL_USER_TARGET_DIR="${FULL_APP_SUPPORT_DIR}/CEP/extensions/momentumjs"
+FULL_MOMENTUM_SUPPORT_DIR="${TEST_ROOT}/full-install/user/Momentum"
 FAKE_DEFAULTS="${TEST_ROOT}/full-install/defaults"
 DEFAULTS_LOG="${TEST_ROOT}/full-install/defaults.log"
 
@@ -68,6 +69,7 @@ printf '%s\n' \
 chmod +x "${FAKE_DEFAULTS}"
 
 MOMENTUM_APP_SUPPORT_USER_DIR="${FULL_APP_SUPPORT_DIR}" \
+MOMENTUM_SUPPORT_DIR="${FULL_MOMENTUM_SUPPORT_DIR}" \
 MOMENTUM_EXTENSION_SOURCE="${FULL_SOURCE_DIR}" \
 MOMENTUM_PLUGIN_SOURCE="${FULL_PLUGIN_DIR}" \
 MOMENTUM_DEFAULTS_COMMAND="${FAKE_DEFAULTS}" \
@@ -79,8 +81,19 @@ test -f "${FULL_USER_TARGET_DIR}/index.html"
 test -f "${FULL_USER_TARGET_DIR}/user/examples/example.js"
 test -f "${FULL_APP_SUPPORT_DIR}/Common/Plug-ins/7.0/MediaCore/Momentum/Momentum.plugin/Contents/MacOS/Momentum"
 test -d "${FULL_APP_SUPPORT_DIR}/Common/Plug-ins/7.0/MediaCore/Momentum/runtime"
+test -x "${FULL_MOMENTUM_SUPPORT_DIR}/uninstall/uninstall.command"
+test -f "${FULL_MOMENTUM_SUPPORT_DIR}/uninstall/scripts/uninstall.sh"
 test "$(sed -n '1p' "${DEFAULTS_LOG}")" = "write com.adobe.CSXS.11 PlayerDebugMode -string 1"
 test "$(sed -n '2p' "${DEFAULTS_LOG}")" = "write com.adobe.CSXS.12 PlayerDebugMode -string 1"
 test "$(wc -l < "${DEFAULTS_LOG}" | tr -d ' ')" = "2"
+
+MOMENTUM_APP_SUPPORT_USER_DIR="${FULL_APP_SUPPORT_DIR}" \
+MOMENTUM_SUPPORT_DIR="${FULL_MOMENTUM_SUPPORT_DIR}" \
+sh "${FULL_MOMENTUM_SUPPORT_DIR}/uninstall/uninstall.command"
+
+test -d "${FULL_USER_TARGET_DIR}/user"
+test ! -e "${FULL_USER_TARGET_DIR}/index.html"
+test ! -e "${FULL_APP_SUPPORT_DIR}/Common/Plug-ins/7.0/MediaCore/Momentum"
+test ! -e "${FULL_MOMENTUM_SUPPORT_DIR}/uninstall"
 
 echo "Install workflow check passed."

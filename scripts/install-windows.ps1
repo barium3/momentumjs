@@ -14,6 +14,9 @@ param(
   [string]$RuntimeDirectory =
     (Join-Path $env:LOCALAPPDATA 'Momentum\runtime'),
 
+  [string]$UninstallerDirectory =
+    (Join-Path $env:LOCALAPPDATA 'Momentum\uninstall'),
+
   [ValidateRange(6, 20)]
   [int[]]$CepMajorVersions = @(6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
 
@@ -156,6 +159,14 @@ foreach ($fileName in @('index.html', 'styles.css')) {
   Copy-Item -Force $source (Join-Path $CepDirectory $fileName)
 }
 
+New-Item -ItemType Directory -Force -Path $UninstallerDirectory | Out-Null
+Copy-Item -Force `
+  (Join-Path $rootDirectory 'uninstall.cmd') `
+  (Join-Path $UninstallerDirectory 'uninstall.cmd')
+Copy-Item -Force `
+  (Join-Path $rootDirectory 'scripts\uninstall-windows.ps1') `
+  (Join-Path $UninstallerDirectory 'uninstall-windows.ps1')
+
 $userSource = Join-Path $extensionDirectory 'user'
 $userDestination = Join-Path $CepDirectory 'user'
 New-Item -ItemType Directory -Force -Path $userDestination | Out-Null
@@ -188,6 +199,7 @@ Write-Host 'Momentum for Windows installed.'
 Write-Host "Plugin: $installedPlugin"
 Write-Host "Runtime: $RuntimeDirectory"
 Write-Host "CEP extension: $CepDirectory"
+Write-Host "Uninstaller: $(Join-Path $UninstallerDirectory 'uninstall.cmd')"
 if ($SkipCepDebugMode) {
   Write-Host 'Unsigned CEP mode was not changed.'
 } else {

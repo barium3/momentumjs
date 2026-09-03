@@ -6,6 +6,8 @@ if [ -z "${ROOT_DIR:-}" ]; then
 fi
 
 APP_SUPPORT_USER_DIR="${MOMENTUM_APP_SUPPORT_USER_DIR:-${HOME}/Library/Application Support/Adobe}"
+MOMENTUM_SUPPORT_DIR="${MOMENTUM_SUPPORT_DIR:-${HOME}/Library/Application Support/Momentum}"
+MOMENTUM_UNINSTALL_DIR="${MOMENTUM_UNINSTALL_DIR:-${MOMENTUM_SUPPORT_DIR}/uninstall}"
 DEFAULT_CEP_DEBUG_VERSIONS="6 7 8 9 10 11 12 13 14 15"
 
 require_macos() {
@@ -251,6 +253,16 @@ copy_release_support_scripts() {
     "${dest_dir}/scripts/uninstall.sh" \
     "${dest_dir}/install.command" \
     "${dest_dir}/uninstall.command"
+}
+
+install_macos_uninstaller() {
+  dest_dir="${MOMENTUM_UNINSTALL_DIR}"
+
+  ensure_dir "${dest_dir}/scripts/lib"
+  cp "${ROOT_DIR}/uninstall.command" "${dest_dir}/uninstall.command"
+  cp "${ROOT_DIR}/scripts/uninstall.sh" "${dest_dir}/scripts/uninstall.sh"
+  cp "${ROOT_DIR}/scripts/lib/common.sh" "${dest_dir}/scripts/lib/common.sh"
+  chmod +x "${dest_dir}/uninstall.command" "${dest_dir}/scripts/uninstall.sh"
 }
 
 copy_release_docs() {
