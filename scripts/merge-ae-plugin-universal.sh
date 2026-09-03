@@ -26,6 +26,9 @@ require_dir() {
 }
 
 list_frameworks() {
+  if [ ! -d "$1" ]; then
+    return 0
+  fi
   find "$1" -maxdepth 1 -type f -name '*.dylib' -print | sed 's#^.*/##' | sort
 }
 
@@ -33,9 +36,6 @@ require_dir "${X86_PLUGIN_DIR}"
 require_dir "${ARM64_PLUGIN_DIR}"
 require_file "${X86_PLUGIN_DIR}/${MAIN_BINARY_REL}"
 require_file "${ARM64_PLUGIN_DIR}/${MAIN_BINARY_REL}"
-require_dir "${X86_PLUGIN_DIR}/${FRAMEWORKS_REL}"
-require_dir "${ARM64_PLUGIN_DIR}/${FRAMEWORKS_REL}"
-
 X86_FRAMEWORK_LIST="$(list_frameworks "${X86_PLUGIN_DIR}/${FRAMEWORKS_REL}")"
 ARM64_FRAMEWORK_LIST="$(list_frameworks "${ARM64_PLUGIN_DIR}/${FRAMEWORKS_REL}")"
 

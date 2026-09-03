@@ -19,6 +19,7 @@
 
 #include "scripting/api/callbacks/data.h"
 #include "scripting/runtime/frame_cache.h"
+#include "scripting/runtime/loop_control.h"
 #include "host/code/timeline.h"
 #include "host/parameter_layout.h"
 #include "rendering/bitmap/planning/planner.h"
@@ -61,6 +62,41 @@ class ScopedControllerTimeline final {
 
  private:
   const std::vector<ControllerPoolState>* previous_ = NULL;
+};
+
+class ScopedActiveRuntime final {
+ public:
+  explicit ScopedActiveRuntime(JsHostRuntime* runtime)
+    : previous_(g_activeRuntime) {
+    g_activeRuntime = runtime;
+  }
+
+  ~ScopedActiveRuntime() {
+    g_activeRuntime = previous_;
+  }
+
+ private:
+  JsHostRuntime* previous_ = NULL;
+};
+
+class ScopedRuntimeUserDraw final {
+ public:
+  explicit ScopedRuntimeUserDraw(RuntimeLoopState* state)
+    : state_(state), previous_(state ? state->inUserDraw : false) {
+    EnterRuntimeUserDraw(state_);
+  }
+
+  ~ScopedRuntimeUserDraw() {
+    if (previous_) {
+      EnterRuntimeUserDraw(state_);
+    } else {
+      ExitRuntimeUserDraw(state_);
+    }
+  }
+
+ private:
+  RuntimeLoopState* state_ = NULL;
+  bool previous_ = false;
 };
 
 namespace {
@@ -821,6 +857,7 @@ void ResetRuntimeTransientDrawingState(JsHostRuntime* runtime, bool resetTransfo
 
 RuntimeEngineState CaptureRuntimeEngineState(const JsHostRuntime& runtime) {
   RuntimeEngineState state;
+  state.loopState = runtime.loopState;
   state.currentFill = runtime.currentFill;
   state.hasFill = runtime.hasFill;
   state.fillExplicit = runtime.fillExplicit;
@@ -864,6 +901,7 @@ void RestoreRuntimeEngineState(JsHostRuntime* runtime, const RuntimeEngineState&
     return;
   }
 
+  runtime->loopState = state.loopState;
   runtime->currentFill = state.currentFill;
   runtime->hasFill = state.hasFill;
   runtime->fillExplicit = state.fillExplicit;
@@ -990,17 +1028,30 @@ bool BuildSettledDisplaySceneForFrame(
     cache->runtime.scene,
     output,
     simulationFrameRate,
-    simulationFrameRate > 0.0 ? static_cast<double>(frame - 1) / simulationFrameRate : 0.0,
-    frame
+    simulationFrameRate > 0.0 ? static_cast<double>(frame) / simulationFrameRate : 0.0,
+    std::max<long>(1, cache->runtime.loopState.drawCount)
   );
 
-  if (!ApplyControllerStateToRuntime(cache->context, frameControllerState, errorMessage)) {
+  bool controllerApplied = false;
+  {
+    const ScopedActiveRuntime activeRuntime(&cache->runtime);
+    controllerApplied = ApplyControllerStateToRuntime(
+      cache->context,
+      frameControllerState,
+      false,
+      errorMessage
+    );
+  }
+  if (!controllerApplied) {
     return false;
   }
 
-  g_activeRuntime = &cache->runtime;
-  const bool drawOk = CallFunction(cache->context, globalObject, cache->drawFn, errorMessage);
-  g_activeRuntime = NULL;
+  bool drawOk = false;
+  {
+    const ScopedActiveRuntime activeRuntime(&cache->runtime);
+    const ScopedRuntimeUserDraw userDraw(&cache->runtime.loopState);
+    drawOk = CallFunction(cache->context, globalObject, cache->drawFn, errorMessage);
+  }
   if (!drawOk) {
     return false;
   }
@@ -1157,7 +1208,18 @@ bool InitializeCachedSketchState(
     instrumentedSource.append(bindingRegistrationScript);
   }
 
-  if (!EvaluateScript(cache->context, instrumentedSource, "momentum-sketch.js", NULL, errorMessage)) {
+  bool sourceEvaluated = false;
+  {
+    const ScopedActiveRuntime activeRuntime(&cache->runtime);
+    sourceEvaluated = EvaluateScript(
+      cache->context,
+      instrumentedSource,
+      "momentum-sketch.js",
+      NULL,
+      errorMessage
+    );
+  }
+  if (!sourceEvaluated) {
     ResetCachedSketchState(cache);
     return false;
   }
@@ -1181,34 +1243,80 @@ bool InitializeCachedSketchState(
   }
 
   if (preloadFn && !JSValueIsNull(cache->context, preloadFn) && !JSValueIsUndefined(cache->context, preloadFn)) {
-    if (!ApplyControllerStateToRuntime(cache->context, initialControllerState, errorMessage)) {
+    if (!ApplyControllerStateToRuntime(
+          cache->context,
+          initialControllerState,
+          false,
+          errorMessage
+        )) {
       ResetCachedSketchState(cache);
       return false;
     }
-    g_activeRuntime = &cache->runtime;
+    const ScopedActiveRuntime activeRuntime(&cache->runtime);
     const bool preloadOk = CallFunction(cache->context, globalObject, preloadFn, errorMessage);
-    g_activeRuntime = NULL;
     if (!preloadOk) {
       ResetCachedSketchState(cache);
       return false;
     }
   }
 
-  if (!ApplyControllerStateToRuntime(cache->context, initialControllerState, errorMessage)) {
+  if (!ApplyControllerStateToRuntime(
+        cache->context,
+        initialControllerState,
+        false,
+        errorMessage
+      )) {
     ResetCachedSketchState(cache);
     return false;
   }
-  g_activeRuntime = &cache->runtime;
-  const bool setupOk = CallFunction(cache->context, globalObject, setupFn, errorMessage);
-  g_activeRuntime = NULL;
+  bool setupOk = false;
+  {
+    const ScopedActiveRuntime activeRuntime(&cache->runtime);
+    setupOk = CallFunction(cache->context, globalObject, setupFn, errorMessage);
+  }
   if (!setupOk) {
     ResetCachedSketchState(cache);
     return false;
   }
+  CompleteRuntimeSetup(&cache->runtime.loopState);
 
   if (drawFn && !JSValueIsNull(cache->context, drawFn) && !JSValueIsUndefined(cache->context, drawFn)) {
     cache->drawFn = drawFn;
     JSValueProtect(cache->context, cache->drawFn);
+
+    // p5 completes one mandatory draw immediately after setup, even when
+    // setup called noLoop(). Materialize that draw into frame zero so Bitmap
+    // and Vector expose the same first-frame lifecycle.
+    if (BeginRuntimeDrawTick(&cache->runtime.loopState)) {
+      ResetRuntimeTransientDrawingState(&cache->runtime, true);
+      UpdateFrameGlobals(
+        cache->context,
+        globalObject,
+        &cache->runtime,
+        cache->runtime.scene,
+        output,
+        cache->runtime.desiredFrameRate,
+        0.0,
+        cache->runtime.loopState.drawCount + 1
+      );
+
+      bool initialDrawOk = false;
+      {
+        const ScopedActiveRuntime activeRuntime(&cache->runtime);
+        const ScopedRuntimeUserDraw userDraw(&cache->runtime.loopState);
+        initialDrawOk = CallFunction(
+          cache->context,
+          globalObject,
+          cache->drawFn,
+          errorMessage
+        );
+      }
+      if (!initialDrawOk) {
+        ResetCachedSketchState(cache);
+        return false;
+      }
+      CompleteRuntimeDraw(&cache->runtime.loopState);
+    }
   }
 
   cache->latestScene = cache->runtime.scene;
@@ -1274,13 +1382,18 @@ bool ApplySoftCodeCuesForFrame(
       break;
     }
 
-    if (!EvaluateScript(
-          cache->context,
-          cue.patchSource,
-          "momentum-soft-code-cue.js",
-          NULL,
-          errorMessage
-        )) {
+    bool cueEvaluated = false;
+    {
+      const ScopedActiveRuntime activeRuntime(&cache->runtime);
+      cueEvaluated = EvaluateScript(
+        cache->context,
+        cue.patchSource,
+        "momentum-soft-code-cue.js",
+        NULL,
+        errorMessage
+      );
+    }
+    if (!cueEvaluated) {
       return false;
     }
     JSValueRef nextDrawFn = GetBindingValue(
@@ -1370,36 +1483,68 @@ bool AdvanceCachedSketchState(
     }
     cache->runtime.scene.commands.clear();
     cache->runtime.scene.imageAssets.clear();
-    ResetRuntimeTransientDrawingState(&cache->runtime, true);
-    UpdateFrameGlobals(
-      cache->context,
-      globalObject,
-      &cache->runtime,
-      cache->runtime.scene,
-      output,
-      simulationFrameRate,
-      simulationFrameRate > 0.0 ? static_cast<double>(frame - 1) / simulationFrameRate : 0.0,
-      frame
-    );
 
-    if (!ApplyControllerStateToRuntime(cache->context, frameControllerState, errorMessage)) {
+    bool controllerApplied = false;
+    {
+      const ScopedActiveRuntime activeRuntime(&cache->runtime);
+      controllerApplied = ApplyControllerStateToRuntime(
+        cache->context,
+        frameControllerState,
+        true,
+        errorMessage
+      );
+    }
+    if (!controllerApplied) {
       return false;
     }
-    g_activeRuntime = &cache->runtime;
-    const bool drawOk = CallFunction(cache->context, globalObject, cache->drawFn, errorMessage);
-    g_activeRuntime = NULL;
-    if (!drawOk) {
-      return false;
-    }
-    if (shouldCancel && shouldCancel()) {
-      if (errorMessage) {
-        *errorMessage = "render-cancelled";
+    const bool shouldDraw = BeginRuntimeDrawTick(&cache->runtime.loopState);
+
+    bool drawAgain = shouldDraw;
+    long drawsThisTick = 0;
+    while (drawAgain) {
+      ResetRuntimeTransientDrawingState(&cache->runtime, true);
+      UpdateFrameGlobals(
+        cache->context,
+        globalObject,
+        &cache->runtime,
+        cache->runtime.scene,
+        output,
+        simulationFrameRate,
+        simulationFrameRate > 0.0 ? static_cast<double>(frame) / simulationFrameRate : 0.0,
+        cache->runtime.loopState.drawCount + 1
+      );
+
+      bool drawOk = false;
+      {
+        const ScopedActiveRuntime activeRuntime(&cache->runtime);
+        const ScopedRuntimeUserDraw userDraw(&cache->runtime.loopState);
+        drawOk = CallFunction(
+          cache->context,
+          globalObject,
+          cache->drawFn,
+          errorMessage
+        );
       }
-      return false;
+      if (!drawOk) {
+        return false;
+      }
+      CompleteRuntimeDraw(&cache->runtime.loopState);
+      drawsThisTick += 1;
+
+      if (shouldCancel && shouldCancel()) {
+        if (errorMessage) {
+          *errorMessage = "render-cancelled";
+        }
+        return false;
+      }
+
+      drawAgain =
+        drawsThisTick < kMaxPendingRedraws &&
+        ConsumeRuntimeQueuedRedraw(&cache->runtime.loopState);
     }
 
     ScenePayload frameScene = cache->runtime.scene;
-    if (hadPreviousControllerState &&
+    if (shouldDraw && drawsThisTick == 1 && hadPreviousControllerState &&
         previousControllerStateHash != frameControllerState.stateHash) {
       ScenePayload settledScene;
       if (!BuildSettledDisplaySceneForFrame(

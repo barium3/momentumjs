@@ -91,6 +91,10 @@ void AppendRuntimeDebugTraceLine(
 constexpr JsCallbackRegistration kRuntimeCallbackRegistrations[] = {
   {"createCanvas", JsCreateCanvas},
   {"frameRate", JsFrameRate},
+  {"isLooping", JsIsLooping},
+  {"loop", JsLoop},
+  {"noLoop", JsNoLoop},
+  {"redraw", JsRedraw},
   {"background", JsBackground},
   {"clear", JsClear},
   {"fill", JsFill},

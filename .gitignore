@@ -28,14 +28,16 @@ npm-debug.log*
 .local-tools/
 .adobe-*/
 .ae2023-*/
-user/lissajousM.js
-user/logo.svg
-user/logoType.js
+user/*
+!user/examples/
+!user/examples/**
 
 # Local build and release artifacts
 build/
 build-arm64/
 build-universal/
+build-macos-x86_64/
+build-macos-arm64/
 build-windows/
 build-windows-static-md/
 build-windows-static/

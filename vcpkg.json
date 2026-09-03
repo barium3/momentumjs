@@ -3,9 +3,15 @@
   "version-string": "1.1.0",
   "builtin-baseline": "efebd56bc79f61b9bdaeb7c2370ad97fb947bb4b",
   "dependencies": [
-    "boost-multiprecision",
+    {
+      "name": "boost-multiprecision",
+      "platform": "windows"
+    },
     "freetype",
     "harfbuzz",
-    "quickjs-ng"
+    {
+      "name": "quickjs-ng",
+      "platform": "windows"
+    }
   ]
 }

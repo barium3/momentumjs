@@ -44,5 +44,43 @@ test ! -e "${TARGET_DIR}/CSXS"
 
 MOMENTUM_REMOVE_USER_DATA=1 remove_extension_preserving_user "${TARGET_DIR}"
 test ! -e "${TARGET_DIR}"
+unset MOMENTUM_REMOVE_USER_DATA
+
+FULL_SOURCE_DIR="${TEST_ROOT}/full-install/source"
+FULL_PLUGIN_DIR="${TEST_ROOT}/full-install/Momentum.plugin"
+FULL_APP_SUPPORT_DIR="${TEST_ROOT}/full-install/user/Adobe"
+FULL_USER_TARGET_DIR="${FULL_APP_SUPPORT_DIR}/CEP/extensions/momentumjs"
+FAKE_DEFAULTS="${TEST_ROOT}/full-install/defaults"
+DEFAULTS_LOG="${TEST_ROOT}/full-install/defaults.log"
+
+mkdir -p \
+  "${FULL_SOURCE_DIR}/CSXS" \
+  "${FULL_SOURCE_DIR}/user/examples" \
+  "${FULL_PLUGIN_DIR}/Contents/MacOS"
+printf '%s\n' '<manifest />' > "${FULL_SOURCE_DIR}/CSXS/manifest.xml"
+printf '%s\n' 'full install payload' > "${FULL_SOURCE_DIR}/index.html"
+printf '%s\n' 'bundled example' > "${FULL_SOURCE_DIR}/user/examples/example.js"
+printf '%s\n' 'plugin binary' > "${FULL_PLUGIN_DIR}/Contents/MacOS/Momentum"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'printf "%s\\n" "$*" >> "${MOMENTUM_DEFAULTS_LOG}"' \
+  > "${FAKE_DEFAULTS}"
+chmod +x "${FAKE_DEFAULTS}"
+
+MOMENTUM_APP_SUPPORT_USER_DIR="${FULL_APP_SUPPORT_DIR}" \
+MOMENTUM_EXTENSION_SOURCE="${FULL_SOURCE_DIR}" \
+MOMENTUM_PLUGIN_SOURCE="${FULL_PLUGIN_DIR}" \
+MOMENTUM_DEFAULTS_COMMAND="${FAKE_DEFAULTS}" \
+MOMENTUM_DEFAULTS_LOG="${DEFAULTS_LOG}" \
+MOMENTUM_CEP_DEBUG_VERSIONS="11 12" \
+sh "${ROOT_DIR}/scripts/install.sh"
+
+test -f "${FULL_USER_TARGET_DIR}/index.html"
+test -f "${FULL_USER_TARGET_DIR}/user/examples/example.js"
+test -f "${FULL_APP_SUPPORT_DIR}/Common/Plug-ins/7.0/MediaCore/Momentum/Momentum.plugin/Contents/MacOS/Momentum"
+test -d "${FULL_APP_SUPPORT_DIR}/Common/Plug-ins/7.0/MediaCore/Momentum/runtime"
+test "$(sed -n '1p' "${DEFAULTS_LOG}")" = "write com.adobe.CSXS.11 PlayerDebugMode -string 1"
+test "$(sed -n '2p' "${DEFAULTS_LOG}")" = "write com.adobe.CSXS.12 PlayerDebugMode -string 1"
+test "$(wc -l < "${DEFAULTS_LOG}" | tr -d ' ')" = "2"
 
 echo "Install workflow check passed."

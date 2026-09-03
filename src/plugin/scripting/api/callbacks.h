@@ -7,4 +7,5 @@
 #include "scripting/api/callbacks/paths.h"
 #include "scripting/api/callbacks/shapes.h"
 #include "scripting/api/callbacks/style.h"
+#include "scripting/api/callbacks/structure.h"
 #include "scripting/api/callbacks/text.h"

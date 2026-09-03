@@ -7,7 +7,7 @@ This page is for contributors who want to build and run Momentum from source.
 - Adobe After Effects installed on the machine
 - After Effects SDK available locally
 - macOS with Xcode, or Windows x64 with Visual Studio 2022 Build Tools, CMake,
-  and vcpkg
+  vcpkg, and a CUDA Toolkit that supplies `nvcc`
 
 ## First-Time Setup
 
@@ -40,11 +40,12 @@ cmake --build --preset windows-debug
 ctest --preset windows-debug
 cmake --build --preset windows-release
 powershell -ExecutionPolicy Bypass -File scripts/install-windows.ps1 `
-  -Configuration Release -EnableCepDebugMode -CepMajorVersion 11
+  -Configuration Release
 ```
 
-The final switch enables the unsigned development panel for AE 2022/CEP 11.
-Omit `-EnableCepDebugMode` when installing a signed CEP package.
+Run the final command from an elevated PowerShell session. It enables unsigned
+CEP mode for CSXS versions 6 through 15 by default; pass `-SkipCepDebugMode`
+only when the required preference has already been configured.
 Windows runtime transports are written under
 `%LOCALAPPDATA%\Momentum\runtime`, outside the protected plugin directory.
 
@@ -69,33 +70,51 @@ If you only want to build the native plugin, run:
 bash scripts/build-ae-plugin.sh
 ```
 
-On Windows:
+For a distributable macOS Universal Release build, bootstrap vcpkg once and
+run:
+
+```bash
+git clone https://github.com/microsoft/vcpkg.git .local-tools/vcpkg
+sh .local-tools/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+bash scripts/build-macos-universal.sh
+```
+
+Set `VCPKG_ROOT` only when using a vcpkg checkout outside the default
+`.local-tools/vcpkg` path.
+
+This cross-builds both `x86_64` and `arm64` with static text dependencies,
+runs tests for the host architecture, and creates
+`build-universal/Release/Momentum.plugin`. An ARM Mac is only required for the
+final ARM runtime check, not for compilation.
+
+On Windows, build and stage the release artifact:
 
 ```powershell
 cmake --build --preset windows-release
+powershell -ExecutionPolicy Bypass -File scripts/package-windows-artifact.ps1
 ```
 
 ## Packaging
 
-Maintainers can assemble the macOS runtime bundle with:
+`momentumjs.zip` is one cross-platform release asset. Before assembling it,
+place the staged Windows directory at `dist/windows/Release` and build the
+macOS Universal plug-in. Then run on macOS:
 
 ```bash
 bash scripts/package-release.sh
 ```
 
-Creates `dist/momentumjs.zip`, a clean macOS runtime bundle with:
+Creates `dist/momentumjs.zip` with:
 
-1. the CEP payload at the archive root
-2. `Momentum.plugin`
-3. install and uninstall helpers
+1. the shared CEP payload under `extension/`
+2. `native/macos/Momentum.plugin`
+3. `native/windows/Momentum.aex` and any runtime DLLs
+4. macOS and Windows install/uninstall entrypoints
+5. end-user and API documentation
 
-To build the one-step macOS installer package that installs both the signed CEP panel and `Momentum.plugin`, run:
-
-```bash
-bash scripts/package-installer.sh
-```
-
-This creates `dist/momentumjs-installer.pkg`. It expects `dist/momentumjs.zxp` to already exist.
+This `.zip` is the only release format for both platforms. The install helpers
+enable unsigned CEP mode on the destination machine, so release packaging does
+not require a ZXP certificate, `ZXPSignCmd`, or platform installer package.
 
 ## Script Layout
 
@@ -105,9 +124,20 @@ The repository now uses `scripts/` as the single CLI entrypoint layer:
 - `scripts/install-dev.sh` is the contributor shortcut that builds `Momentum.plugin` and then runs the source install flow.
 - `scripts/install-windows.ps1` installs `Momentum.aex`, its runtime DLLs, and
   the CEP panel while preserving the Windows `user` workspace.
-- `scripts/package-release.sh` assembles the macOS release zip with the CEP payload, `Momentum.plugin`, and install helpers.
-- `scripts/package-installer.sh` assembles a macOS `.pkg` installer for the signed panel and native plugin.
+- `scripts/uninstall-windows.ps1` removes the Windows native/runtime files and
+  preserves the `user` workspace unless explicitly requested otherwise.
+- `scripts/package-windows-artifact.ps1` stages the Windows release binary for
+  transfer to the machine assembling the unified archive.
+- `scripts/package-release.sh` assembles the single cross-platform release zip.
+- `install.command`/`uninstall.command` and `install.cmd`/`uninstall.cmd` are
+  the end-user entrypoints included at the archive root.
 - `scripts/lib/common.sh` is the shared path and packaging helper layer used by the install and packaging scripts.
+
+On macOS, keep the source repository outside Adobe's CEP discovery directories.
+The install script owns the canonical runtime copy at
+`~/Library/Application Support/Adobe/CEP/extensions/momentumjs`. The native
+plug-in and writable transport files remain under the user's Adobe
+`Common/Plug-ins` tree.
 
 ## CEP And Host Startup Contract
 

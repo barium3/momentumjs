@@ -10,10 +10,12 @@
 
 #include "controllers/types.h"
 #include "scene/types.h"
+#include "scripting/runtime/loop_control.h"
 
 namespace momentum {
 
 struct RuntimeEngineState : RuntimeStyleState {
+  RuntimeLoopState loopState;
   int angleMode = ANGLE_MODE_RADIANS;
   A_u_long randomState = 0x12345678UL;
   bool gaussianHasSpare = false;

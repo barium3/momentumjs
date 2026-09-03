@@ -114,8 +114,18 @@ assert.match(
 );
 assert.match(
   windowsInstaller,
-  /build-windows-static\\\$Configuration/,
-  "the Windows installer must select the static-CRT artifact",
+  /native\\windows[\s\S]*build-windows-static\\\$Configuration/,
+  "the Windows installer must prefer the packaged artifact and support source builds",
+);
+assert.match(
+  windowsInstaller,
+  /AutoElevate[\s\S]*Start-Process[\s\S]*-Verb RunAs/,
+  "the packaged Windows installer must request UAC elevation itself",
+);
+assert.match(
+  windowsInstaller,
+  /CepMajorVersions[\s\S]*SkipCepDebugMode[\s\S]*PlayerDebugMode/,
+  "the Windows installer must enable unsigned CEP mode by default",
 );
 
 assert.match(

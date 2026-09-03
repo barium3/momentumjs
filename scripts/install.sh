@@ -8,8 +8,9 @@ export ROOT_DIR
 . "${SCRIPT_DIR}/lib/common.sh"
 
 require_macos
+require_non_root_install
 
-CEP_EXTENSIONS_DIR="$(cep_extensions_dir_for_scope "${MOMENTUM_CEP_SCOPE:-user}")"
+CEP_EXTENSIONS_DIR="${APP_SUPPORT_USER_DIR}/CEP/extensions"
 CEP_TARGET_DIR="${CEP_EXTENSIONS_DIR}/momentumjs"
 
 EXTENSION_SOURCE_DIR="$(resolve_extension_source || true)"
@@ -31,13 +32,16 @@ if [ -z "${PLUGIN_SOURCE_DIR}" ]; then
   exit 1
 fi
 
-ensure_dir "${CEP_EXTENSIONS_DIR}"
+enable_unsigned_cep_mode
+
 ensure_dir "${MEDIA_CORE_DIR}"
 ensure_dir "${PLUGIN_CONTAINER_DIR}"
 ensure_dir "${RUNTIME_TARGET_DIR}"
 
 EXTENSION_SOURCE_ABS="$(abs_dir "${EXTENSION_SOURCE_DIR}")"
 PLUGIN_SOURCE_ABS="$(abs_dir "${PLUGIN_SOURCE_DIR}")"
+ensure_dir "${CEP_EXTENSIONS_DIR}"
+ensure_dir "${CEP_TARGET_DIR}"
 CEP_TARGET_ABS="$(abs_dir "${CEP_TARGET_DIR}" 2>/dev/null || true)"
 PLUGIN_TARGET_ABS="$(abs_dir "${PLUGIN_TARGET_DIR}" 2>/dev/null || true)"
 
@@ -51,11 +55,9 @@ fi
 
 ensure_dir "${RUNTIME_TARGET_DIR}"
 remove_quarantine "${CEP_TARGET_DIR}" "${PLUGIN_CONTAINER_DIR}"
-ensure_install_ownership "${CEP_TARGET_DIR}" "${PLUGIN_CONTAINER_DIR}"
 
 echo "Momentum installed."
-echo "CEP scope: ${MOMENTUM_CEP_SCOPE:-user}"
-echo "CEP extension: ${CEP_TARGET_DIR}"
+echo "CEP extension (user): ${CEP_TARGET_DIR}"
 echo "Plugin bundle: ${PLUGIN_TARGET_DIR}"
 echo "Runtime dir: ${RUNTIME_TARGET_DIR}"
 echo "Restart After Effects before testing."

@@ -1146,12 +1146,22 @@ functionRegistry.controllers = {
 
 assignObject(functionRegistry.instances, {
   SliderController: {
+    changed: entry("changed", {
+      signatures: [signature(1, 1, "SliderController")],
+      returns: "SliderController",
+      runtimeModes: ["bitmap"],
+    }),
     value: entry("value", {
       signatures: [signature(0, 0, "number")],
       returns: "number",
     }),
   },
   AngleController: {
+    changed: entry("changed", {
+      signatures: [signature(1, 1, "AngleController")],
+      returns: "AngleController",
+      runtimeModes: ["bitmap"],
+    }),
     degrees: entry("degrees", {
       signatures: [signature(0, 0, "number")],
       returns: "number",
@@ -1166,6 +1176,11 @@ assignObject(functionRegistry.instances, {
     }),
   },
   ColorController: {
+    changed: entry("changed", {
+      signatures: [signature(1, 1, "ColorController")],
+      returns: "ColorController",
+      runtimeModes: ["bitmap"],
+    }),
     color: entry("color", {
       signatures: [signature(0, 0, "Color")],
       returns: "Color",
@@ -1176,6 +1191,11 @@ assignObject(functionRegistry.instances, {
     }),
   },
   CheckboxController: {
+    changed: entry("changed", {
+      signatures: [signature(1, 1, "CheckboxController")],
+      returns: "CheckboxController",
+      runtimeModes: ["bitmap"],
+    }),
     checked: entry("checked", {
       signatures: [signature(0, 0, "boolean")],
       returns: "boolean",
@@ -1186,6 +1206,11 @@ assignObject(functionRegistry.instances, {
     }),
   },
   SelectController: {
+    changed: entry("changed", {
+      signatures: [signature(1, 1, "SelectController")],
+      returns: "SelectController",
+      runtimeModes: ["bitmap"],
+    }),
     index: entry("index", {
       signatures: [signature(0, 0, "number")],
       returns: "number",
@@ -1206,6 +1231,11 @@ assignObject(functionRegistry.instances, {
     }),
   },
   PointController: {
+    changed: entry("changed", {
+      signatures: [signature(1, 1, "PointController")],
+      returns: "PointController",
+      runtimeModes: ["bitmap"],
+    }),
     value: entry("value", {
       signatures: [signature(0, 0, "array")],
       returns: "array",
@@ -1595,10 +1625,22 @@ functionRegistry.environment = {
       signature(1, 4),
     ],
   }),
-  isLooping: entry("isLooping"),
-  loop: entry("loop"),
-  noLoop: entry("noLoop"),
-  redraw: entry("redraw"),
+  isLooping: entry("isLooping", {
+    returns: "boolean",
+    signatures: [signature(0, 0, "boolean")],
+  }),
+  loop: entry("loop", {
+    signatures: [signature(0, 0)],
+  }),
+  noLoop: entry("noLoop", {
+    signatures: [signature(0, 0)],
+  }),
+  redraw: entry("redraw", {
+    signatures: [
+      signature(0, 0),
+      signature(1, 1),
+    ],
+  }),
   frameCount: variable("frameCount"),
   width: constant("width"),
   height: constant("height"),

@@ -6,7 +6,7 @@ if [ -z "${ROOT_DIR:-}" ]; then
 fi
 
 APP_SUPPORT_USER_DIR="${MOMENTUM_APP_SUPPORT_USER_DIR:-${HOME}/Library/Application Support/Adobe}"
-SYSTEM_CEP_EXTENSIONS_DIR="${MOMENTUM_SYSTEM_CEP_EXTENSIONS_DIR:-/Library/Application Support/Adobe/CEP/extensions}"
+DEFAULT_CEP_DEBUG_VERSIONS="6 7 8 9 10 11 12 13 14 15"
 
 require_macos() {
   if [ "$(uname -s)" != "Darwin" ]; then
@@ -26,78 +26,37 @@ ensure_dir() {
   mkdir -p "$1"
 }
 
-load_local_signing_env() {
-  env_file="${ROOT_DIR}/.local-signing/zxp.env"
-
-  if [ -f "${env_file}" ]; then
-    . "${env_file}"
+require_non_root_install() {
+  if [ "$(id -u)" = "0" ]; then
+    echo "Error: Run Momentum's installer as the logged-in user, without sudo." >&2
+    exit 1
   fi
 }
 
-resolve_install_owner() {
-  if [ -n "${MOMENTUM_INSTALL_OWNER:-}" ]; then
-    printf '%s\n' "${MOMENTUM_INSTALL_OWNER}"
+enable_unsigned_cep_mode() {
+  if [ "${MOMENTUM_ENABLE_CEP_DEBUG_MODE:-1}" = "0" ]; then
+    echo "Unsigned CEP mode was not changed."
     return 0
   fi
 
-  case "${APP_SUPPORT_USER_DIR}" in
-    /Users/*/Library/Application\ Support/Adobe*)
-      owner_path="${APP_SUPPORT_USER_DIR#/Users/}"
-      printf '%s\n' "${owner_path%%/*}"
-      return 0
-      ;;
-  esac
-
-  return 1
-}
-
-resolve_install_group() {
-  owner="$1"
-
-  if [ -n "${MOMENTUM_INSTALL_GROUP:-}" ]; then
-    printf '%s\n' "${MOMENTUM_INSTALL_GROUP}"
-    return 0
+  defaults_command="${MOMENTUM_DEFAULTS_COMMAND:-defaults}"
+  if ! command -v "${defaults_command}" >/dev/null 2>&1; then
+    echo "Error: Could not find the macOS 'defaults' command." >&2
+    exit 1
   fi
 
-  if [ -n "${owner}" ] && command -v id >/dev/null 2>&1; then
-    owner_group="$(id -gn "${owner}" 2>/dev/null || true)"
-    if [ -n "${owner_group}" ]; then
-      printf '%s\n' "${owner_group}"
-      return 0
-    fi
-  fi
-
-  printf '%s\n' "staff"
-}
-
-ensure_install_ownership() {
-  if [ "$(id -u)" != "0" ]; then
-    return 0
-  fi
-
-  owner="$(resolve_install_owner || true)"
-  if [ -z "${owner}" ]; then
-    return 0
-  fi
-
-  group="$(resolve_install_group "${owner}")"
-
-  for target in "$@"; do
-    if [ -n "${target}" ] && [ -e "${target}" ]; then
-      chown -R "${owner}:${group}" "${target}"
-    fi
+  debug_versions="${MOMENTUM_CEP_DEBUG_VERSIONS:-${DEFAULT_CEP_DEBUG_VERSIONS}}"
+  for version in ${debug_versions}; do
+    case "${version}" in
+      ''|*[!0-9]*)
+        echo "Error: Invalid CEP major version: ${version}" >&2
+        exit 1
+        ;;
+    esac
+    "${defaults_command}" write "com.adobe.CSXS.${version}" PlayerDebugMode -string 1
   done
-}
 
-read_extension_version() {
-  extension_dir="$1"
-  manifest_path="${extension_dir}/CSXS/manifest.xml"
-
-  if [ ! -f "${manifest_path}" ]; then
-    return 1
-  fi
-
-  sed -n 's/.*ExtensionBundleVersion="\([^"]*\)".*/\1/p' "${manifest_path}" | sed -n '1p'
+  echo "Unsigned CEP mode enabled for CSXS versions: ${debug_versions}"
 }
 
 resolve_extension_source() {
@@ -108,6 +67,11 @@ resolve_extension_source() {
 
   if [ -f "${ROOT_DIR}/CSXS/manifest.xml" ]; then
     printf '%s\n' "${ROOT_DIR}"
+    return 0
+  fi
+
+  if [ -f "${ROOT_DIR}/extension/CSXS/manifest.xml" ]; then
+    printf '%s\n' "${ROOT_DIR}/extension"
     return 0
   fi
 
@@ -126,6 +90,8 @@ resolve_plugin_source() {
   fi
 
   for candidate in \
+    "${ROOT_DIR}/native/macos/Momentum.plugin" \
+    "${ROOT_DIR}/build-universal/Release/Momentum.plugin" \
     "${ROOT_DIR}/Momentum.plugin" \
     "${ROOT_DIR}/build/Momentum.plugin" \
     "${ROOT_DIR}/build/Debug/Momentum.plugin" \
@@ -157,23 +123,6 @@ resolve_media_core_dir() {
   fi
 
   printf '%s\n' "${APP_SUPPORT_USER_DIR}/Common/Plug-ins/7.0/MediaCore"
-}
-
-cep_extensions_dir_for_scope() {
-  scope="${1:-user}"
-
-  case "${scope}" in
-    user)
-      printf '%s\n' "${APP_SUPPORT_USER_DIR}/CEP/extensions"
-      ;;
-    system)
-      printf '%s\n' "${SYSTEM_CEP_EXTENSIONS_DIR}"
-      ;;
-    *)
-      echo "Error: Unsupported MOMENTUM_CEP_SCOPE='${scope}'. Use 'user' or 'system'." >&2
-      exit 1
-      ;;
-  esac
 }
 
 copy_runtime_extension_tree() {
@@ -282,13 +231,6 @@ copy_release_extension_tree() {
     "${dest_dir}/"
 }
 
-copy_zxp_extension_tree() {
-  src_dir="$1"
-  dest_dir="$2"
-
-  copy_release_extension_tree "${src_dir}" "${dest_dir}"
-}
-
 copy_release_support_scripts() {
   dest_dir="$1"
 
@@ -296,11 +238,19 @@ copy_release_support_scripts() {
 
   cp "${ROOT_DIR}/scripts/install.sh" "${dest_dir}/scripts/install.sh"
   cp "${ROOT_DIR}/scripts/uninstall.sh" "${dest_dir}/scripts/uninstall.sh"
+  cp "${ROOT_DIR}/scripts/install-windows.ps1" "${dest_dir}/scripts/install-windows.ps1"
+  cp "${ROOT_DIR}/scripts/uninstall-windows.ps1" "${dest_dir}/scripts/uninstall-windows.ps1"
   cp "${ROOT_DIR}/scripts/lib/common.sh" "${dest_dir}/scripts/lib/common.sh"
+  cp "${ROOT_DIR}/install.command" "${dest_dir}/install.command"
+  cp "${ROOT_DIR}/uninstall.command" "${dest_dir}/uninstall.command"
+  cp "${ROOT_DIR}/install.cmd" "${dest_dir}/install.cmd"
+  cp "${ROOT_DIR}/uninstall.cmd" "${dest_dir}/uninstall.cmd"
 
   chmod +x \
     "${dest_dir}/scripts/install.sh" \
-    "${dest_dir}/scripts/uninstall.sh"
+    "${dest_dir}/scripts/uninstall.sh" \
+    "${dest_dir}/install.command" \
+    "${dest_dir}/uninstall.command"
 }
 
 copy_release_docs() {
@@ -308,6 +258,10 @@ copy_release_docs() {
 
   cp "${ROOT_DIR}/README.md" "${dest_dir}/README.md"
   cp "${ROOT_DIR}/LICENSE" "${dest_dir}/LICENSE"
+  ensure_dir "${dest_dir}/docs"
+  rsync -a --delete --exclude '.DS_Store' \
+    "${ROOT_DIR}/docs/" \
+    "${dest_dir}/docs/"
 }
 
 remove_quarantine() {
@@ -346,40 +300,4 @@ create_zip_archive() {
 
   echo "Error: Neither 'ditto' nor 'zip' is available to create an archive." >&2
   exit 1
-}
-
-find_zxp_sign_cmd() {
-  for candidate in \
-    "${ROOT_DIR}/.local-tools/ZXPSignCmd/ZXPSignCmd" \
-    "${ROOT_DIR}/.local-tools/ZXPSignCMD/ZXPSignCmd" \
-    "${ROOT_DIR}/.local-tools/ZXPSignCMD/4.1.3/macOS/ZXPSignCmd"
-  do
-    if [ -x "${candidate}" ]; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
-  done
-
-  if [ -n "${MOMENTUM_ZXP_SIGN_CMD:-}" ]; then
-    if [ -x "${MOMENTUM_ZXP_SIGN_CMD}" ]; then
-      printf '%s\n' "${MOMENTUM_ZXP_SIGN_CMD}"
-      return 0
-    fi
-    if command -v "${MOMENTUM_ZXP_SIGN_CMD}" >/dev/null 2>&1; then
-      command -v "${MOMENTUM_ZXP_SIGN_CMD}"
-      return 0
-    fi
-  fi
-
-  if command -v ZXPSignCmd >/dev/null 2>&1; then
-    command -v ZXPSignCmd
-    return 0
-  fi
-
-  if command -v ZXPSignCMD >/dev/null 2>&1; then
-    command -v ZXPSignCMD
-    return 0
-  fi
-
-  return 1
 }

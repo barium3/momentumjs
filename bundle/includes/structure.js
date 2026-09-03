@@ -115,14 +115,30 @@ function getDrawLoopLib(hasShapes, envDeps) {
     "  for (var f = startFrame, targetFrame = currentFrame; f <= targetFrame; f++) {",
     "    currentFrame = f; currentTime = f / fps;"
   ];
-  if (envDeps.frameCount) {
-    block.push("    frameCount = currentFrame;");
-  }
   block.push(
     "    _render = (f === targetFrame);",
-    "    if (_ctx._looping !== false || _ctx._redrawRequested === true) {",
+    "    var __manualDraws = Math.floor(Number(_ctx._redrawRequested) || 0);",
+    "    var __drawsThisFrame = __manualDraws > 0",
+    "      ? __manualDraws",
+    "      : ((!_ctx._hasDrawn || _ctx._looping !== false || _ctx._loopRequested) ? 1 : 0);",
+    "    _ctx._redrawRequested = 0;",
+    "    _ctx._loopRequested = false;",
+    "    for (var __redrawIndex = 0; __redrawIndex < __drawsThisFrame; __redrawIndex++) {"
+  );
+  if (envDeps.frameCount) {
+    block.push("      frameCount = _ctx._drawCount + 1;");
+  }
+  block.push(
+    "      _ctx.env.frameCount = _ctx._drawCount + 1;",
+    "      _ctx._inUserDraw = true;",
+    "      try {",
     getDrawCallLine(hasShapes),
-    "      _ctx._redrawRequested = false;",
+    "      } finally {",
+    "        _ctx._inUserDraw = false;",
+    "        __momentumPhase = 'idle';",
+    "      }",
+    "      _ctx._hasDrawn = true;",
+    "      _ctx._drawCount += 1;",
     "    }",
     "  }",
     "  _ctx._lastComputedFrame = currentFrame;",
@@ -154,13 +170,23 @@ function getSetupLib(label, hasShapes) {
     "  _render = true;",
     "  _setMomentumRenderTargets('setup');",
     "  __user__.setup();",
-    "  _refreshMergedRenderState();"
+    "  _refreshMergedRenderState();",
+    "  _ctx._setupDone = true;",
+    "  __momentumPhase = 'idle';"
   ];
   if (hasShapes && label === "// Run setup on first execution") {
     block.push("  resetMatrix();");
   }
   block.push("}");
   return block.join("\n");
+}
+
+function getImplicitSetupCompleteLib() {
+  return [
+    "// ===== Implicit Setup =====",
+    "if (!_ctx._setupDone) _ctx._setupDone = true;",
+    "__momentumPhase = 'idle';"
+  ].join("\n");
 }
 
 function getFrameCacheUpdateLib(label) {
@@ -185,6 +211,7 @@ function buildExecutionLogic(hasDraw, hasSetup, hasShapes, envDeps) {
   } else if (hasDraw) {
     return _compactTruthy(expr.concat([
       getPreloadRunLib(" or timeline rewind"),
+      getImplicitSetupCompleteLib(),
       getDrawLoopLib(hasShapes, envDeps)
     ]));
   } else if (hasSetup) {

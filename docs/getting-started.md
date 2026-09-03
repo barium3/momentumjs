@@ -33,6 +33,12 @@ If the project is set to software-only rendering, Momentum can fall back to CPU 
 
 Momentum currently has two runtime modes:
 
+At the public API level, Vector is now a subset of Bitmap. The mode choice is
+still meaningful because Vector produces editable AE structures, while Bitmap
+produces a rendered effect surface. Registry entries marked `runtimeModes:
+["bitmap"]` identify APIs that require switching away from Vector; they are not
+a list of APIs forbidden in Bitmap.
+
 ### Vector Mode
 
 Vector mode converts sketch output into normal After Effects structures.
@@ -74,7 +80,10 @@ This mode is best when:
 Tradeoffs:
 
 - the result is a plugin-rendered bitmap layer, not a tree of editable AE shape groups
-- some p5 loop-control APIs such as `isLooping()`, `loop()`, `noLoop()`, and `redraw()` are not currently supported in Bitmap mode because rendering is driven by the AE effect host
+- loop control is evaluator-local in Bitmap mode: `noLoop()` freezes the last
+  rendered result while AE continues requesting frames; `loop()` resumes it,
+  and Bitmap controller `.changed()` callbacks can request a p5-compatible
+  `redraw()` without advancing a paused sketch on every AE frame
 - Bitmap mode uses Metal acceleration on macOS. On Windows it follows the GPU
   framework selected by After Effects: CUDA for compatible NVIDIA devices or
   OpenCL when AE supplies an OpenCL context. If GPU setup is unavailable,
@@ -205,9 +214,13 @@ function draw() {
 ## The `user/` Directory
 
 Momentum uses the extension's `user/` directory as the working area for sketch assets.
-Momentum's macOS installer and uninstaller preserve this directory during
+Momentum's macOS install and uninstall scripts preserve this directory during
 application updates and normal uninstall operations. Bundled examples are only
 copied when the corresponding file does not already exist.
+
+On macOS, the CEP panel is installed as a real user-level directory. The native
+effect and its writable runtime remain separate under the user's Adobe
+`Common/Plug-ins` directory.
 
 Typical install location of the CEP extension:
 

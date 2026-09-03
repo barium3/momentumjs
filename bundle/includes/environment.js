@@ -186,19 +186,39 @@ function getEnvironmentLib(deps) {
     lib.push("const height = thisComp.height;");
   }
   if (deps.frameCount) {
-    lib.push("var frameCount = currentFrame;");
+    lib.push("var frameCount = _ctx._drawCount;");
   }
   if (deps.isLooping) {
     lib.push("function isLooping() { return _ctx._looping !== false; }");
   }
   if (deps.loop) {
-    lib.push("function loop() { _ctx._looping = true; }");
+    lib.push(
+      "function loop() { " +
+      "if (__momentumPhase === 'global' && _ctx._setupDone) return; " +
+      "if (_ctx._looping === false) { _ctx._looping = true; " +
+      "if (_ctx._setupDone && __momentumPhase !== 'draw') _ctx._loopRequested = true; } " +
+      "}"
+    );
   }
   if (deps.noLoop) {
-    lib.push("function noLoop() { _ctx._looping = false; }");
+    lib.push(
+      "function noLoop() { " +
+      "if (__momentumPhase === 'global' && _ctx._setupDone) return; " +
+      "_ctx._looping = false; " +
+      "}"
+    );
   }
   if (deps.redraw) {
-    lib.push("function redraw() { _ctx._redrawRequested = true; }");
+    lib.push(
+      "function redraw(n) { " +
+      "if (!_ctx._setupDone || __momentumPhase === 'global' || " +
+      "__momentumPhase === 'setup' || __momentumPhase === 'draw') return; " +
+      "var count = parseInt(n); " +
+      "if (isNaN(count) || count < 1) count = 1; " +
+      "if (count > 1000) count = 1000; " +
+      "_ctx._redrawRequested = Math.min(1000, _ctx._redrawRequested + count); " +
+      "}"
+    );
   }
 
   return lib.join("\n");

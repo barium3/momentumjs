@@ -34,6 +34,21 @@ var __momentumControllerRuntimeValues = {
   point: [],
 };
 
+// Controller callbacks are executable runtime resources and must not be
+// serialized into frame snapshots. A forward replay recreates them by running
+// setup(), while settled-display snapshots leave this registry untouched.
+var __momentumControllerChangeHandlers = {
+  slider: [],
+  angle: [],
+  color: [],
+  checkbox: [],
+  select: [],
+  point: [],
+};
+if (typeof __momentumBaselineGlobals === "object") {
+  __momentumBaselineGlobals.__momentumControllerChangeHandlers = true;
+}
+
 function __momentumControllerRuntimeKey(kind) {
   switch (kind) {
     case __momentumControllerKind.slider: return "slider";
@@ -56,6 +71,49 @@ function __momentumCloneControllerData(value) {
     copy[key] = __momentumCloneControllerData(value[key]);
   });
   return copy;
+}
+
+function __momentumControllerValuesEqual(left, right) {
+  if (left === right) return true;
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index += 1) {
+    if (!__momentumControllerValuesEqual(left[index], right[index])) return false;
+  }
+  return true;
+}
+
+function __momentumDispatchControllerChanges(previousValues) {
+  Object.keys(__momentumControllerChangeHandlers).forEach(function(key) {
+    var handlers = __momentumControllerChangeHandlers[key];
+    var before = previousValues && previousValues[key];
+    var after = __momentumControllerRuntimeValues[key];
+    if (!Array.isArray(handlers) || !Array.isArray(before) || !Array.isArray(after)) return;
+    for (var slot = 0; slot < handlers.length; slot += 1) {
+      var registration = handlers[slot];
+      if (!registration || typeof registration.callback !== "function") continue;
+      if (slot >= before.length || slot >= after.length) continue;
+      if (__momentumControllerValuesEqual(before[slot], after[slot])) continue;
+      registration.callback.call(registration.controller);
+    }
+  });
+}
+
+function __momentumAttachControllerEvents(controller, kind) {
+  controller.changed = function(callback) {
+    if (typeof callback !== "function") {
+      throw new TypeError("changed() requires a callback function.");
+    }
+    var key = __momentumControllerRuntimeKey(kind);
+    if (!key) return this;
+    __momentumControllerChangeHandlers[key][this._controllerSlot] = {
+      callback: callback,
+      controller: this,
+    };
+    return this;
+  };
+  return controller;
 }
 
 function __momentumClaimControllerSlot(kind, existingSlot) {
@@ -215,8 +273,10 @@ function __momentumColorArrayToHex(input) {
   return hex;
 }
 
-function __momentumApplyControllerState(nextState) {
+function __momentumApplyControllerState(nextState, notifyChanges) {
   if (!nextState || typeof nextState !== "object") return;
+
+  var previousValues = __momentumCloneControllerData(__momentumControllerRuntimeValues);
 
   __momentumControllerRuntimeValues.slider = Array.isArray(nextState.sliders)
     ? nextState.sliders.map(function(value) {
@@ -248,6 +308,9 @@ function __momentumApplyControllerState(nextState) {
         return __momentumNormalizePointValue(value);
       })
     : [];
+  if (notifyChanges !== false) {
+    __momentumDispatchControllerChanges(previousValues);
+  }
 }
 
 function __momentumReadControllerValue(kind, slot) {
@@ -311,7 +374,7 @@ function __momentumCreateSliderController(data) {
   data._controllerSlot = slot;
   data.value = clampAndSnap(data.value);
   __momentumEnsureControllerRuntimeValue(__momentumControllerKind.slider, slot, data.value);
-  return {
+  return __momentumAttachControllerEvents({
     __momentumController: true,
     __momentumType: "SliderController",
     _controllerSlot: slot,
@@ -325,7 +388,7 @@ function __momentumCreateSliderController(data) {
       }
       return this._controllerData.value;
     },
-  };
+  }, __momentumControllerKind.slider);
 }
 
 function __momentumCreateAngleController(data) {
@@ -334,7 +397,7 @@ function __momentumCreateAngleController(data) {
   var slot = __momentumClaimControllerSlot("angle", data._controllerSlot);
   data._controllerSlot = slot;
   __momentumEnsureControllerRuntimeValue(__momentumControllerKind.angle, slot, data.value);
-  return {
+  return __momentumAttachControllerEvents({
     __momentumController: true,
     __momentumType: "AngleController",
     _controllerSlot: slot,
@@ -352,7 +415,7 @@ function __momentumCreateAngleController(data) {
     radians: function() {
       return this.value() * Math.PI / 180;
     },
-  };
+  }, __momentumControllerKind.angle);
 }
 
 )MOMENTUM_BOOT"
@@ -363,7 +426,7 @@ function __momentumCreateColorController(data) {
   var slot = __momentumClaimControllerSlot("color", data._controllerSlot);
   data._controllerSlot = slot;
   __momentumEnsureControllerRuntimeValue(__momentumControllerKind.color, slot, data.value);
-  return {
+  return __momentumAttachControllerEvents({
     __momentumController: true,
     __momentumType: "ColorController",
     _controllerSlot: slot,
@@ -385,7 +448,7 @@ function __momentumCreateColorController(data) {
       }
       return __momentumColorArrayToHex(this._controllerData.value);
     },
-  };
+  }, __momentumControllerKind.color);
 }
 
 function __momentumCreateCheckboxController(data) {
@@ -395,7 +458,7 @@ function __momentumCreateCheckboxController(data) {
   var slot = __momentumClaimControllerSlot("checkbox", data._controllerSlot);
   data._controllerSlot = slot;
   __momentumEnsureControllerRuntimeValue(__momentumControllerKind.checkbox, slot, data.value);
-  return {
+  return __momentumAttachControllerEvents({
     __momentumController: true,
     __momentumType: "CheckboxController",
     _controllerSlot: slot,
@@ -410,7 +473,7 @@ function __momentumCreateCheckboxController(data) {
     checked: function() {
       return this.value();
     },
-  };
+  }, __momentumControllerKind.checkbox);
 }
 
 function __momentumCreateSelectController(data) {
@@ -439,7 +502,7 @@ function __momentumCreateSelectController(data) {
   var slot = __momentumClaimControllerSlot("select", data._controllerSlot);
   data._controllerSlot = slot;
   __momentumEnsureControllerRuntimeValue(__momentumControllerKind.select, slot, data.value);
-  return {
+  return __momentumAttachControllerEvents({
     __momentumController: true,
     __momentumType: "SelectController",
     _controllerSlot: slot,
@@ -490,7 +553,7 @@ function __momentumCreateSelectController(data) {
       this._controllerData.value = clampIndex(nextIndex);
       return this;
     },
-  };
+  }, __momentumControllerKind.select);
 }
 
 function __momentumCreatePointController(data) {
@@ -501,7 +564,7 @@ function __momentumCreatePointController(data) {
   var slot = __momentumClaimControllerSlot("point", data._controllerSlot);
   data._controllerSlot = slot;
   __momentumEnsureControllerRuntimeValue(__momentumControllerKind.point, slot, [data.x, data.y]);
-  return {
+  return __momentumAttachControllerEvents({
     __momentumController: true,
     __momentumType: "PointController",
     _controllerSlot: slot,
@@ -520,7 +583,7 @@ function __momentumCreatePointController(data) {
     y: function() {
       return this.value()[1];
     },
-  };
+  }, __momentumControllerKind.point);
 }
 
 function createSlider(min, max, value, step) {
@@ -622,7 +685,10 @@ __momentumReviveValue = function(value) {
 };
 )MOMENTUM_BOOT";
 
-std::string BuildControllerStateApplyScript(const ControllerPoolState& state) {
+std::string BuildControllerStateApplyScript(
+  const ControllerPoolState& state,
+  bool notifyChanges
+) {
   std::ostringstream stream;
   stream << "__momentumApplyControllerState({sliders:[";
   for (std::size_t index = 0; index < state.sliders.size(); index += 1) {
@@ -668,7 +734,7 @@ std::string BuildControllerStateApplyScript(const ControllerPoolState& state) {
     const ControllerPointValue& point = state.points[index];
     stream << '[' << point.x << ',' << point.y << ']';
   }
-  stream << "]})";
+  stream << "]}," << (notifyChanges ? "true" : "false") << ')';
   return stream.str();
 }
 
@@ -677,11 +743,12 @@ std::string BuildControllerStateApplyScript(const ControllerPoolState& state) {
 bool ApplyControllerStateToRuntime(
   JSContextRef ctx,
   const ControllerPoolState& state,
+  bool notifyChanges,
   std::string* errorMessage
 ) {
   return runtime_internal::EvaluateScript(
     ctx,
-    BuildControllerStateApplyScript(state),
+    BuildControllerStateApplyScript(state, notifyChanges),
     "__momentumApplyControllerState",
     NULL,
     errorMessage

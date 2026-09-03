@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 
+if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING
+    "Minimum macOS version supported by Momentum"
+  )
+endif()
+
 project(momentum_ae_plugin LANGUAGES C CXX)
 
 if(MSVC)
@@ -17,32 +23,37 @@ endif()
 
 set(MOMENTUM_PLUGIN_NAME Momentum)
 
-if(WIN32)
-  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
-  if(MSVC)
-    add_compile_options(/utf-8)
+if(WIN32 OR (APPLE AND DEFINED VCPKG_TARGET_TRIPLET))
+  if(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+    if(MSVC)
+      add_compile_options(/utf-8)
+    endif()
   endif()
 
-  find_package(boost_multiprecision CONFIG REQUIRED)
   find_package(Freetype REQUIRED)
   find_package(harfbuzz CONFIG REQUIRED)
-  find_package(qjs CONFIG REQUIRED)
   set(MOMENTUM_TEXT_LIBRARIES
     Freetype::Freetype
     harfbuzz::harfbuzz
   )
-  set(MOMENTUM_WIDE_INTEGER_LIBRARIES Boost::multiprecision)
-  set(MOMENTUM_SCRIPTING_LIBRARIES qjs)
-  set(MOMENTUM_PLATFORM_INCLUDE_DIRS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/platform/windows"
-  )
-else()
+elseif(APPLE)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(FREETYPE2 REQUIRED IMPORTED_TARGET freetype2)
   pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
   set(MOMENTUM_TEXT_LIBRARIES
     PkgConfig::FREETYPE2
     PkgConfig::HARFBUZZ
+  )
+endif()
+
+if(WIN32)
+  find_package(boost_multiprecision CONFIG REQUIRED)
+  find_package(qjs CONFIG REQUIRED)
+  set(MOMENTUM_WIDE_INTEGER_LIBRARIES Boost::multiprecision)
+  set(MOMENTUM_SCRIPTING_LIBRARIES qjs)
+  set(MOMENTUM_PLATFORM_INCLUDE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin/platform/windows"
   )
 endif()
 
@@ -90,6 +101,7 @@ set(MOMENTUM_SCRIPTING_SOURCES
   src/plugin/scripting/api/math.cpp
   src/plugin/scripting/api/data.cpp
   src/plugin/scripting/api/io.cpp
+  src/plugin/scripting/api/structure.cpp
   src/plugin/scripting/api/typography.cpp
   src/plugin/scripting/api/shapes.cpp
   src/plugin/scripting/api/paths.cpp
@@ -101,6 +113,7 @@ set(MOMENTUM_SCRIPTING_SOURCES
   src/plugin/scripting/runtime/environment.cpp
   src/plugin/scripting/runtime/maintenance.cpp
   src/plugin/scripting/runtime/javascript.cpp
+  src/plugin/scripting/runtime/loop_control.cpp
   src/plugin/scripting/runtime/source.cpp
 )
 
@@ -373,6 +386,19 @@ if(BUILD_TESTING)
   add_test(
     NAME momentum_runtime_maintenance
     COMMAND momentum_runtime_maintenance_test
+  )
+
+  add_executable(momentum_runtime_loop_control_test
+    tests/runtime_loop_control_test.cpp
+    src/plugin/scripting/runtime/loop_control.cpp
+  )
+  target_compile_features(momentum_runtime_loop_control_test PRIVATE cxx_std_17)
+  target_include_directories(momentum_runtime_loop_control_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin"
+  )
+  add_test(
+    NAME momentum_runtime_loop_control
+    COMMAND momentum_runtime_loop_control_test
   )
 
   add_executable(momentum_code_timeline_time_test

@@ -4,17 +4,16 @@
 
 namespace momentum {
 
-const char* GetDataBootstrapScript();
-const char* GetControllerBootstrapScript();
-const char* GetIoBootstrapScript();
-bool ApplyControllerStateToRuntime(
+JSValueRef JsIsLooping(
   JSContextRef ctx,
-  const ControllerPoolState& state,
-  bool notifyChanges,
-  std::string* errorMessage
+  JSObjectRef function,
+  JSObjectRef thisObject,
+  std::size_t argumentCount,
+  const JSValueRef arguments[],
+  JSValueRef* exception
 );
 
-JSValueRef JsMomentumNativeLoadJSON(
+JSValueRef JsLoop(
   JSContextRef ctx,
   JSObjectRef function,
   JSObjectRef thisObject,
@@ -22,7 +21,8 @@ JSValueRef JsMomentumNativeLoadJSON(
   const JSValueRef arguments[],
   JSValueRef* exception
 );
-JSValueRef JsMomentumNativeLoadStrings(
+
+JSValueRef JsNoLoop(
   JSContextRef ctx,
   JSObjectRef function,
   JSObjectRef thisObject,
@@ -30,23 +30,8 @@ JSValueRef JsMomentumNativeLoadStrings(
   const JSValueRef arguments[],
   JSValueRef* exception
 );
-JSValueRef JsMomentumNativeLoadBytes(
-  JSContextRef ctx,
-  JSObjectRef function,
-  JSObjectRef thisObject,
-  std::size_t argumentCount,
-  const JSValueRef arguments[],
-  JSValueRef* exception
-);
-JSValueRef JsMomentumNativeLoadXML(
-  JSContextRef ctx,
-  JSObjectRef function,
-  JSObjectRef thisObject,
-  std::size_t argumentCount,
-  const JSValueRef arguments[],
-  JSValueRef* exception
-);
-JSValueRef JsMomentumNativeLoadTable(
+
+JSValueRef JsRedraw(
   JSContextRef ctx,
   JSObjectRef function,
   JSObjectRef thisObject,

@@ -763,7 +763,7 @@ function getEngineStateLib(
     "    fps: fps,",
     "    frame: currentFrame,",
     "    time: currentTime,",
-    "    env: { frameCount: currentFrame, width: thisComp.width, height: thisComp.height },",
+    "    env: { frameCount: 0, width: thisComp.width, height: thisComp.height },",
     "    shapes: [],",
     "    backgrounds: [],",
     "    setupShapes: [],",
@@ -774,7 +774,12 @@ function getEngineStateLib(
     "    controllers: [],",
     "    _lastComputedFrame: -1,",
     "    _looping: true,",
-    "    _redrawRequested: false",
+    "    _setupDone: false,",
+    "    _inUserDraw: false,",
+    "    _hasDrawn: false,",
+    "    _drawCount: 0,",
+    "    _loopRequested: false,",
+    "    _redrawRequested: 0",
     "  };",
     "}",
     "function _readPreviousEngineContext() {",
@@ -790,12 +795,13 @@ function getEngineStateLib(
     "}",
     "function _normalizeEngineContext(ctx) {",
     "  var next = (ctx && typeof ctx === 'object') ? ctx : _createFreshEngineContext();",
-    "  next.version = 2;",
+    "  next.version = 3;",
     "  next.fps = fps;",
     "  next.frame = currentFrame;",
     "  next.time = currentTime;",
     "  if (!next.env || typeof next.env !== 'object') next.env = {};",
-    "  next.env.frameCount = currentFrame;",
+    "  if (next._drawCount === undefined || next._drawCount === null) next._drawCount = 0;",
+    "  next.env.frameCount = next._drawCount;",
     "  next.env.width = thisComp.width;",
     "  next.env.height = thisComp.height;",
     "  if (!next.setupShapes) next.setupShapes = next.shapes ? next.shapes.slice(0) : [];",
@@ -806,11 +812,16 @@ function getEngineStateLib(
     "  if (!next.controllers || next.controllers.length === undefined) next.controllers = [];",
     "  if (next._lastComputedFrame === undefined || next._lastComputedFrame === null) next._lastComputedFrame = -1;",
     "  if (next._looping === undefined) next._looping = true;",
-    "  if (next._redrawRequested === undefined) next._redrawRequested = false;",
+    "  if (next._setupDone === undefined) next._setupDone = false;",
+    "  if (next._inUserDraw === undefined) next._inUserDraw = false;",
+    "  if (next._hasDrawn === undefined) next._hasDrawn = false;",
+    "  if (next._loopRequested === undefined) next._loopRequested = false;",
+    "  if (next._redrawRequested === true) next._redrawRequested = 1;",
+    "  else if (!(next._redrawRequested >= 0)) next._redrawRequested = 0;",
     "  return next;",
     "}",
     "function _setMomentumRenderTargets(phase) {",
-    "  __momentumPhase = phase || 'global';",
+    "  __momentumPhase = phase || 'idle';",
     "  if (phase === 'setup') {",
     "    _ctx.setupShapes = [];",
     "    _ctx.setupBackgrounds = [];",
@@ -930,11 +941,6 @@ function buildExpression(
   parts.push(getCorePreludeLib());
   pushLib(
     parts,
-    "Environment",
-    hasKeys(envDeps) ? getEnvironmentLib(envDeps) : ""
-  );
-  pushLib(
-    parts,
     "Engine State",
     getEngineStateLib(
       fontMetricsParam,
@@ -942,6 +948,11 @@ function buildExpression(
       tableDataParam,
       jsonDataParam
     )
+  );
+  pushLib(
+    parts,
+    "Environment",
+    hasKeys(envDeps) ? getEnvironmentLib(envDeps) : ""
   );
 
   pushLib(

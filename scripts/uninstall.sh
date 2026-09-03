@@ -8,11 +8,10 @@ export ROOT_DIR
 . "${SCRIPT_DIR}/lib/common.sh"
 
 require_macos
+require_non_root_install
 
 USER_CEP_TARGET_DIR="${APP_SUPPORT_USER_DIR}/CEP/extensions/momentumjs"
-SYSTEM_CEP_TARGET_DIR="${SYSTEM_CEP_EXTENSIONS_DIR}/momentumjs"
 COMMON_PLUGINS_DIR="${APP_SUPPORT_USER_DIR}/Common/Plug-ins"
-CEP_SCOPE="${MOMENTUM_CEP_SCOPE:-user}"
 
 remove_if_exists() {
   if [ -e "$1" ]; then
@@ -21,22 +20,7 @@ remove_if_exists() {
   fi
 }
 
-case "${CEP_SCOPE}" in
-  user)
-    remove_extension_preserving_user "${USER_CEP_TARGET_DIR}"
-    ;;
-  system)
-    remove_extension_preserving_user "${SYSTEM_CEP_TARGET_DIR}"
-    ;;
-  all)
-    remove_extension_preserving_user "${USER_CEP_TARGET_DIR}"
-    remove_extension_preserving_user "${SYSTEM_CEP_TARGET_DIR}"
-    ;;
-  *)
-    echo "Error: Unsupported MOMENTUM_CEP_SCOPE='${CEP_SCOPE}'. Use 'user', 'system', or 'all'." >&2
-    exit 1
-    ;;
-esac
+remove_extension_preserving_user "${USER_CEP_TARGET_DIR}"
 
 if [ -d "${COMMON_PLUGINS_DIR}" ]; then
   remove_if_exists "${COMMON_PLUGINS_DIR}/Momentum"
@@ -50,3 +34,4 @@ if [ "${MOMENTUM_REMOVE_USER_DATA:-0}" = "1" ]; then
 else
   echo "Momentum uninstall completed. User workspaces were preserved."
 fi
+echo "Unsigned CEP mode was left unchanged because other extensions may use it."

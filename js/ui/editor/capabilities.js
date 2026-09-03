@@ -15,6 +15,9 @@
   }
 
   function isBitmapOnlyEntry(info) {
+    // runtimeModes is a compatibility marker for automatic mode selection.
+    // A bitmap-only entry means Vector cannot execute it; it is not a Bitmap
+    // denylist. Keep these markers even when Bitmap is the broader runtime.
     var modes = normalizeRuntimeModes(info);
     return modes.indexOf("bitmap") !== -1 && modes.indexOf("vector") === -1;
   }
