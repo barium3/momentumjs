@@ -19,6 +19,8 @@ Common shape APIs:
 - `triangle(x1, y1, x2, y2, x3, y3)`
 - `quad(x1, y1, x2, y2, x3, y3, x4, y4)`
 - `arc(x, y, w, h, start, stop, [mode])`
+- `bezier(x1, y1, x2, y2, x3, y3, x4, y4)`
+- `curve(x1, y1, x2, y2, x3, y3, x4, y4)`
 - `ellipseMode(mode)`
 - `rectMode(mode)`
 
@@ -32,6 +34,12 @@ Custom shape APIs:
 - `beginContour()`
 - `endContour()`
 - `endShape([mode])`
+
+Bitmap-only clipping APIs:
+
+- `clip(callback[, options])`
+- `beginClip([options])`
+- `endClip()`
 
 Common related style APIs:
 
@@ -495,6 +503,65 @@ rect(10, 20, 40, 20);
 rectMode(CORNERS);
 rect(10, 20, 50, 40);
 ```
+
+---
+
+## Direct Curves
+
+Mode: Vector, Bitmap
+
+### `bezier(x1, y1, x2, y2, x3, y3, x4, y4)`
+
+Draws a cubic Bézier curve from `(x1, y1)` to `(x4, y4)` using the two
+middle points as controls.
+
+```js
+noFill();
+bezier(10, 80, 30, 10, 70, 10, 90, 80);
+```
+
+### `curve(x1, y1, x2, y2, x3, y3, x4, y4)`
+
+Draws a curve between the two middle points. `curveTightness()` controls its
+shape.
+
+```js
+noFill();
+curve(0, 80, 20, 20, 80, 20, 100, 80);
+```
+
+---
+
+## Clipping
+
+Mode: Bitmap
+
+### `clip(callback[, options])`
+
+Uses shapes drawn by `callback` as a clipping mask.
+
+```js
+clip(function () {
+  circle(50, 50, 70);
+});
+image(img, 0, 0, 100, 100);
+```
+
+Pass `{ invert: true }` to invert the mask.
+
+### `beginClip([options])` / `endClip()`
+
+Defines the same mask without a callback.
+
+```js
+beginClip();
+circle(50, 50, 70);
+endClip();
+image(img, 0, 0, 100, 100);
+```
+
+Prefer `clip()` when possible because it always closes the mask if the
+callback exits early.
 
 ---
 

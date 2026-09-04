@@ -42,6 +42,14 @@ Common color extraction APIs:
 - `brightness(c)`
 - `lightness(c)`
 
+Color value methods:
+
+- `setRed(value)`
+- `setGreen(value)`
+- `setBlue(value)`
+- `setAlpha(value)`
+- `toString([format])`
+
 Supported color mode constants:
 
 - `RGB`
@@ -107,6 +115,8 @@ background(gray, alpha)
 background(r, g, b)
 background(r, g, b, alpha)
 background(c)
+background(img)
+background(img, alpha)
 ```
 
 ### Example
@@ -122,6 +132,7 @@ background(255, 0, 0, 128);
 ### Notes
 
 - `background()` affects the current surface background, not the current fill or stroke state.
+- Image backgrounds are available in Bitmap mode.
 - In bitmap mode, this also works on `Graphics` buffers.
 
 ---
@@ -569,6 +580,31 @@ let c = color(255, 100, 50, 200);
 let r = red(c);
 let a = alpha(c);
 ```
+
+---
+
+## Color Value Methods
+
+Mode: Vector, Bitmap
+
+Colors returned by `color()` can be updated in place.
+
+```js
+let c = color(40, 120, 220);
+c.setRed(255);
+c.setAlpha(180);
+fill(c);
+```
+
+- `setRed(value)`
+- `setGreen(value)`
+- `setBlue(value)`
+- `setAlpha(value)`
+
+Each setter returns the same color object.
+
+`toString()` returns a CSS-style color string. An optional format string can
+be supplied when a specific representation is needed.
 
 ---
 

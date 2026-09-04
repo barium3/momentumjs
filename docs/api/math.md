@@ -76,7 +76,7 @@ Common math APIs:
 - `curvePoint(...)`
 - `curveTangent(...)`
 - `curveTightness(v)`
-- `createVector(x, [y])`
+- `createVector([x], [y], [z])`
 
 ---
 
@@ -342,9 +342,11 @@ point(x, y);
 
 ---
 
-## Vector Helper
+## Vectors
 
-### `createVector(x, [y])`
+Mode: Vector, Bitmap
+
+### `createVector([x], [y], [z])`
 
 Creates a vector object.
 
@@ -354,17 +356,44 @@ Creates a vector object.
 createVector()
 createVector(x)
 createVector(x, y)
+createVector(x, y, z)
 ```
 
 ### Example
 
 ```js
-let v = createVector(10, 20);
+let velocity = createVector(10, 20, 0);
+velocity.limit(5);
 ```
 
-### Notes
+Vector components are available as `x`, `y`, and `z`. Drawing coordinates
+remain two-dimensional, but vectors can retain and calculate a `z` component.
 
-- Momentum exposes 2D vector usage only.
+### Instance methods
+
+- `set(vector)`, `set(x, y[, z])`
+- `copy()`
+- `add(vector)`, `add(x, y[, z])`
+- `sub(vector)`, `sub(x, y[, z])`
+- `mult(value)`, `div(value)`
+- `mag()`, `magSq()`
+- `dot(vector)`, `dot(x, y[, z])`
+- `cross(vector)`
+- `dist(vector)`
+- `normalize()`, `limit(max)`, `setMag(length)`
+- `heading()`, `setHeading(angle)`, `rotate(angle)`
+- `lerp(vector, amount)`, `lerp(x, y, z, amount)`
+- `angleBetween(vector)`
+- `array()`, `equals(vector)`, `equals(x, y[, z])`
+- `toString()`
+
+Methods that modify a vector return that vector, so calls can be chained.
+
+```js
+let position = createVector(20, 30);
+let velocity = createVector(2, -1);
+position.add(velocity).limit(100);
+```
 
 ---
 

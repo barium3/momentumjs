@@ -571,7 +571,7 @@ functionRegistry.instances = {
       runtimeModes: ["bitmap"],
     }),
     resize: entry("resize", {
-      signatures: [signature(2, 2)],
+      signatures: [signature(1, 2)],
       runtimeModes: ["bitmap"],
     }),
     mask: entry("mask", {
@@ -634,7 +634,7 @@ functionRegistry.instances = {
       runtimeModes: ["bitmap"],
     }),
     resize: entry("resize", {
-      signatures: [signature(2, 2)],
+      signatures: [signature(1, 2)],
       runtimeModes: ["bitmap"],
     }),
     mask: entry("mask", {
@@ -959,14 +959,15 @@ functionRegistry.instances = {
   Font: {
     textBounds: entry("textBounds", {
       signatures: [
+        signature(3, 3, "object"),
         signature(4, 4, "object"),
-        signature(5, 5, "object"),
       ],
       returns: "object",
       runtimeModes: ["bitmap"],
     }),
     textToPoints: entry("textToPoints", {
       signatures: [
+        signature(3, 3, "array"),
         signature(4, 4, "array"),
         signature(5, 5, "array"),
       ],

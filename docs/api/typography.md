@@ -24,6 +24,9 @@ Common typography APIs:
 - `textWidth(str)`
 - `textAscent()`
 - `textDescent()`
+
+Bitmap-only font APIs:
+
 - `loadFont(path[, successCallback[, failureCallback]])`
 
 Bitmap-only `Font` methods:
@@ -288,7 +291,7 @@ function draw() {
 
 ---
 
-## `textBounds(text, x, y[, fontSize])`
+## `Font.textBounds(text, x, y[, fontSize])`
 
 Mode: Bitmap
 
@@ -340,7 +343,7 @@ function draw() {
 
 ---
 
-## `textToPoints(text, x, y[, fontSize[, options]])`
+## `Font.textToPoints(text, x, y[, fontSize[, options]])`
 
 Mode: Bitmap
 
@@ -349,6 +352,7 @@ Converts text outlines into sampled points using the loaded font.
 ### Signatures
 
 ```js
+font.textToPoints(text, x, y)
 font.textToPoints(text, x, y, fontSize)
 font.textToPoints(text, x, y, fontSize, options)
 ```
@@ -361,6 +365,7 @@ font.textToPoints(text, x, y, fontSize, options)
 ### Notes
 
 - Use this when you want to build point clouds, particles, or custom outline-driven motion from text.
+- If `fontSize` is omitted, Momentum uses the current text size.
 - Higher `sampleFactor` produces more points.
 
 ### Example

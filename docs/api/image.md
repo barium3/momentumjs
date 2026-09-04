@@ -215,6 +215,23 @@ A `Graphics` object.
 - `Graphics` supports drawing commands plus bitmap-only pixel operations.
 - Use this when you want an offscreen surface, then draw it back with `image(pg, ...)`.
 
+### Graphics methods
+
+`Graphics` has its own `width`, `height`, `pixels`, and drawing state.
+
+- Drawing: `background`, `clear`, color and stroke functions, shapes,
+  custom paths, `bezier`, `curve`, `beginClip`, and `endClip`
+- Transform: `push`, `pop`, `translate`, `rotate`, `scale`,
+  `applyMatrix`, `resetMatrix`, `rectMode`, and `ellipseMode`
+- Text: `text`, `textSize`, `textLeading`, `textFont`, `textStyle`,
+  `textWrap`, `textAlign`, `textWidth`, `textAscent`, and `textDescent`
+- Images and pixels: `image`, `imageMode`, `tint`, `pixelDensity`,
+  `loadPixels`, `updatePixels`, `get`, `set`, `copy`, `blend`,
+  `filter`, `resize`, and `mask`
+
+These methods use the signatures documented in [Shapes](shapes.md),
+[Transform](transform.md), [Color](color.md), and [Typography](typography.md).
+
 ---
 
 ## `createImage(w, h)`
@@ -423,12 +440,14 @@ Resizes an image object while preserving aspect ratio when one dimension is omit
 ### Signature
 
 ```js
+img.resize(w)
 img.resize(w, h)
 ```
 
 ### Notes
 
-- If only one dimension is provided, the other is derived from the current aspect ratio.
+- If `h` is omitted, it is derived from the current aspect ratio.
+- Pass `0` for either dimension to derive that dimension from the other.
 
 ---
 
@@ -604,12 +623,14 @@ Resizes an `Image` object while preserving aspect ratio when one dimension is om
 ### Signature
 
 ```js
+img.resize(w)
 img.resize(w, h)
 ```
 
 ### Notes
 
-- If only one dimension is provided, the other is derived from the current aspect ratio.
+- If `h` is omitted, it is derived from the current aspect ratio.
+- Pass `0` for either dimension to derive that dimension from the other.
 
 ---
 
